@@ -2,6 +2,7 @@ package com.lhs.share.config.security
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.config.Customizer
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration
@@ -53,6 +54,9 @@ class SecurityConfig(
                 .requestMatchers(*URL_WHITELIST)
                 .anonymous()
                 .requestMatchers(*URL_PERMIT_ALL)
+                .permitAll()
+                // Hub 库业务:查询公开,写操作需登录(未放行的方法默认 authenticated)
+                .requestMatchers(HttpMethod.GET, "/hub/post/**")
                 .permitAll()
                 .anyRequest()
                 .authenticated()

@@ -1,6 +1,7 @@
 package com.lhs.share
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.autoconfigure.data.mongo.MongoRepositoriesAutoConfiguration
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.runApplication
 import org.springframework.cache.annotation.EnableCaching
@@ -16,7 +17,7 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 @EnableAsync
 @EnableCaching
 @EnableScheduling
-@SpringBootApplication
+@SpringBootApplication(exclude = [MongoRepositoriesAutoConfiguration::class])
 @ConfigurationPropertiesScan
 @EnableMethodSecurity
 class ShareApplication

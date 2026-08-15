@@ -22,6 +22,8 @@ data class ShareProperties(
     var vcode: Vcode = Vcode(),
     @NestedConfigurationProperty
     var mails: List<Mail> = emptyList(),
+    @NestedConfigurationProperty
+    var mongo: Mongo = Mongo(),
 ) {
     /**
      * JWT 配置
@@ -74,6 +76,16 @@ data class ShareProperties(
          * 验证码失效时间,单位秒
          */
         var expire: Long = 600,
+    )
+
+    /**
+     * MongoDB 多库配置
+     */
+    data class Mongo(
+        /**
+         * Hub 库连接串,留空则复用主库连接(同一实例仅切换库名)
+         */
+        var hubUri: String = "",
     )
 
     /**
