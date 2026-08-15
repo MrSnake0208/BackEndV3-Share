@@ -74,6 +74,7 @@ dependencies {
 
     // hutool
     implementation("cn.hutool:hutool-jwt:$hutoolVersion")
+    implementation("cn.hutool:hutool-extra:$hutoolVersion")
 
     // mapstruct
     implementation("org.mapstruct:mapstruct:$mapstructVersion")
@@ -81,6 +82,12 @@ dependencies {
 
     // caffeine 进程内缓存
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
+
+    // freemarker 邮件模板
+    implementation("org.freemarker:freemarker:2.3.34")
+
+    // commons-lang3
+    implementation("org.apache.commons:commons-lang3:3.17.0")
 
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 }

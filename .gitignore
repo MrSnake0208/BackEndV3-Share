@@ -16,4 +16,5 @@ bin/
 application-dev.yml
 application-prod.yml
 /data/
+.tools/
 .env

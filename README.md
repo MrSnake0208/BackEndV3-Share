@@ -72,34 +72,64 @@ src/main/kotlin/com/lhs/share/
 - 定时任务放在 `task` 包,标注 `@Scheduled`(已开启 `@EnableScheduling`);
 - 异步任务标注 `@Async`(已开启 `@EnableAsync`)。
 
-## 认证链路(演示)
+## 账号模块
 
-`AuthController` 提供了两个演示接口(接入真实业务后可删除):
+与 MaaYuan-Share-Backend 共用同一个 MongoDB 数据库(`MaaBackend`,连接串 `mongodb://192.168.31.21:27017/MaaBackend`),
+注册/登录/改密/邮箱验证码/JWT 全部在本服务内实现,直接读写 `maa_user` 集合,
+业务语义与原项目保持一致(字段结构、密码 BCrypt、status 状态、权限 authority 均对齐)。
 
-- `POST /auth/demo-token?userId=xxx` 签发演示 token(生产环境的 token 应在登录成功后签发);
-- `GET /auth/me` 需要登录,请求头携带 `Authorization: Bearer <token>`,
-  通过 `AuthenticationHelper.requireUserId()` 获取当前用户 id。
+### 接口清单
 
-JWT 实现基于 hutool-jwt,参考 `service/jwt` 包:
-`JwtService.issueAuthToken` 签发、`verifyAndParseAuthToken` 验证,
-默认无状态方案;若需要 RefreshToken 有状态管理,可在数据库中记录 jwtId。
+| 接口 | 说明 | 认证 |
+|---|---|---|
+| POST /user/register | 用户注册(邮箱验证码) | 匿名 |
+| POST /user/sendRegistrationToken | 发送注册验证码 | 匿名 |
+| POST /user/login | 登录,返回 access+refresh token | 匿名 |
+| POST /user/refresh | 刷新 token | 匿名(无状态校验) |
+| POST /user/update/password | 修改密码(原密码,10 分钟频率限制) | 需登录 |
+| POST /user/update/info | 修改用户名 | 需登录 |
+| POST /user/password/reset_request | 发送重置密码验证码 | 公开 |
+| POST /user/password/reset | 邮箱验证码重置密码 | 公开 |
+| GET /user/info?userId= | 查询用户公开信息(404 语义) | 公开 |
+| GET /user/search?userName=&page=&size= | 用户模糊搜索(size 上限 50) | 公开 |
 
-## 测试
+### 字段命名约定
 
-`./gradlew test` 运行测试。现有测试:
+全局 SNAKE_CASE(与原项目一致):请求体与响应体字段均为 `user_name`、`refresh_token`、`registration_token` 等。
 
-- `JwtServiceTest`:JWT 签发/验证/过期/伪造
-- `DemoServiceTest`:Demo 服务层(MockK 模拟仓储)
+### 验证码机制
 
-## 编译与部署
+- 6 位随机码,存 Redis(`vCodeEmail:{email}`),默认 600 秒过期(`share.vcode.expire`);
+- 发送间隔限制:一个过期周期内最多重发 10 次(`HasBeenSentVCode:{email}`);
+- **一次性**:校验通过即删除(Redis Lua 原子操作),防止重放;
+- 本地调试:`debug.email.no-send: true` 时不真实发邮件,验证码打印到日志。
 
-1. 安装 JDK 21
-2. `./gradlew bootJar` 编译
-3. 复制配置文件:`cp ./build/resources/main/application-template.yml ./application-prod.yml`
-4. 修改 `application-prod.yml`
-5. 运行:`java -jar build/libs/BackEndV3Share-0.1.0-SNAPSHOT.jar --spring.profiles.active=prod`
+### 邮件配置
 
-## 代码规范
+在 `application-dev.yml` 中配置 `share.mails`(SMTP 列表,可配多个轮询发送):
 
-- ktlint 强制检查(`./gradlew ktlintCheck`),不过关无法构建;
-- 代码风格由 `.editorconfig` 定义(IntelliJ IDEA 风格,4 空格缩进)。
+```yaml
+share:
+  mails:
+    - host: smtp.qq.com
+      port: 465
+      from: xxx@qq.com
+      user: xxx
+      pass: 授权码
+      ssl: true
+      starttls: false
+```
+
+### JWT 与安全
+
+- AccessToken 默认 6 小时(`share.jwt.expire`),RefreshToken 默认 7 天(`share.jwt.refresh-expire`);
+- 需登录接口默认受 Spring Security 保护,请求头携带 `Authorization: Bearer <token>`;
+- 权限模型与原项目一致:status 为几即拥有 0..status 的 authority;
+- 改密/重置密码后,旧的 refresh token 因 `pwdUpdateTime` 校验而失效。
+
+### 硬性约定(与原项目共享数据)
+
+- userId 由 MongoDB 生成(ObjectId),禁止自造;
+- 实体 `MaaUser` 字段与索引注解与原项目一字不差(email 唯一索引是数据根基);
+- 密码统一 BCrypt(`$2a$10$`),兼容原项目已有 1921 条数据;
+- 不要新建自己的用户集合;字段演进需与原项目协调。

@@ -55,6 +55,23 @@ share:
   cache:
     # 缓存默认过期时间,单位秒
     default-expire: 60
+  vcode:
+    # 验证码失效时间,单位秒
+    expire: 600
+  mails:
+    # 邮件服务器 SMTP 配置(可配置多个,发送时轮询)
+    # - host: smtp.qq.com
+    #   port: 465
+    #   from: xxx@qq.com
+    #   user: xxx
+    #   pass: 授权码
+    #   ssl: true
+    #   starttls: false
+
+debug:
+  email:
+    # 本地调试:true 时不真实发邮件,验证码打印到日志
+    no-send: true
 
 springdoc:
   swagger-ui:

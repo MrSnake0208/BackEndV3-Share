@@ -19,8 +19,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  *
  * 认证方式:无状态 JWT,通过 [JwtAuthenticationTokenFilter] 解析请求头中的 token
  *
- * 新增接口时,公开接口加入 [URL_PERMIT_ALL],需要登录的接口保持默认(authenticated)
- * 即可;若需要精细到接口级权限,可参考 URL_AUTHENTICATION_1 的模式按 authority 放行
+ * 新增接口时:
+ * - 匿名可访问(登录/注册):加入 [URL_WHITELIST](anonymous)
+ * - 公开接口(无需登录):加入 [URL_PERMIT_ALL]
+ * - 需要登录的接口:保持默认(authenticated),可加 @RequireJwt 展示文档
  */
 @Configuration
 class SecurityConfig(
@@ -48,6 +50,8 @@ class SecurityConfig(
 
         http.authorizeHttpRequests { authorize ->
             authorize
+                .requestMatchers(*URL_WHITELIST)
+                .anonymous()
                 .requestMatchers(*URL_PERMIT_ALL)
                 .permitAll()
                 .anyRequest()
@@ -70,7 +74,17 @@ class SecurityConfig(
 
     companion object {
         /**
-         * 放行接口,不需要登录即可访问,在此处添加
+         * 匿名可访问接口(即使已登录也按匿名处理)
+         */
+        private val URL_WHITELIST =
+            arrayOf(
+                "/user/login",
+                "/user/register",
+                "/user/sendRegistrationToken",
+            )
+
+        /**
+         * 公开接口,不需要登录即可访问
          */
         private val URL_PERMIT_ALL =
             arrayOf(
@@ -78,7 +92,11 @@ class SecurityConfig(
                 "/error",
                 "/version",
                 "/demo/**",
-                "/auth/demo-token",
+                "/user/info",
+                "/user/search",
+                "/user/password/reset_request",
+                "/user/password/reset",
+                "/user/refresh",
                 "/swagger-ui.html",
                 "/v3/api-docs/**",
                 "/swagger-ui/**",

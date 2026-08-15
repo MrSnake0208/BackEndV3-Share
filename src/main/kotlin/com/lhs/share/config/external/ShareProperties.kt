@@ -18,6 +18,10 @@ data class ShareProperties(
     var info: Info = Info(),
     @NestedConfigurationProperty
     var cache: Cache = Cache(),
+    @NestedConfigurationProperty
+    var vcode: Vcode = Vcode(),
+    @NestedConfigurationProperty
+    var mails: List<Mail> = emptyList(),
 ) {
     /**
      * JWT 配置
@@ -48,6 +52,8 @@ data class ShareProperties(
         var title: String = "Share Backend API",
         var description: String = "Share Backend API",
         var version: String = "v0.1.0",
+        var domain: String = "",
+        var frontendDomain: String = "",
     )
 
     /**
@@ -58,5 +64,28 @@ data class ShareProperties(
          * 缓存默认过期时间,单位秒
          */
         var defaultExpire: Long = 60,
+    )
+
+    /**
+     * 验证码配置
+     */
+    data class Vcode(
+        /**
+         * 验证码失效时间,单位秒
+         */
+        var expire: Long = 600,
+    )
+
+    /**
+     * 邮件服务器配置(可配置多个,发送时轮询)
+     */
+    data class Mail(
+        var host: String = "smtp.qq.com",
+        var port: Int = 465,
+        var from: String = "",
+        var user: String = "",
+        var pass: String = "",
+        var starttls: Boolean = true,
+        var ssl: Boolean = false,
     )
 }

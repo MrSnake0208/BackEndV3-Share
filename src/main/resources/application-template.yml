@@ -3,11 +3,13 @@
 spring:
   data:
     mongodb:
+      # 账号只读模块:与 MaaYuan-Share-Backend 共用 MongoDB,maa_user 集合由原项目写入
+      # 库名 MaaBackend(注意:不是 ShareBackend,数据在原项目的 MaaBackend 库中)
       # 如果没有密码
-      # uri: mongodb://localhost:27017/ShareBackend
+      # uri: mongodb://192.168.31.21:27017/MaaBackend
       # 有密码
-      # uri: mongodb://用户名:密码@localhost:27017/ShareBackend
-      uri: mongodb://127.0.0.1:27017/ShareBackend
+      # uri: mongodb://用户名:密码@192.168.31.21:27017/MaaBackend
+      uri: mongodb://192.168.31.21:27017/MaaBackend
     redis:
       host: 127.0.0.1
       port: 6379
