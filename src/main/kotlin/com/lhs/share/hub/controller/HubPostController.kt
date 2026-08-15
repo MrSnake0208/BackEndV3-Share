@@ -35,7 +35,7 @@ class HubPostController(
     @Operation(summary = "发布帖子")
     @RequireJwt
     @PostMapping
-    fun create(@RequestBody request: @Valid HubPostCreateRequest): ApiResult<HubPostResponse> =
+    fun create(@Valid @RequestBody request: HubPostCreateRequest): ApiResult<HubPostResponse> =
         success(hubPostService.create(helper.requireUserId(), request))
 
     /**

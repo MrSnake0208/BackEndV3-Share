@@ -49,7 +49,7 @@ class UserController(
     @Operation(summary = "修改当前用户密码", description = "根据原密码")
     @RequireJwt
     @PostMapping("/update/password")
-    fun updatePassword(@RequestBody updateDTO: @Valid PasswordUpdateDTO): ApiResult<Unit> {
+    fun updatePassword(@Valid @RequestBody updateDTO: PasswordUpdateDTO): ApiResult<Unit> {
         userService.modifyPassword(helper.requireUserId(), updateDTO.newPassword, updateDTO.originalPassword)
         return success()
     }
@@ -60,7 +60,7 @@ class UserController(
     @Operation(summary = "更新用户详细信息")
     @RequireJwt
     @PostMapping("/update/info")
-    fun updateInfo(@RequestBody updateDTO: @Valid UserInfoUpdateDTO): ApiResult<Unit> {
+    fun updateInfo(@Valid @RequestBody updateDTO: UserInfoUpdateDTO): ApiResult<Unit> {
         userService.updateUserInfo(helper.requireUserId(), updateDTO)
         return success()
     }
@@ -70,7 +70,7 @@ class UserController(
      */
     @Operation(summary = "重置密码")
     @PostMapping("/password/reset")
-    fun passwordReset(@RequestBody passwordResetDTO: @Valid PasswordResetDTO): ApiResult<Unit> {
+    fun passwordReset(@Valid @RequestBody passwordResetDTO: PasswordResetDTO): ApiResult<Unit> {
         // 校验用户邮箱是否存在
         userService.checkUserExistByEmail(passwordResetDTO.email)
         userService.modifyPasswordByActiveCode(passwordResetDTO)
@@ -82,7 +82,7 @@ class UserController(
      */
     @Operation(summary = "发送用于重置密码的验证码")
     @PostMapping("/password/reset_request")
-    fun passwordResetRequest(@RequestBody passwordResetVCodeDTO: @Valid PasswordResetVCodeDTO): ApiResult<Unit> {
+    fun passwordResetRequest(@Valid @RequestBody passwordResetVCodeDTO: PasswordResetVCodeDTO): ApiResult<Unit> {
         // 校验用户邮箱是否存在
         userService.checkUserExistByEmail(passwordResetVCodeDTO.email)
         emailService.sendVCode(passwordResetVCodeDTO.email)
@@ -103,14 +103,14 @@ class UserController(
      */
     @Operation(summary = "用户注册")
     @PostMapping("/register")
-    fun register(@RequestBody user: @Valid RegisterDTO): ApiResult<MaaUserInfo> = success(userService.register(user))
+    fun register(@Valid @RequestBody user: RegisterDTO): ApiResult<MaaUserInfo> = success(userService.register(user))
 
     /**
      * 注册时发送验证码
      */
     @Operation(summary = "注册时发送验证码")
     @PostMapping("/sendRegistrationToken")
-    fun sendRegistrationToken(@RequestBody regDTO: @Valid SendRegistrationTokenDTO): ApiResult<Unit> {
+    fun sendRegistrationToken(@Valid @RequestBody regDTO: SendRegistrationTokenDTO): ApiResult<Unit> {
         userService.sendRegistrationToken(regDTO)
         return success()
     }
@@ -120,7 +120,7 @@ class UserController(
      */
     @Operation(summary = "用户登录")
     @PostMapping("/login")
-    fun login(@RequestBody user: @Valid LoginDTO): ApiResult<MaaLoginRsp> = success(userService.login(user))
+    fun login(@Valid @RequestBody user: LoginDTO): ApiResult<MaaLoginRsp> = success(userService.login(user))
 
     /**
      * 按 userId 查询用户公开信息,查不到返回 404

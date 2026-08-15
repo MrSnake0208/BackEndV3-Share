@@ -58,6 +58,9 @@ share:
   vcode:
     # 验证码失效时间,单位秒
     expire: 600
+  ledger:
+    # 广陵账房:每用户方案数上限
+    max-plans-per-user: 50
   mails:
     # 邮件服务器 SMTP 配置(可配置多个,发送时轮询)
     # - host: smtp.qq.com

@@ -19,3 +19,4 @@ application-prod.yml
 /data/
 .tools/
 .env
+.agent-teams

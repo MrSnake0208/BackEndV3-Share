@@ -27,7 +27,7 @@ class DemoController(private val demoService: DemoService) {
      */
     @Operation(summary = "创建示例资源")
     @PostMapping
-    fun create(@RequestBody request: @Valid DemoCreateRequest): ApiResult<DemoResponse> = success(demoService.create(request))
+    fun create(@Valid @RequestBody request: DemoCreateRequest): ApiResult<DemoResponse> = success(demoService.create(request))
 
     /**
      * 按 id 查询示例资源

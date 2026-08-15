@@ -24,6 +24,8 @@ data class ShareProperties(
     var mails: List<Mail> = emptyList(),
     @NestedConfigurationProperty
     var mongo: Mongo = Mongo(),
+    @NestedConfigurationProperty
+    var ledger: Ledger = Ledger(),
 ) {
     /**
      * JWT 配置
@@ -86,6 +88,16 @@ data class ShareProperties(
          * Hub 库连接串,留空则复用主库连接(同一实例仅切换库名)
          */
         var hubUri: String = "",
+    )
+
+    /**
+     * 广陵账房配置
+     */
+    data class Ledger(
+        /**
+         * 每用户方案数上限,超出后创建返回 429
+         */
+        var maxPlansPerUser: Long = 50,
     )
 
     /**
