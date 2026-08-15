@@ -1,0 +1,67 @@
+spring:
+  profiles:
+    active: dev
+  servlet:
+    multipart:
+      # 最大文件阈值
+      max-file-size: 500KB
+      # 最大请求阈值
+      max-request-size: 500KB
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    date-format: yyyy-MM-dd'T'HH:mm:ss'Z'
+    time-zone: UTC
+    deserialization:
+      FAIL_ON_UNKNOWN_PROPERTIES: false
+  data:
+    mongodb:
+      # 打开自动索引生成(否则数据库内唯一索引不生效)
+      auto-index-creation: true
+  cache:
+    # 进程内缓存,使用 caffeine,缓存时长为 5 分钟,最大缓存数量 500
+    type: caffeine
+    caffeine:
+      spec: maximumSize=500,expireAfterWrite=300s
+server:
+  port: 8080
+  tomcat:
+    # 限制 post 表单最大为 30KB
+    max-http-form-post-size: 30KB
+  compression:
+    enabled: true
+
+logging:
+  file:
+    name: ./logs/latest.log
+  logback:
+    rollingpolicy:
+      max-history: 14
+      clean-history-on-start: true
+
+# 应用自定义配置
+share:
+  info:
+    title: Share Backend API
+    description: Share Backend API
+    version: v0.1.0
+  jwt:
+    header: Authorization
+    # AccessToken 过期时间,单位秒
+    expire: 21600
+    # RefreshToken 过期时间,单位秒
+    refresh-expire: 604800
+    # JWT 签名密钥,生产环境务必更换为随机长字符串
+    secret: please-change-me-to-a-long-random-secret
+  cache:
+    # 缓存默认过期时间,单位秒
+    default-expire: 60
+
+springdoc:
+  swagger-ui:
+    # 开启 Swagger UI 界面
+    enabled: true
+  api-docs:
+    # 开启 api-docs
+    enabled: true
+  # 配置需要生成接口文档的扫描包
+  packages-to-scan: com.lhs.share

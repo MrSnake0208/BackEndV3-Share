@@ -1,0 +1,18 @@
+# 本地开发配置模板
+# 复制本文件为 application-dev.yml 并按需修改
+spring:
+  data:
+    mongodb:
+      # 如果没有密码
+      # uri: mongodb://localhost:27017/ShareBackend
+      # 有密码
+      # uri: mongodb://用户名:密码@localhost:27017/ShareBackend
+      uri: mongodb://127.0.0.1:27017/ShareBackend
+    redis:
+      host: 127.0.0.1
+      port: 6379
+
+share:
+  jwt:
+    # JWT 签名密钥,生产环境务必更换
+    secret: please-change-me-to-a-long-random-secret

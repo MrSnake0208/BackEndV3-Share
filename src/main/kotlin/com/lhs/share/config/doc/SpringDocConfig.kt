@@ -1,0 +1,53 @@
+package com.lhs.share.config.doc
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.lhs.share.config.external.ShareProperties
+import io.swagger.v3.core.jackson.ModelResolver
+import io.swagger.v3.oas.models.Components
+import io.swagger.v3.oas.models.OpenAPI
+import io.swagger.v3.oas.models.info.Info
+import io.swagger.v3.oas.models.security.SecurityScheme
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+
+/**
+ * OpenAPI(Swagger)文档配置
+ */
+@Configuration
+class SpringDocConfig(
+    properties: ShareProperties,
+) {
+    private val info = properties.info
+    private val jwt = properties.jwt
+
+    @Bean
+    fun shareOpenApi(): OpenAPI = OpenAPI().apply {
+        info(
+            Info().apply {
+                title(this@SpringDocConfig.info.title)
+                description(this@SpringDocConfig.info.description)
+                version(this@SpringDocConfig.info.version)
+            },
+        )
+        components(
+            Components().apply {
+                addSecuritySchemes(
+                    SECURITY_SCHEME_JWT,
+                    SecurityScheme().apply {
+                        type(SecurityScheme.Type.HTTP)
+                        scheme("bearer")
+                        `in`(SecurityScheme.In.HEADER)
+                        name(jwt.header)
+                    },
+                )
+            },
+        )
+    }
+
+    @Bean
+    fun modelResolver(objectMapper: ObjectMapper) = ModelResolver(objectMapper)
+
+    companion object {
+        const val SECURITY_SCHEME_JWT: String = "Jwt"
+    }
+}
