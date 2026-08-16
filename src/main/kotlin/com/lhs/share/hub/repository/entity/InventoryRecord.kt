@@ -4,6 +4,7 @@ import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
+import org.springframework.data.mongodb.core.mapping.Field
 import java.io.Serializable
 import java.time.Instant
 
@@ -105,8 +106,13 @@ data class ProducerInfo(
 data class RecordEntry(
     /**
      * 跨平台稳定 id(operators.json 的 formal id 或 items.json 的 id),身份主键为
-     * (entity_type, id)
+     * (entity_type, id)。
+     *
+     * 显式 @Field("id"):Spring Data 对属性名 id 有默认映射为 _id 的约定,
+     * 但协议 4.2 要求 entries 元素使用 id 字段,且时段获得量聚合按
+     * $entries.id 分组,因此强制存储字段名为 id。
      */
+    @Field("id")
     val id: String,
     /**
      * 展示名称,便于人工阅读,不作为主键
