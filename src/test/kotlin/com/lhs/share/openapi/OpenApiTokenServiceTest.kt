@@ -29,18 +29,14 @@ class OpenApiTokenServiceTest {
 
     private val service = OpenApiTokenService(tokenRepository, redisCache)
 
-    private fun entity(
-        userId: String = "u1",
-        token: String = "tok123",
-        scope: List<Int> = listOf(10001),
-        remark: String? = "note",
-    ) = OpenApiToken(
-        userId = userId,
-        token = token,
-        scope = scope,
-        remark = remark,
-        createTime = Instant.ofEpochMilli(1700000000000L),
-    )
+    private fun entity(userId: String = "u1", token: String = "tok123", scope: List<Int> = listOf(10001), remark: String? = "note") =
+        OpenApiToken(
+            userId = userId,
+            token = token,
+            scope = scope,
+            remark = remark,
+            createTime = Instant.ofEpochMilli(1700000000000L),
+        )
 
     @Test
     fun generate_returns_dashless_uuid_and_persists() {
@@ -89,12 +85,18 @@ class OpenApiTokenServiceTest {
 
     @Test
     fun validate_null_or_blank_token_throws_401() {
-        assertEquals(401, assertThrows(ApiResultException::class.java) {
-            service.validate(null, 10001)
-        }.statusCode)
-        assertEquals(401, assertThrows(ApiResultException::class.java) {
-            service.validate("  ", 10001)
-        }.statusCode)
+        assertEquals(
+            401,
+            assertThrows(ApiResultException::class.java) {
+                service.validate(null, 10001)
+            }.statusCode,
+        )
+        assertEquals(
+            401,
+            assertThrows(ApiResultException::class.java) {
+                service.validate("  ", 10001)
+            }.statusCode,
+        )
     }
 
     @Test

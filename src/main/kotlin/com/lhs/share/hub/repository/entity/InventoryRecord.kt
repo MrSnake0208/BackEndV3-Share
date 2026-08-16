@@ -53,6 +53,11 @@ data class InventoryRecord(
      */
     val entityType: String,
     /**
+     * 获取渠道(协议 5.1 record 级可选字段):推荐稳定值 背包 / 据点情报 / 派遣,
+     * 允许扩展其他非空值;仅排查用,不参与库存计算
+     */
+    val acquisitionChannel: String? = null,
+    /**
      * 快照范围: full | listed;仅 record_type = stock_snapshot 时携带,
      * reward_delta 记录恒为 null
      */

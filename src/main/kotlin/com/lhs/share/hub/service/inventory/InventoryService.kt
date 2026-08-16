@@ -9,6 +9,7 @@ import com.lhs.share.hub.controller.inventory.response.InventoryExportEntryDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportRecordDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
+import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
@@ -212,6 +213,7 @@ class InventoryService(
             userId = userId,
             recordType = record.recordType,
             entityType = record.entityType,
+            acquisitionChannel = record.acquisitionChannel,
             snapshotScope = record.snapshotScope,
             effectiveAt = validated.effectiveAt,
             producer = ProducerInfo(platform = producer.platform, version = producer.version),
@@ -236,6 +238,7 @@ class InventoryService(
     ): Boolean {
         if (existing.recordType != newReq.recordType ||
             existing.entityType != newReq.entityType ||
+            existing.acquisitionChannel != newReq.acquisitionChannel ||
             existing.snapshotScope != newReq.snapshotScope ||
             !existing.effectiveAt.equals(parseInstant(newReq.effectiveAt, "effective_at"))
         ) {
@@ -251,13 +254,31 @@ class InventoryService(
     }
 
     /**
-     * 奖励增量:对每个 entry 比较其有效基线 max(full_baseline_at, listed_baseline_at),
-     * 晚于基线 → \$inc 当前库存(stock_effect=applied);不晚于基线 → 只存档(history_only)。
+     * 奖励增量:先计算效果(基线比较),再落流水,最后 \$inc 当前库存。
      *
+     * 流水须保留完整 entries(历史统计聚合不区分 stock_effect);
+     * stock_effect 为记录级标记:存在任一 applied 条目 → applied,否则 history_only。
      * 幂等唯一索引兜底:插入流水时若并发已插入同 (userId, recordId) 会抛
      * DuplicateKeyException,捕获后按 duplicate 处理(不二次 \$inc)。
      */
     private fun applyRewardDelta(userId: String, entity: InventoryRecord): Effect {
+        val comp = computeReward(userId, entity)
+        val stored = entity.copy(stockEffect = comp.effect.stock())
+        try {
+            recordRepository.save(stored)
+        } catch (e: DuplicateKeyException) {
+            log.warn(e) { "并发重复 record_id,按重复处理: userId=$userId, recordId=${entity.recordId}" }
+            return Effect.DUPLICATE
+        }
+        applyRewardToCurrent(userId, entity.entityType, comp)
+        return comp.effect
+    }
+
+    /**
+     * 计算奖励增量效果(纯计算,不写库):对每个 entry 比较其有效基线
+     * max(full_baseline_at, listed_baseline_at),晚于基线 → applied。
+     */
+    private fun computeReward(userId: String, entity: InventoryRecord): RewardComputation {
         val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
         val fullBaseline = current?.fullBaselineAt
         val listedBaselines = current?.entries?.mapValues { it.value.listedBaselineAt } ?: emptyMap()
@@ -267,29 +288,21 @@ class InventoryService(
             val baseline = maxOfNotNull(fullBaseline, listedBaselines[entry.id])
             baseline == null || entity.effectiveAt.isAfter(baseline)
         }
-
-        // 流水须保留完整 entries(历史统计聚合不区分 stock_effect),
-        // stock_effect 为记录级标记:存在任一 applied 条目 → applied,否则 history_only。
-        val historyOnly = appliedEntries.isEmpty()
-        val stored = entity.copy(
-            stockEffect = if (historyOnly) HISTORY_ONLY else APPLIED,
+        return RewardComputation(
+            effect = if (appliedEntries.isEmpty()) Effect.HISTORY_ONLY else Effect.APPLIED,
+            appliedEntries = appliedEntries,
         )
+    }
 
-        // 先插流水(唯一索引兜底并发)
-        try {
-            recordRepository.save(stored)
-        } catch (e: DuplicateKeyException) {
-            log.warn(e) { "并发重复 record_id,按重复处理: userId=$userId, recordId=${entity.recordId}" }
-            return Effect.DUPLICATE
-        }
-
-        // 再 \$inc 当前库存(单文档原子)
-        if (!historyOnly) {
-            appliedEntries.forEach { entry ->
-                incCurrent(userId, entity.entityType, entry.id, entry.count)
+    /**
+     * 把奖励增量效果应用到当前库存(applied 的 entry \$inc)。
+     */
+    private fun applyRewardToCurrent(userId: String, entityType: String, comp: RewardComputation) {
+        if (comp.effect == Effect.APPLIED) {
+            comp.appliedEntries.forEach { entry ->
+                incCurrent(userId, entityType, entry.id, entry.count)
             }
         }
-        return if (historyOnly) Effect.HISTORY_ONLY else Effect.APPLIED
     }
 
     /**
@@ -309,22 +322,36 @@ class InventoryService(
     }
 
     /**
-     * 库存快照:full 覆盖整类(未列出归零)、listed 只覆盖列出对象;比较相应基线,
-     * 较新 → applied,较旧 → 存档 superseded。
+     * 库存快照:先计算效果(基线比较),再落流水,最后应用快照。
      */
     private fun applyStockSnapshot(userId: String, entity: InventoryRecord): Effect {
+        val comp = computeSnapshot(userId, entity)
+        val stored = entity.copy(stockEffect = comp.effect.stock())
+        try {
+            recordRepository.save(stored)
+        } catch (e: DuplicateKeyException) {
+            log.warn(e) { "并发重复 record_id,按重复处理: userId=$userId, recordId=${entity.recordId}" }
+            return Effect.DUPLICATE
+        }
+        if (comp.effect == Effect.APPLIED) {
+            applySnapshotToCurrent(userId, entity)
+        }
+        return comp.effect
+    }
+
+    /**
+     * 计算快照效果(纯计算,不写库):full 快照不早于现有 full 基线才生效;
+     * listed 快照在所有列出对象的 listed 基线都晚于本快照时整条 superseded。
+     */
+    private fun computeSnapshot(userId: String, entity: InventoryRecord): SnapshotComputation {
         val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
         val existingFullBaseline = current?.fullBaselineAt
-
         val isFull = entity.snapshotScope == SNAPSHOT_FULL
         val effective = entity.effectiveAt
 
-        // superseded 判定:full 快照不早于现有 full 基线才生效;listed 逐一比较对象 listed 基线
         val superseded = when {
             isFull -> existingFullBaseline != null && !effective.isAfter(existingFullBaseline)
             else -> {
-                // listed:任一列出对象的既有 listed_baseline_at 晚于本快照,则该对象被新值覆盖的可能
-                // 但整体 listed 快照的 superseded 语义:所有列出对象的基线都晚于本快照才整条 superseded。
                 val baselines = current?.entries?.mapValues { it.value.listedBaselineAt } ?: emptyMap()
                 entity.entries.all { entry ->
                     val b = baselines[entry.id]
@@ -332,25 +359,18 @@ class InventoryService(
                 }
             }
         }
+        return SnapshotComputation(if (superseded) Effect.SUPERSEDED else Effect.APPLIED)
+    }
 
-        // 先插流水(存档,唯一索引兜底)
-        val stored = entity.copy(stockEffect = if (superseded) SUPERSEDED else APPLIED)
-        try {
-            recordRepository.save(stored)
-        } catch (e: DuplicateKeyException) {
-            log.warn(e) { "并发重复 record_id,按重复处理: userId=$userId, recordId=${entity.recordId}" }
-            return Effect.DUPLICATE
-        }
-
-        if (superseded) return Effect.SUPERSEDED
-
-        // 应用快照
-        if (isFull) {
+    /**
+     * 把快照效果应用到当前库存。
+     */
+    private fun applySnapshotToCurrent(userId: String, entity: InventoryRecord) {
+        if (entity.snapshotScope == SNAPSHOT_FULL) {
             applyFullSnapshot(userId, entity)
         } else {
             applyListedSnapshot(userId, entity)
         }
-        return Effect.APPLIED
     }
 
     /**
@@ -401,6 +421,74 @@ class InventoryService(
                 .set("entries.${entry.id}.listedBaselineAt", entity.effectiveAt)
         }
         hubMongoTemplate.upsert(query, update, InventoryCurrent::class.java, "inventory_current")
+    }
+
+    // ==================== 记录管理(删除/重放/列表) ====================
+
+    /**
+     * 删除单条记录并全量重放:语义等价于「该记录从未导入过」。
+     *
+     * 步骤:
+     * 1. 归属校验(仅本人,不存在/越权统一 404);
+     * 2. 删除 inventory_records 中的目标记录;
+     * 3. 删除该用户该 entity_type 的 inventory_current 文档;
+     * 4. 将剩余记录按 effective_at 升序(同时间奖励先于快照)逐条重放,
+     *    重建当前库存,并把每条记录的实际效果回写 stock_effect。
+     *
+     * 协议 5.1 §6.1:错误记录由平台管理接口撤销;删除后历史统计不再包含该记录。
+     */
+    fun deleteRecord(userId: String, recordId: String) {
+        val record = recordRepository.findByUserIdAndRecordId(userId, recordId)
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "记录不存在: $recordId")
+        val entityType = record.entityType
+
+        recordRepository.deleteById(record.checkId())
+
+        currentRepository.findByUserIdAndEntityType(userId, entityType)?.let {
+            currentRepository.deleteById(it.checkId())
+        }
+
+        val remaining = recordRepository.findByUserIdOrderByEffectiveAtAsc(userId)
+            .filter { it.entityType == entityType }
+            .sortedWith(
+                compareBy<InventoryRecord> { it.effectiveAt }
+                    .thenBy { if (it.recordType == REWARD_DELTA) 0 else 1 },
+            )
+        remaining.forEach { replayRecord(userId, it) }
+        log.info { "删除库存记录并重放完成: userId=$userId, recordId=$recordId, entityType=$entityType, 重放 ${remaining.size} 条" }
+    }
+
+    /**
+     * 重放一条已落库记录:重新计算效果、回写 stock_effect、更新当前库存。
+     * 不插入流水(记录已在库里)。
+     */
+    private fun replayRecord(userId: String, entity: InventoryRecord) {
+        when (entity.recordType) {
+            REWARD_DELTA -> {
+                val comp = computeReward(userId, entity)
+                recordRepository.save(entity.copy(stockEffect = comp.effect.stock()))
+                applyRewardToCurrent(userId, entity.entityType, comp)
+            }
+            STOCK_SNAPSHOT -> {
+                val comp = computeSnapshot(userId, entity)
+                recordRepository.save(entity.copy(stockEffect = comp.effect.stock()))
+                if (comp.effect == Effect.APPLIED) {
+                    applySnapshotToCurrent(userId, entity)
+                }
+            }
+            else -> throw IllegalStateException("已落库记录类型非法: ${entity.recordType}")
+        }
+    }
+
+    /**
+     * 导入记录列表(entityType/from/to 可选过滤;按 effective_at 倒序,最新在前)。
+     */
+    fun listRecords(userId: String, entityType: String?, from: Instant?, to: Instant?): List<InventoryRecordListItemDto> {
+        return recordRepository.findByUserIdOrderByEffectiveAtDesc(userId)
+            .filter { entityType == null || it.entityType == entityType }
+            .filter { from == null || !it.effectiveAt.isBefore(from) }
+            .filter { to == null || it.effectiveAt.isBefore(to) }
+            .map { InventoryRecordListItemDto.of(it) }
     }
 
     // ==================== 查询 ====================
@@ -483,6 +571,7 @@ class InventoryService(
                     recordId = "myshare:stock:$type:$userId",
                     recordType = STOCK_SNAPSHOT,
                     entityType = type,
+                    acquisitionChannel = "背包",
                     effectiveAt = current.fullBaselineAt ?: current.updatedAt,
                     snapshotScope = SNAPSHOT_FULL,
                     entries = entries,
@@ -502,6 +591,7 @@ class InventoryService(
                         recordId = r.recordId,
                         recordType = r.recordType,
                         entityType = r.entityType,
+                        acquisitionChannel = r.acquisitionChannel,
                         effectiveAt = r.effectiveAt,
                         snapshotScope = r.snapshotScope,
                         entries = r.entries.map { e -> InventoryExportEntryDto(id = e.id, name = e.name, count = e.count) },
@@ -546,12 +636,45 @@ class InventoryService(
         val effectiveAt: Instant,
     )
 
+    /**
+     * 奖励增量计算结果
+     */
+    private data class RewardComputation(
+        val effect: Effect,
+        val appliedEntries: List<RecordEntry>,
+    )
+
+    /**
+     * 快照计算结果
+     */
+    private data class SnapshotComputation(
+        val effect: Effect,
+    )
+
     private enum class Effect {
         APPLIED,
         DUPLICATE,
         HISTORY_ONLY,
         SUPERSEDED,
+        ;
+
+        /**
+         * 效果 → stock_effect 标记(DUPLICATE 无对应标记,不落库)
+         */
+        fun stock(): String = when (this) {
+            APPLIED -> "applied"
+            HISTORY_ONLY -> "history_only"
+            SUPERSEDED -> "superseded"
+            DUPLICATE -> throw IllegalStateException("DUPLICATE 无对应 stock_effect")
+        }
     }
+
+    /**
+     * 已加载实体的 id 必然非空(否则不存在于库中),集中校验避免空指针。
+     */
+    private fun InventoryRecord.checkId(): String = checkNotNull(id) { "流水实体未持久化" }
+
+    private fun InventoryCurrent.checkId(): String = checkNotNull(id) { "库存实体未持久化" }
 
     companion object {
         private const val SUPPORTED_VERSION = 1

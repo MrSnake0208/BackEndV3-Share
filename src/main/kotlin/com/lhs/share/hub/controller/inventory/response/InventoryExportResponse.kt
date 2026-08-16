@@ -23,6 +23,7 @@ data class InventoryExportRecordDto(
     val recordId: String,
     val recordType: String,
     val entityType: String,
+    val acquisitionChannel: String? = null,
     val effectiveAt: Instant,
     val snapshotScope: String?,
     val entries: List<InventoryExportEntryDto>,

@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.inventory
 
+import com.lhs.share.config.accesslimit.AccessLimit
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
@@ -10,12 +11,15 @@ import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
+import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -89,6 +93,38 @@ class InventoryController(
         val fromInstant = from?.let { parseQueryTime(it) }
         val toInstant = to?.let { parseQueryTime(it) }
         return success(inventoryService.export(helper.requireUserId(), includeRewards, fromInstant, toInstant))
+    }
+
+    /**
+     * 导入记录列表(需登录;entity_type/from/to 可选过滤,按 effective_at 倒序)。
+     */
+    @Operation(summary = "导入记录列表")
+    @RequireJwt
+    @GetMapping("/records")
+    fun records(
+        @RequestParam(name = "entity_type", required = false) entityType: String?,
+        @RequestParam(name = "from", required = false) from: String?,
+        @RequestParam(name = "to", required = false) to: String?,
+    ): ApiResult<List<InventoryRecordListItemDto>> = success(
+        inventoryService.listRecords(
+            helper.requireUserId(),
+            entityType,
+            from?.let { parseQueryTime(it) },
+            to?.let { parseQueryTime(it) },
+        ),
+    )
+
+    /**
+     * 删除单条记录(需登录,仅本人;不存在/越权统一 404)。
+     * 删除后全量重放剩余记录重建当前库存(语义等价于该记录从未导入过)。
+     */
+    @Operation(summary = "删除单条记录(重放重建库存)")
+    @RequireJwt
+    @AccessLimit(times = 10, second = 60)
+    @DeleteMapping("/records/{recordId}")
+    fun deleteRecord(@PathVariable(name = "recordId") recordId: String): ApiResult<Boolean> {
+        inventoryService.deleteRecord(helper.requireUserId(), recordId)
+        return success(true)
     }
 
     /**

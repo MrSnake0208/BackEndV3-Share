@@ -1,0 +1,43 @@
+package com.lhs.share.hub.controller.inventory.response
+
+import com.lhs.share.hub.repository.entity.InventoryRecord
+import java.time.Instant
+
+/**
+ * 导入记录列表项(记录排查与删除入口)
+ *
+ * Jackson SNAKE_CASE 序列化:record_id / record_type / entity_type /
+ * acquisition_channel / effective_at / received_at / stock_effect。
+ */
+data class InventoryRecordListItemDto(
+    val recordId: String,
+    val recordType: String,
+    val entityType: String,
+    val acquisitionChannel: String?,
+    val effectiveAt: Instant,
+    val receivedAt: Instant,
+    val stockEffect: String,
+    val entries: List<InventoryRecordEntryDto>,
+) {
+    companion object {
+        fun of(record: InventoryRecord): InventoryRecordListItemDto = InventoryRecordListItemDto(
+            recordId = record.recordId,
+            recordType = record.recordType,
+            entityType = record.entityType,
+            acquisitionChannel = record.acquisitionChannel,
+            effectiveAt = record.effectiveAt,
+            receivedAt = record.receivedAt,
+            stockEffect = record.stockEffect,
+            entries = record.entries.map { InventoryRecordEntryDto(id = it.id, name = it.name, count = it.count) },
+        )
+    }
+}
+
+/**
+ * 记录条目
+ */
+data class InventoryRecordEntryDto(
+    val id: String,
+    val name: String?,
+    val count: Long,
+)

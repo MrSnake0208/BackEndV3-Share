@@ -49,6 +49,11 @@ data class InventoryRecordRequest(
     @field:NotBlank(message = "entity_type 不能为空")
     @field:Pattern(regexp = "item|agent", message = "entity_type 仅支持 item 或 agent")
     val entityType: String,
+    /**
+     * 获取渠道(协议 5.1 可选字段):推荐稳定值 背包 / 据点情报 / 派遣
+     */
+    @field:Size(max = 64, message = "acquisition_channel 最长 64 个字符")
+    val acquisitionChannel: String? = null,
     @field:NotNull(message = "effective_at 不能为空")
     val effectiveAt: String,
     @field:Pattern(regexp = "full|listed", message = "snapshot_scope 仅支持 full 或 listed")
