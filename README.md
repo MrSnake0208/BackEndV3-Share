@@ -14,11 +14,107 @@
 
 ## 本地开发指南
 
-1. 进入开发环境：`nix develop path:.`。该环境提供 JDK 21、Git、curl 和 jq；Gradle 使用仓库内的 `./gradlew`。
-2. 使用 IDE 导入此项目,复制 `/src/main/resources/application-template.yml` 到同目录下,
-   命名为 `application-dev.yml`,修改数据库配置以符合你自己的环境。
-3. 需要本地的 MongoDB 和 Redis 环境。
-4. 运行 `./gradlew bootRun`。
+本地 JVM 直接运行在 WSL/Nix 环境中，Docker Compose 只启动 MongoDB 和 Redis：
+
+```bash
+./scripts/dev-up.sh
+nix develop path:.
+SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
+```
+
+`scripts/dev-up.sh` 会启动单节点 MongoDB replica set `rs0` 和 Redis，初始化一次 replica set，等待 PRIMARY，
+并验证 replica set discovery 与 Redis `PING`。本地 profile 固定使用：
+
+- 后端：`http://127.0.0.1:8080`
+- MaaBackend：`mongodb://127.0.0.1:27017/MaaBackend?replicaSet=rs0`
+- HubBackend：`mongodb://127.0.0.1:27017/HubBackend?replicaSet=rs0`
+- Redis：`127.0.0.1:6379`
+
+库存导入使用 MongoDB transaction，因此 MongoDB 必须以 replica set 运行；standalone MongoDB 不受支持。
+启动后检查：
+
+```bash
+curl --fail-with-body http://127.0.0.1:8080/ready | jq
+curl --fail-with-body http://127.0.0.1:8080/v3/api-docs \
+  | jq '.servers'
+```
+
+第二条命令在 local profile 下应显示 `http://127.0.0.1:8080`。
+
+MongoDB 与 Redis 使用命名 volume。普通停止不会删除本地数据：
+
+```bash
+docker compose -f compose.dev.yml down
+```
+
+需要显式重置测试数据时可执行下面的命令。**该命令会永久删除本仓库 Compose 环境的全部本地 MongoDB 和 Redis 数据：**
+
+```bash
+docker compose -f compose.dev.yml down -v
+```
+
+Windows 上的 MaaY 通常可直接用 `http://127.0.0.1:8080` 访问 WSL 后端。如果 WSL localhost 转发不可用，
+在 WSL 中运行 `hostname -I` 查询当前 IP，并在 MaaY 中临时填写 `http://<WSL_IP>:8080`；不要把动态 IP 写入配置文件。
+
+### 创建本地账号和 API Token
+
+local profile 已开启 `debug.email.no-send: true`，不会连接 SMTP。先请求注册验证码：
+
+```bash
+export API_BASE_URL=http://127.0.0.1:8080
+export LOCAL_EMAIL=developer@example.test
+export LOCAL_PASSWORD='replace-with-a-local-password'
+
+curl --fail-with-body -X POST "$API_BASE_URL/user/sendRegistrationToken" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$LOCAL_EMAIL\"}" | jq
+```
+
+验证码会出现在运行 `bootRun` 的终端以及 `logs/latest.log` 中，日志文本为
+`Email not sent, no-send enabled, vcode is ...`。把验证码仅放在当前终端后注册并登录：
+
+```bash
+export REGISTRATION_CODE='replace-with-code-from-log'
+
+curl --fail-with-body -X POST "$API_BASE_URL/user/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$LOCAL_EMAIL\",\"user_name\":\"localdev\",\"password\":\"$LOCAL_PASSWORD\",\"registration_token\":\"$REGISTRATION_CODE\"}" \
+  | jq
+
+export JWT_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$LOCAL_EMAIL\",\"password\":\"$LOCAL_PASSWORD\"}" \
+  | jq -er '.data.token')"
+```
+
+使用 JWT 生成同时包含读、写、导出 scope 的本地 API Token：
+
+```bash
+export INVENTORY_API_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/open-api/token" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"scopes":["inventory:read","inventory:write","inventory:export"],"remark":"local inventory smoke"}' \
+  | jq -er '.data.token')"
+```
+
+JWT 和完整 API Token 只保存在当前终端环境变量中，不要写入文件或命令日志。可用以下命令确认 scope：
+
+```bash
+curl --fail-with-body "$API_BASE_URL/user/open-api/tokens" \
+  -H "Authorization: Bearer $JWT_TOKEN" | jq '.data[] | {token_id, scopes, remark}'
+```
+
+### 库存联调 Smoke Test
+
+另开一个已进入 `nix develop path:.` 的终端，将刚生成的完整 API Token 放入环境变量后运行：
+
+```bash
+export INVENTORY_API_TOKEN='replace-with-local-api-token'
+./scripts/inventory-smoke.sh
+```
+
+脚本默认访问 `http://127.0.0.1:8080`，也可通过 `API_BASE_URL` 覆盖。它从真实目录选择 item，使用唯一
+`record_id` 验证首次导入、幂等重传、409 冲突、当前库存、原始交换文档导出和直接回传导入；脚本不会打印 Token。
 
 ## 项目结构
 
