@@ -1,0 +1,114 @@
+package com.lhs.share.hub.repository.entity
+
+import org.springframework.data.annotation.Id
+import org.springframework.data.mongodb.core.index.CompoundIndex
+import org.springframework.data.mongodb.core.index.Indexed
+import org.springframework.data.mongodb.core.mapping.Document
+import java.io.Serializable
+import java.time.Instant
+
+/**
+ * 库存/奖励流水(HubBackend.inventory_records)
+ *
+ * 保存已接收的交换记录,仅用于幂等上报、延迟上报处理与历史统计。
+ * 一条记录只属于一种 entity_type,entries 内 id 不得重复。
+ *
+ * 幂等键:(userId, recordId) 全局唯一;不同用户相同 recordId 互不影响。
+ * recordId 建议使用 <platform>:<uuid> 形式(协议 5.1)。
+ *
+ * 时段获得量只聚合 record_type = "reward_delta" 的记录。
+ */
+@Document("inventory_records")
+@CompoundIndex(
+    name = "idx_user_record_unique",
+    def = "{'userId': 1, 'recordId': 1}",
+    unique = true,
+)
+@CompoundIndex(
+    name = "idx_user_effective",
+    def = "{'userId': 1, 'effectiveAt': 1}",
+)
+@CompoundIndex(
+    name = "idx_user_type_effective",
+    def = "{'userId': 1, 'recordType': 1, 'effectiveAt': 1}",
+)
+data class InventoryRecord(
+    @Id
+    val id: String? = null,
+    /**
+     * 幂等 ID,单一用户数据集中唯一(1..128 字符)
+     */
+    val recordId: String,
+    /**
+     * 记录归属用户 id(引用 MaaBackend.maa_user.userId),取自 JWT,绝不由前端传入
+     */
+    @Indexed
+    val userId: String,
+    /**
+     * 记录类型: reward_delta(奖励增量) | stock_snapshot(库存快照)
+     */
+    val recordType: String,
+    /**
+     * 对象类型: item | agent
+     */
+    val entityType: String,
+    /**
+     * 快照范围: full | listed;仅 record_type = stock_snapshot 时携带,
+     * reward_delta 记录恒为 null
+     */
+    val snapshotScope: String? = null,
+    /**
+     * 奖励发生时间或库存实际读取时间(协议要求带时区),是历史统计与基线比较的依据
+     */
+    val effectiveAt: Instant,
+    /**
+     * 接收时间(服务端落库时间),仅排查用,不参与库存计算
+     */
+    val receivedAt: Instant = Instant.now(),
+    /**
+     * 生成数据的平台信息
+     */
+    val producer: ProducerInfo,
+    /**
+     * 记录携带的对象与数量,按 id 唯一
+     */
+    val entries: List<RecordEntry>,
+    /**
+     * 库存生效状态: applied | history_only | superseded
+     * 仅用于排查导入结果,不参与业务计算
+     */
+    val stockEffect: String = "applied",
+) : Serializable
+
+/**
+ * 生产者平台信息
+ */
+data class ProducerInfo(
+    /**
+     * 平台稳定短名称,如 myshare / partner-a
+     */
+    val platform: String,
+    /**
+     * 平台或客户端版本,仅排查用
+     */
+    val version: String? = null,
+)
+
+/**
+ * 流水条目:对象 id + 可选展示名 + 数量
+ */
+data class RecordEntry(
+    /**
+     * 跨平台稳定 id(operators.json 的 formal id 或 items.json 的 id),身份主键为
+     * (entity_type, id)
+     */
+    val id: String,
+    /**
+     * 展示名称,便于人工阅读,不作为主键
+     */
+    val name: String? = null,
+    /**
+     * 数量:reward_delta 恒 > 0,stock_snapshot 为 0..Int.MAX_VALUE
+     */
+    val count: Long,
+)
