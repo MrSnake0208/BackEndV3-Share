@@ -51,6 +51,7 @@ dependencies {
 
     testImplementation("io.mockk:mockk:1.14.4")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("com.networknt:json-schema-validator:1.5.8")
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-security")

@@ -1,6 +1,8 @@
 package com.lhs.share.config.security
 
 import com.lhs.share.controller.response.ApiResult.Companion.fail
+import com.lhs.share.hub.controller.inventory.response.InventoryError
+import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
 import com.lhs.share.service.DataTransferService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -19,7 +21,14 @@ class AuthenticationEntryPointImpl(
 ) : AuthenticationEntryPoint {
     @Throws(IOException::class)
     override fun commence(request: HttpServletRequest, response: HttpServletResponse, authException: AuthenticationException) {
-        val result = fail(HttpStatus.UNAUTHORIZED.value(), "未登录或登录已过期")
+        val result = if (request.isInventoryRequest()) {
+            InventoryErrorResponse(InventoryError("unauthorized", "Authentication is required"))
+        } else {
+            fail(HttpStatus.UNAUTHORIZED.value(), "未登录或登录已过期")
+        }
         dataTransferService.writeJson(response, result, HttpStatus.UNAUTHORIZED.value())
     }
+
+    private fun HttpServletRequest.isInventoryRequest(): Boolean =
+        requestURI.startsWith("/v1/inventory") || requestURI.startsWith("/open-api/inventory")
 }

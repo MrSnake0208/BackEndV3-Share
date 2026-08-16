@@ -22,9 +22,9 @@ interface OpenApiTokenRepository : MongoRepository<OpenApiToken, String> {
     fun findByToken(token: String): OpenApiToken?
 
     /**
-     * 按 token 删除
+     * 按 token_id + 用户查询,用于归属安全的撤销
      */
-    fun deleteByToken(token: String)
+    fun findByIdAndUserId(id: String, userId: String): OpenApiToken?
 
     /**
      * 统计用户 token 数量(配额校验用)

@@ -24,6 +24,7 @@ spring:
       spec: maximumSize=500,expireAfterWrite=300s
 server:
   port: 8080
+  forward-headers-strategy: framework
   tomcat:
     # 限制 post 表单最大为 30KB
     max-http-form-post-size: 30KB
@@ -44,6 +45,7 @@ share:
     title: Share Backend API
     description: Share Backend API
     version: v0.1.0
+    public-base-url: ${SHARE_PUBLIC_BASE_URL:https://hub.maayuan.fun:16666}
   jwt:
     header: Authorization
     # AccessToken 过期时间,单位秒

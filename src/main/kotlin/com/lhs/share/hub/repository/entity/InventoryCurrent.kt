@@ -20,7 +20,7 @@ import java.time.Instant
  * 对象有效基线的计算规则:max(full_baseline_at, entries[id].listed_baseline_at)。
  * - full 快照:替换整个 entries 并更新 full_baseline_at,未列出的对象归零。
  * - listed 快照:只替换正文列出的对象,并更新对应对象的 listed_baseline_at。
- * - reward_delta:用 $inc 修改 entries.<id>.count,但不改变任何基线。
+ * - reward_delta:增加 entries.<id>.count,但不改变任何基线。
  */
 @Document("inventory_current")
 @CompoundIndex(

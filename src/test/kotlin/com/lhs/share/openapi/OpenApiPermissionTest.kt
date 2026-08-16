@@ -15,14 +15,17 @@ class OpenApiPermissionTest {
     fun permissions_have_expected_codes() {
         assertEquals(10001, OpenApiPermission.INVENTORY_READ.code)
         assertEquals(10002, OpenApiPermission.INVENTORY_WRITE.code)
+        assertEquals(10003, OpenApiPermission.INVENTORY_EXPORT.code)
         assertEquals("inventory:read", OpenApiPermission.INVENTORY_READ.key)
         assertEquals("inventory:write", OpenApiPermission.INVENTORY_WRITE.key)
+        assertEquals("inventory:export", OpenApiPermission.INVENTORY_EXPORT.key)
     }
 
     @Test
     fun codeByKey_returns_code_for_known_key() {
         assertEquals(10001, OpenApiPermission.codeByKey("inventory:read"))
         assertEquals(10002, OpenApiPermission.codeByKey("inventory:write"))
+        assertEquals(10003, OpenApiPermission.codeByKey("inventory:export"))
     }
 
     @Test
@@ -35,13 +38,12 @@ class OpenApiPermissionTest {
     fun listAll_returns_key_code_desc_entries() {
         val list = OpenApiPermission.listAll()
 
-        assertEquals(2, list.size)
-        val read = list.first { it["key"] == "inventory:read" }
-        assertEquals(10001, read["code"])
-        assertEquals("库存数据读取", read["desc"])
+        assertEquals(3, list.size)
+        val read = list.first { it.scope == "inventory:read" }
+        assertEquals("库存数据读取", read.description)
 
-        val write = list.first { it["key"] == "inventory:write" }
-        assertEquals(10002, write["code"])
-        assertEquals("库存数据写入", write["desc"])
+        val write = list.first { it.scope == "inventory:write" }
+        assertEquals("库存数据写入", write.description)
+        assertEquals("inventory:export", list.first { it.scope == "inventory:export" }.scope)
     }
 }

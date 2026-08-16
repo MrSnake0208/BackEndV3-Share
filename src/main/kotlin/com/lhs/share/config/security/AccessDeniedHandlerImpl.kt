@@ -1,6 +1,8 @@
 package com.lhs.share.config.security
 
 import com.lhs.share.controller.response.ApiResult.Companion.fail
+import com.lhs.share.hub.controller.inventory.response.InventoryError
+import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
 import com.lhs.share.service.DataTransferService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -17,7 +19,14 @@ import java.io.IOException
 class AccessDeniedHandlerImpl(private val dataTransferService: DataTransferService) : AccessDeniedHandler {
     @Throws(IOException::class)
     override fun handle(request: HttpServletRequest, response: HttpServletResponse, accessDeniedException: AccessDeniedException) {
-        val result = fail(HttpStatus.FORBIDDEN.value(), "权限不足")
+        val result = if (request.isInventoryRequest()) {
+            InventoryErrorResponse(InventoryError("forbidden", "Permission denied"))
+        } else {
+            fail(HttpStatus.FORBIDDEN.value(), "权限不足")
+        }
         dataTransferService.writeJson(response, result, HttpStatus.FORBIDDEN.value())
     }
+
+    private fun HttpServletRequest.isInventoryRequest(): Boolean =
+        requestURI.startsWith("/v1/inventory") || requestURI.startsWith("/open-api/inventory")
 }

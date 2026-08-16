@@ -1,10 +1,13 @@
 package com.lhs.share.hub.controller.inventory.request
 
+import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.annotation.JsonSetter
+import com.fasterxml.jackson.annotation.Nulls
+import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
@@ -17,49 +20,71 @@ import jakarta.validation.constraints.Size
  */
 data class InventoryImportRequest(
     @field:NotBlank(message = "format 不能为空")
-    @field:Pattern(regexp = "myshare-inventory-exchange", message = "format 必须为 myshare-inventory-exchange")
+    @field:Pattern(regexp = "^myshare-inventory-exchange$", message = "format 必须为 myshare-inventory-exchange")
+    @field:Schema(allowableValues = ["myshare-inventory-exchange"])
     val format: String,
     @field:NotNull(message = "version 不能为空")
     @field:Min(value = 1, message = "version 必须为正整数")
+    @field:Schema(minimum = "1", maximum = "1")
     val version: Int,
     @field:NotBlank(message = "exported_at 不能为空")
+    @field:Schema(format = "date-time")
     val exportedAt: String,
     @field:Valid
     @field:NotNull(message = "producer 不能为空")
     val producer: ProducerDto,
+    @field:Size(min = 1, max = 128, message = "catalog_version 长度须在 1..128")
+    @field:JsonSetter(nulls = Nulls.FAIL)
     val catalogVersion: String? = null,
     @field:Valid
-    @field:NotEmpty(message = "records 不能为空")
-    @field:Size(max = 1000, message = "records 最多 1000 条")
+    @field:Size(min = 1, max = 1000, message = "records 数量须在 1..1000")
     val records: List<InventoryRecordRequest>,
-)
+) {
+    @JsonAnySetter
+    fun handleExtension(name: String, value: Any?) {
+        if (name == "user_id") throw IllegalArgumentException("user_id must not be present in an inventory document")
+    }
+}
 
 /**
  * 单条记录(协议 4 Record 字段);field 级约束无法表达「快照必填 snapshot_scope、
  * 奖励不得携带 snapshot_scope、reward_delta count 必须 > 0」这类跨字段规则,
  * 由服务层补充校验。
  */
+@Schema(
+    oneOf = [
+        InventoryRewardRecordSchema::class,
+        InventoryFullSnapshotRecordSchema::class,
+        InventoryListedSnapshotRecordSchema::class,
+    ],
+)
 data class InventoryRecordRequest(
     @field:NotBlank(message = "record_id 不能为空")
     @field:Size(min = 1, max = 128, message = "record_id 长度须在 1..128")
     val recordId: String,
     @field:NotBlank(message = "record_type 不能为空")
     @field:Pattern(regexp = "reward_delta|stock_snapshot", message = "record_type 仅支持 reward_delta 或 stock_snapshot")
+    @field:Schema(allowableValues = ["reward_delta", "stock_snapshot"])
     val recordType: String,
     @field:NotBlank(message = "entity_type 不能为空")
     @field:Pattern(regexp = "item|agent", message = "entity_type 仅支持 item 或 agent")
+    @field:Schema(allowableValues = ["item", "agent"])
     val entityType: String,
     /**
      * 获取渠道(协议 5.1 可选字段):推荐稳定值 背包 / 据点情报 / 派遣
      */
-    @field:Size(max = 64, message = "acquisition_channel 最长 64 个字符")
+    @field:Size(min = 1, max = 64, message = "acquisition_channel 长度须在 1..64")
+    @field:JsonSetter(nulls = Nulls.FAIL)
     val acquisitionChannel: String? = null,
     @field:NotNull(message = "effective_at 不能为空")
+    @field:Schema(format = "date-time")
     val effectiveAt: String,
     @field:Pattern(regexp = "full|listed", message = "snapshot_scope 仅支持 full 或 listed")
+    @field:Schema(allowableValues = ["full", "listed"])
+    @field:JsonSetter(nulls = Nulls.FAIL)
     val snapshotScope: String? = null,
     @field:Valid
-    @field:NotEmpty(message = "entries 不能为空")
+    @field:NotNull(message = "entries 不能为空")
     val entries: List<InventoryEntryRequest>,
 )
 
@@ -68,9 +93,10 @@ data class InventoryRecordRequest(
  */
 data class InventoryEntryRequest(
     @field:NotBlank(message = "id 不能为空")
-    @field:Size(max = 128, message = "id 最长 128 个字符")
+    @field:Size(min = 1, max = 128, message = "id 长度须在 1..128")
     val id: String,
-    @field:Size(max = 128, message = "name 最长 128 个字符")
+    @field:Size(min = 1, max = 256, message = "name 长度须在 1..256")
+    @field:JsonSetter(nulls = Nulls.FAIL)
     val name: String? = null,
     @field:NotNull(message = "count 不能为空")
     @field:Min(value = 0, message = "count 不能为负")

@@ -14,9 +14,9 @@
 
 ## 本地开发指南
 
-1. 使用 IDE 导入此项目,复制 `/src/main/resources/application-template.yml` 到同目录下,
+1. 进入开发环境：`nix develop path:.`。该环境提供 JDK 21、Git、curl 和 jq；Gradle 使用仓库内的 `./gradlew`。
+2. 使用 IDE 导入此项目,复制 `/src/main/resources/application-template.yml` 到同目录下,
    命名为 `application-dev.yml`,修改数据库配置以符合你自己的环境。
-2. 安装 JDK 21 或以上版本。
 3. 需要本地的 MongoDB 和 Redis 环境。
 4. 运行 `./gradlew bootRun`。
 

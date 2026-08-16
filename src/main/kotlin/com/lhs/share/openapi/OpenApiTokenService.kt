@@ -3,6 +3,7 @@ package com.lhs.share.openapi
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.repository.OpenApiTokenRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
+import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -23,7 +24,7 @@ class OpenApiTokenService(
     /**
      * 生成第三方 API Token(每用户上限 [MAX_TOKENS_PER_USER] 个)
      */
-    fun generate(userId: String, scopeCodes: List<Int>, remark: String?): TokenResponse {
+    fun generate(userId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
         if (tokenRepository.countByUserId(userId) >= MAX_TOKENS_PER_USER) {
             throw ApiResultException(
                 HttpStatus.TOO_MANY_REQUESTS.value(),
@@ -31,6 +32,16 @@ class OpenApiTokenService(
             )
         }
 
+        val permissions = scopes.map { scope ->
+            OpenApiPermission.byKey(scope)
+                ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "未知 scope: $scope")
+        }
+        if (permissions.distinct().size != permissions.size) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不得重复")
+        }
+        val scopeCodes = permissions.map { it.code }
+        val publicScopes = permissions.map { it.key }
+        val tokenId = UUID.randomUUID().toString()
         val token = UUID.randomUUID().toString().replace("-", "")
         val now = Instant.now()
 
@@ -40,6 +51,7 @@ class OpenApiTokenService(
         // 落库
         tokenRepository.save(
             OpenApiToken(
+                id = tokenId,
                 userId = userId,
                 token = token,
                 scope = scopeCodes,
@@ -48,30 +60,44 @@ class OpenApiTokenService(
             ),
         )
 
-        return TokenResponse(token = token, scope = scopeCodes)
+        return OpenApiTokenCreatedResponse(
+            tokenId = tokenId,
+            token = token,
+            remark = remark,
+            scopes = publicScopes,
+            createdAt = now,
+        )
     }
 
     /**
      * 校验 token 并校验权限,返回归属 userId。
      * token 空 → 401;Redis 无则回退 Mongo,仍无 → 401;scope 不含 requiredCode → 403。
      */
-    fun validate(token: String?, requiredCode: Int): String {
+    fun validateAuthorization(authorization: String?, permission: OpenApiPermission): String {
+        val token = authorization
+            ?.takeIf { it.startsWith(BEARER_PREFIX) }
+            ?.removePrefix(BEARER_PREFIX)
+            ?.trim()
+        return validate(token, permission.code)
+    }
+
+    private fun validate(token: String?, requiredCode: Int): String {
         if (token.isNullOrBlank()) {
-            throw ApiResultException(HttpStatus.UNAUTHORIZED.value(), "token不能为空")
+            throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is missing")
         }
         val cached = redisCache.getCache(redisKey(token), TokenCacheData::class.java)
         if (cached != null) {
             if (!cached.scope.contains(requiredCode)) {
-                throw ApiResultException(HttpStatus.FORBIDDEN.value(), "权限不足")
+                throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
             }
             return cached.userId
         }
 
         // 回退 Mongo(防 Redis 丢失)
         val entity = tokenRepository.findByToken(token)
-            ?: throw ApiResultException(HttpStatus.UNAUTHORIZED.value(), "token无效")
+            ?: throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is invalid")
         if (!entity.scope.contains(requiredCode)) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "权限不足")
+            throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
         }
         return entity.userId
     }
@@ -79,25 +105,23 @@ class OpenApiTokenService(
     /**
      * 删除 token(校验归属,越权抛 403)
      */
-    fun delete(userId: String, token: String) {
-        val entity = tokenRepository.findByToken(token)
-            ?: throw ApiResultException(HttpStatus.FORBIDDEN.value(), "token无效或无权删除")
-        if (entity.userId != userId) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "token无效或无权删除")
-        }
-        redisCache.delete(redisKey(token))
-        tokenRepository.deleteByToken(token)
+    fun delete(userId: String, tokenId: String) {
+        val entity = tokenRepository.findByIdAndUserId(tokenId, userId)
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
+        redisCache.delete(redisKey(entity.token))
+        tokenRepository.deleteById(tokenId)
     }
 
     /**
      * 列出当前用户的 token(按创建时间倒序)
      */
-    fun list(userId: String): List<Map<String, Any?>> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map {
-        mapOf(
-            "token" to it.token,
-            "scope" to it.scope,
-            "remark" to it.remark,
-            "create_time" to it.createTime.toEpochMilli(),
+    fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map {
+        OpenApiTokenListItemDto(
+            tokenId = checkNotNull(it.id) { "Token document has no id" },
+            remark = it.remark,
+            scopes = it.scope.mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
+                .map { permission -> permission.key },
+            createdAt = it.createTime,
         )
     }
 
@@ -105,16 +129,24 @@ class OpenApiTokenService(
 
     companion object {
         private const val REDIS_KEY_PREFIX = "open-api-token:"
+        private const val BEARER_PREFIX = "Bearer "
         private const val MAX_TOKENS_PER_USER = 5
     }
 }
 
-/**
- * 生成 token 的响应
- */
-data class TokenResponse(
+data class OpenApiTokenCreatedResponse(
+    val tokenId: String,
     val token: String,
-    val scope: List<Int>,
+    val remark: String?,
+    val scopes: List<String>,
+    val createdAt: Instant,
+)
+
+data class OpenApiTokenListItemDto(
+    val tokenId: String,
+    val remark: String?,
+    val scopes: List<String>,
+    val createdAt: Instant,
 )
 
 /**

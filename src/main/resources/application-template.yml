@@ -15,6 +15,9 @@ spring:
       port: 6379
 
 share:
+  info:
+    # OpenAPI 中发布的 HTTPS 地址;反向代理部署时按实际公网地址覆盖
+    public-base-url: ${SHARE_PUBLIC_BASE_URL:https://hub.maayuan.fun:16666}
   jwt:
     # JWT 签名密钥,生产环境务必更换
     secret: please-change-me-to-a-long-random-secret

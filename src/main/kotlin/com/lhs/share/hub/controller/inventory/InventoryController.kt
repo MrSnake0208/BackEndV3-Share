@@ -1,6 +1,10 @@
 package com.lhs.share.hub.controller.inventory
 
 import com.lhs.share.config.accesslimit.AccessLimit
+import com.lhs.share.config.doc.InventoryDeleteResponses
+import com.lhs.share.config.doc.InventoryPublicResponses
+import com.lhs.share.config.doc.InventoryReadResponses
+import com.lhs.share.config.doc.InventoryWriteResponses
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
@@ -11,12 +15,15 @@ import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
-import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
+import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -25,10 +32,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import java.time.Instant
-import java.time.LocalDate
 import java.time.OffsetDateTime
-import java.time.ZoneOffset
 
 /**
  * 库存与奖励接口(数据存 HubBackend.inventory_current / inventory_records)
@@ -40,7 +44,7 @@ import java.time.ZoneOffset
  * 协议:规范/5.0 后端设计、规范/5.1 交换协议 v1。
  */
 @Tag(name = "库存", description = "库存与奖励数据(HubBackend)")
-@RequestMapping("/v1/inventory")
+@RequestMapping("/v1/inventory", produces = [MediaType.APPLICATION_JSON_VALUE])
 @RestController
 class InventoryController(
     private val inventoryService: InventoryService,
@@ -51,8 +55,9 @@ class InventoryController(
      * 导入库存/奖励交换文档(需登录;整份校验,幂等)。
      */
     @Operation(summary = "导入库存/奖励")
+    @InventoryWriteResponses
     @RequireJwt
-    @PostMapping("/import")
+    @PostMapping("/import", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun import(@Valid @RequestBody request: InventoryImportRequest): ApiResult<InventoryImportResult> =
         success(inventoryService.import(helper.requireUserId(), request))
 
@@ -60,57 +65,85 @@ class InventoryController(
      * 当前库存查询(需登录;entity_type 可选,缺省返回全部类型)。
      */
     @Operation(summary = "当前库存")
+    @InventoryReadResponses
     @RequireJwt
     @GetMapping("/current")
-    fun current(@RequestParam(name = "entity_type", required = false) entityType: String?): ApiResult<List<InventoryCurrentResponse>> =
-        success(inventoryService.current(helper.requireUserId(), entityType))
+    fun current(
+        @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
+        @RequestParam(name = "entity_type", required = false)
+        entityType: String?,
+    ): ApiResult<List<InventoryCurrentResponse>> = success(inventoryService.current(helper.requireUserId(), entityType))
 
     /**
      * 时段获得量查询(需登录;只聚合 reward_delta,区间 [from, to))。
      */
     @Operation(summary = "时段获得量")
+    @InventoryReadResponses
     @RequireJwt
     @GetMapping("/acquired")
     fun acquired(
+        @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type") entityType: String,
-        @RequestParam(name = "from") from: String,
-        @RequestParam(name = "to") to: String,
+        @RequestParam(name = "from") from: OffsetDateTime,
+        @RequestParam(name = "to") to: OffsetDateTime,
     ): ApiResult<InventoryAcquiredResponse> =
-        success(inventoryService.acquired(helper.requireUserId(), entityType, parseQueryTime(from), parseQueryTime(to)))
+        success(inventoryService.acquired(helper.requireUserId(), entityType, from.toInstant(), to.toInstant()))
 
     /**
      * 导出(需登录;默认仅当前状态 full 快照,include=rewards 时附带区间奖励流水)。
      */
     @Operation(summary = "导出")
+    @InventoryReadResponses
     @RequireJwt
     @GetMapping("/export")
     fun export(
-        @RequestParam(name = "include", required = false, defaultValue = "current") include: String,
-        @RequestParam(name = "from", required = false) from: String?,
-        @RequestParam(name = "to", required = false) to: String?,
-    ): ApiResult<InventoryExportResponse> {
-        val includeRewards = include.split(",").any { it.trim() == "rewards" }
-        val fromInstant = from?.let { parseQueryTime(it) }
-        val toInstant = to?.let { parseQueryTime(it) }
-        return success(inventoryService.export(helper.requireUserId(), includeRewards, fromInstant, toInstant))
+        @Parameter(schema = Schema(allowableValues = ["current", "current,rewards"]))
+        @RequestParam(name = "include", required = false, defaultValue = "current")
+        include: String,
+        @RequestParam(name = "from", required = false) from: OffsetDateTime?,
+        @RequestParam(name = "to", required = false) to: OffsetDateTime?,
+    ): InventoryExportResponse {
+        if (include != "current" && include != "current,rewards") {
+            throw com.lhs.share.hub.service.inventory.InventoryApiException(
+                org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+                "schema_validation_failed",
+                "include must be current or current,rewards",
+            )
+        }
+        return inventoryService.export(helper.requireUserId(), include == "current,rewards", from?.toInstant(), to?.toInstant())
     }
 
     /**
      * 导入记录列表(需登录;entity_type/from/to 可选过滤,按 effective_at 倒序)。
      */
     @Operation(summary = "导入记录列表")
+    @InventoryReadResponses
     @RequireJwt
     @GetMapping("/records")
     fun records(
+        @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type", required = false) entityType: String?,
-        @RequestParam(name = "from", required = false) from: String?,
-        @RequestParam(name = "to", required = false) to: String?,
-    ): ApiResult<List<InventoryRecordListItemDto>> = success(
+        @RequestParam(name = "from", required = false) from: OffsetDateTime?,
+        @RequestParam(name = "to", required = false) to: OffsetDateTime?,
+        @RequestParam(name = "cursor", required = false) cursor: String?,
+        @Parameter(
+            schema = Schema(
+                type = "integer",
+                format = "int32",
+                minimum = "1",
+                maximum = "100",
+                defaultValue = "50",
+            ),
+        )
+        @RequestParam(name = "limit", required = false, defaultValue = "50") limit: Int,
+    ): ApiResult<InventoryRecordPageResponse> = success(
         inventoryService.listRecords(
             helper.requireUserId(),
             entityType,
-            from?.let { parseQueryTime(it) },
-            to?.let { parseQueryTime(it) },
+            from?.toInstant(),
+            to?.toInstant(),
+            cursor,
+            limit,
         ),
     )
 
@@ -119,6 +152,7 @@ class InventoryController(
      * 删除后全量重放剩余记录重建当前库存(语义等价于该记录从未导入过)。
      */
     @Operation(summary = "删除单条记录(重放重建库存)")
+    @InventoryDeleteResponses
     @RequireJwt
     @AccessLimit(times = 10, second = 60)
     @DeleteMapping("/records/{recordId}")
@@ -131,27 +165,7 @@ class InventoryController(
      * 对象目录(公开,无需登录;返回目录版本与全部 {entity_type, id, name})。
      */
     @Operation(summary = "对象目录")
+    @InventoryPublicResponses
     @GetMapping("/catalog")
     fun catalog(): ApiResult<InventoryCatalogResponse> = success(catalogService.catalog())
-
-    /**
-     * 解析查询参数中的时间:支持 RFC 3339(带 offset 或 Z)与纯日期 YYYY-MM-DD。
-     * 纯日期按 UTC 当日起点解析(前端 <input type=date> 传的是本地日期字符串,
-     * 由前端决定时区语义,这里约定按 UTC 处理以保证 [from,to) 区间稳定)。
-     */
-    private fun parseQueryTime(value: String): Instant {
-        val trimmed = value.trim()
-        return try {
-            if (trimmed.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
-                LocalDate.parse(trimmed).atStartOfDay().toInstant(ZoneOffset.UTC)
-            } else {
-                OffsetDateTime.parse(trimmed).toInstant()
-            }
-        } catch (e: Exception) {
-            throw com.lhs.share.controller.response.ApiResultException(
-                422,
-                "schema_validation_failed: 非法时间 $value",
-            )
-        }
-    }
 }

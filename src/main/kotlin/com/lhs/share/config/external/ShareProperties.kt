@@ -56,6 +56,7 @@ data class ShareProperties(
         var title: String = "Share Backend API",
         var description: String = "Share Backend API",
         var version: String = "v0.1.0",
+        var publicBaseUrl: String = "https://hub.maayuan.fun:16666",
         var domain: String = "",
         var frontendDomain: String = "",
     )

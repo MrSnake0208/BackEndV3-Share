@@ -1,5 +1,8 @@
 package com.lhs.share.hub.controller.inventory.response
 
+import com.fasterxml.jackson.annotation.JsonInclude
+import com.lhs.share.hub.controller.inventory.request.ProducerDto
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
 /**
@@ -8,23 +11,31 @@ import java.time.Instant
  * 每条 entity_type 生成一条 full stock_snapshot(当前状态导出);
  * 若 include=rewards,再附带区间内的 reward_delta 流水。
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class InventoryExportResponse(
     val format: String = "myshare-inventory-exchange",
     val version: Int = 1,
+    @field:Schema(format = "date-time")
     val exportedAt: Instant,
     val catalogVersion: String?,
+    val producer: ProducerDto,
     val records: List<InventoryExportRecordDto>,
 )
 
 /**
  * 导出记录:与导入记录结构一致,方便往返。
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class InventoryExportRecordDto(
     val recordId: String,
+    @field:Schema(allowableValues = ["reward_delta", "stock_snapshot"])
     val recordType: String,
+    @field:Schema(allowableValues = ["item", "agent"])
     val entityType: String,
     val acquisitionChannel: String? = null,
+    @field:Schema(format = "date-time")
     val effectiveAt: Instant,
+    @field:Schema(allowableValues = ["full", "listed"])
     val snapshotScope: String?,
     val entries: List<InventoryExportEntryDto>,
 )
@@ -32,6 +43,7 @@ data class InventoryExportRecordDto(
 /**
  * 导出条目
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class InventoryExportEntryDto(
     val id: String,
     val name: String?,

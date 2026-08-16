@@ -9,10 +9,12 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
 import org.springframework.data.mongodb.MongoDatabaseFactory
+import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
 import org.springframework.data.mongodb.core.convert.MongoConverter
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.util.StringUtils
 
 /**
@@ -107,4 +109,12 @@ class HubMongoConfig {
     fun hubMongoTemplate(@Qualifier("hubMongoDatabaseFactory") factory: MongoDatabaseFactory, converter: MongoConverter): MongoTemplate {
         return MongoTemplate(factory, converter)
     }
+
+    @Bean
+    fun hubTransactionManager(@Qualifier("hubMongoDatabaseFactory") factory: MongoDatabaseFactory): MongoTransactionManager =
+        MongoTransactionManager(factory)
+
+    @Bean
+    fun hubTransactionTemplate(@Qualifier("hubTransactionManager") transactionManager: MongoTransactionManager): TransactionTemplate =
+        TransactionTemplate(transactionManager)
 }

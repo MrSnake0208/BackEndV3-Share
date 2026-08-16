@@ -18,12 +18,10 @@ private val log = KotlinLogging.logger { }
  * 对象目录服务(HubBackend.entity_catalog)
  *
  * 目录为全局只读字典,向后端校验 (entity_type, id) 与向前端展示统一对象名称。
- * 加载策略:
- * 1. 先读 entity_catalog collection,非空则直接使用(已从 classpath 播种过);
- * 2. 为空则从 classpath 资源 inventory/items.json、inventory/operators.json
- *    解析全部对象,逐条 upsert,之后走只读路径。
+ * 加载策略:首次访问时从 classpath 资源 inventory/items.json、inventory/operators.json
+ * 解析全部对象,只补齐 collection 中缺失的对象,之后走只读路径。
  *
- * 该 service 仅在空 collection 时播种,绝不覆盖既有数据,避免误清空运维手工维护的目录。
+ * 该 service 绝不覆盖或删除既有数据,避免影响运维手工维护的目录。
  */
 @Service
 class EntityCatalogService(
@@ -74,18 +72,13 @@ class EntityCatalogService(
     }
 
     /**
-     * 惰性播种:collection 为空时从 classpath 加载并持久化,否则跳过。
+     * 惰性播种:首次访问时补齐 classpath 中存在、collection 中缺失的对象。
      */
     private fun ensureSeeded() {
         if (seeded) return
         synchronized(this) {
             if (seeded) return
-            val count = repository.count()
-            if (count > 0) {
-                log.info { "对象目录已存在 $count 条,跳过 classpath 播种" }
-            } else {
-                seed()
-            }
+            seed()
             seeded = true
         }
     }

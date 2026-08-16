@@ -3,8 +3,7 @@ package com.lhs.share.openapi
 /**
  * 第三方 API Token 权限枚举
  *
- * 每个权限有唯一 code(整数)与 key(字符串),scope 中存 code。
- * code 与后端校验、前端展示均以此处为唯一来源。
+ * 数据库存唯一整数 code;公开 API 只使用稳定字符串 key。
  */
 enum class OpenApiPermission(
     val code: Int,
@@ -20,6 +19,11 @@ enum class OpenApiPermission(
      * 库存数据写入
      */
     INVENTORY_WRITE(code = 10002, key = "inventory:write", desc = "库存数据写入"),
+
+    /**
+     * 库存交换文档导出
+     */
+    INVENTORY_EXPORT(code = 10003, key = "inventory:export", desc = "库存数据导出"),
     ;
 
     companion object {
@@ -28,11 +32,13 @@ enum class OpenApiPermission(
          */
         fun codeByKey(key: String): Int? = entries.firstOrNull { it.key == key }?.code
 
-        /**
-         * 列出全部权限,每项 {key, code, desc}
-         */
-        fun listAll(): List<Map<String, Any>> = entries.map {
-            mapOf("key" to it.key, "code" to it.code, "desc" to it.desc)
-        }
+        fun byKey(key: String): OpenApiPermission? = entries.firstOrNull { it.key == key }
+
+        fun listAll(): List<OpenApiPermissionDto> = entries.map { OpenApiPermissionDto(scope = it.key, description = it.desc) }
     }
 }
+
+data class OpenApiPermissionDto(
+    val scope: String,
+    val description: String,
+)
