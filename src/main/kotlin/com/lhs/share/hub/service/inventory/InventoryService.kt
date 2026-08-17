@@ -578,12 +578,12 @@ class InventoryService(
             criteria.andOperator(
                 Criteria().orOperator(
                     Criteria.where("effectiveAt").lt(decoded.effectiveAt),
-                    Criteria.where("effectiveAt").`is`(decoded.effectiveAt).and("_id").lt(decoded.id),
+                    Criteria.where("effectiveAt").`is`(decoded.effectiveAt).and("recordId").lt(decoded.recordId),
                 ),
             )
         }
         val query = Query(criteria)
-            .with(Sort.by(Sort.Order.desc("effectiveAt"), Sort.Order.desc("_id")))
+            .with(Sort.by(Sort.Order.desc("effectiveAt"), Sort.Order.desc("recordId")))
             .limit(limit + 1)
         val records = hubMongoTemplate.find(query, InventoryRecord::class.java, "inventory_records")
         val hasNext = records.size > limit
@@ -776,8 +776,7 @@ class InventoryService(
         ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
 
     private fun encodeCursor(record: InventoryRecord): String {
-        val id = checkNotNull(record.id) { "Inventory record has no id" }
-        val value = "${record.effectiveAt}\n$id"
+        val value = "${record.effectiveAt}\n${record.recordId}"
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))
     }
 
@@ -822,7 +821,7 @@ class InventoryService(
 
     private data class RecordCursor(
         val effectiveAt: Instant,
-        val id: String,
+        val recordId: String,
     )
 
     /**
