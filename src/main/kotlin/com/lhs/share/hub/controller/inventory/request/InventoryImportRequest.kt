@@ -24,8 +24,8 @@ data class InventoryImportRequest(
     @field:Schema(allowableValues = ["myshare-inventory-exchange"])
     val format: String,
     @field:NotNull(message = "version 不能为空")
-    @field:Min(value = 1, message = "version 必须为正整数")
-    @field:Schema(minimum = "1", maximum = "1")
+    @field:Min(value = 2, message = "version 必须为 2")
+    @field:Schema(minimum = "2", maximum = "2")
     val version: Int,
     @field:NotBlank(message = "exported_at 不能为空")
     @field:Schema(format = "date-time")
@@ -37,6 +37,10 @@ data class InventoryImportRequest(
     @field:JsonSetter(nulls = Nulls.FAIL)
     val catalogVersion: String? = null,
     @field:Valid
+    @field:Size(min = 1, max = 1000, message = "accounts 数量须在 1..1000")
+    @field:JsonSetter(nulls = Nulls.FAIL)
+    val accounts: List<InventoryExchangeAccountDto>? = null,
+    @field:Valid
     @field:Size(min = 1, max = 1000, message = "records 数量须在 1..1000")
     val records: List<InventoryRecordRequest>,
 ) {
@@ -45,6 +49,19 @@ data class InventoryImportRequest(
         if (name == "user_id") throw IllegalArgumentException("user_id must not be present in an inventory document")
     }
 }
+
+data class InventoryExchangeAccountDto(
+    @field:NotBlank(message = "accounts[].id 不能为空")
+    @field:Size(min = 1, max = 64, message = "accounts[].id 长度须在 1..64")
+    @field:Pattern(
+        regexp = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+        message = "accounts[].id 格式无效",
+    )
+    val id: String,
+    @field:Size(min = 1, max = 64, message = "accounts[].name 长度须在 1..64")
+    @field:JsonSetter(nulls = Nulls.FAIL)
+    val name: String? = null,
+)
 
 /**
  * 单条记录(协议 4 Record 字段);field 级约束无法表达「快照必填 snapshot_scope、
@@ -59,6 +76,13 @@ data class InventoryImportRequest(
     ],
 )
 data class InventoryRecordRequest(
+    @field:NotBlank(message = "account_id 不能为空")
+    @field:Size(min = 1, max = 64, message = "account_id 长度须在 1..64")
+    @field:Pattern(
+        regexp = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+        message = "account_id 格式无效",
+    )
+    val accountId: String,
     @field:NotBlank(message = "record_id 不能为空")
     @field:Size(min = 1, max = 128, message = "record_id 长度须在 1..128")
     val recordId: String,

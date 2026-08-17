@@ -12,6 +12,7 @@ import java.time.Instant
  */
 data class InventoryCurrentResponse(
     val userId: String,
+    val accountId: String,
     val entityType: String,
     val fullBaselineAt: Instant?,
     val entries: Map<String, StockEntryDto>,
@@ -20,6 +21,7 @@ data class InventoryCurrentResponse(
     companion object {
         fun of(current: InventoryCurrent): InventoryCurrentResponse = InventoryCurrentResponse(
             userId = current.userId,
+            accountId = current.accountId,
             entityType = current.entityType,
             fullBaselineAt = current.fullBaselineAt,
             entries = current.entries.mapValues { (_, e) -> StockEntryDto.of(e) },

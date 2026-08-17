@@ -40,7 +40,7 @@ class OpenApiTokenController(
     @OpenApiTokenGenerateResponses
     @PostMapping("/token", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun generate(@Valid @RequestBody request: OpenApiTokenGenerateRequest): ApiResult<OpenApiTokenCreatedResponse> =
-        success(tokenService.generate(helper.requireUserId(), request.scopes, request.remark))
+        success(tokenService.generate(helper.requireUserId(), request.accountId, request.scopes, request.remark))
 
     /**
      * 权限列表(公开,无需登录)

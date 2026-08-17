@@ -21,26 +21,29 @@ interface InventoryRecordRepository : MongoRepository<InventoryRecord, String> {
     /**
      * 按用户 + 幂等 id 查询;不存在时返回 null(幂等校验用)
      */
-    fun findByUserIdAndRecordId(userId: String, recordId: String): InventoryRecord?
+    fun findByUserIdAndAccountIdAndRecordId(userId: String, accountId: String, recordId: String): InventoryRecord?
 
     /**
      * 按用户查询流水,按生效时间降序(排查导入结果用)
      */
-    fun findByUserIdOrderByEffectiveAtDesc(userId: String): List<InventoryRecord>
+    fun findByUserIdAndAccountIdOrderByEffectiveAtDesc(userId: String, accountId: String): List<InventoryRecord>
 
     /**
      * 按用户查询流水,按生效时间升序(导出用,保证重导入顺序正确)
      */
-    fun findByUserIdOrderByEffectiveAtAsc(userId: String): List<InventoryRecord>
+    fun findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId: String, accountId: String): List<InventoryRecord>
 
     /**
      * 按用户 + 记录类型 + 生效时间区间分页查询(时段统计用,区间 [from, to))
      */
-    fun findByUserIdAndRecordTypeAndEffectiveAtGreaterThanEqualAndEffectiveAtLessThan(
+    fun findByUserIdAndAccountIdAndRecordTypeAndEffectiveAtGreaterThanEqualAndEffectiveAtLessThan(
         userId: String,
+        accountId: String,
         recordType: String,
         from: Instant,
         to: Instant,
         pageable: Pageable,
     ): Page<InventoryRecord>
+
+    fun deleteAllByUserIdAndAccountId(userId: String, accountId: String)
 }

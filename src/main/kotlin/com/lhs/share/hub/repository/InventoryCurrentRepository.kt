@@ -17,10 +17,12 @@ interface InventoryCurrentRepository : MongoRepository<InventoryCurrent, String>
     /**
      * 按用户 + 对象类型查询当前库存文档;不存在时返回 null
      */
-    fun findByUserIdAndEntityType(userId: String, entityType: String): InventoryCurrent?
+    fun findByUserIdAndAccountIdAndEntityType(userId: String, accountId: String, entityType: String): InventoryCurrent?
 
     /**
      * 列出某用户全部对象类型的当前库存文档(按更新时间倒序)
      */
-    fun findByUserIdOrderByUpdatedAtDesc(userId: String): List<InventoryCurrent>
+    fun findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId: String, accountId: String): List<InventoryCurrent>
+
+    fun deleteAllByUserIdAndAccountId(userId: String, accountId: String)
 }

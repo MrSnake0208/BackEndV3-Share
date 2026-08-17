@@ -6,11 +6,13 @@ import io.swagger.v3.oas.annotations.media.Schema
 /** OpenAPI-only schemas for the conditional inventory exchange record variants. */
 @Schema(
     name = "InventoryRewardRecord",
-    requiredProperties = ["record_id", "record_type", "entity_type", "effective_at", "entries"],
+    requiredProperties = ["account_id", "record_id", "record_type", "entity_type", "effective_at", "entries"],
     additionalProperties = Schema.AdditionalPropertiesValue.TRUE,
     not = InventorySnapshotScopePresentSchema::class,
 )
 class InventoryRewardRecordSchema(
+    @field:Schema(minLength = 1, maxLength = 64, pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    val accountId: String,
     @field:Schema(minLength = 1, maxLength = 128)
     val recordId: String,
     @field:Schema(type = "string", allowableValues = ["reward_delta"])
@@ -27,10 +29,12 @@ class InventoryRewardRecordSchema(
 
 @Schema(
     name = "InventoryFullSnapshotRecord",
-    requiredProperties = ["record_id", "record_type", "entity_type", "effective_at", "snapshot_scope", "entries"],
+    requiredProperties = ["account_id", "record_id", "record_type", "entity_type", "effective_at", "snapshot_scope", "entries"],
     additionalProperties = Schema.AdditionalPropertiesValue.TRUE,
 )
 class InventoryFullSnapshotRecordSchema(
+    @field:Schema(minLength = 1, maxLength = 64, pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    val accountId: String,
     @field:Schema(minLength = 1, maxLength = 128)
     val recordId: String,
     @field:Schema(type = "string", allowableValues = ["stock_snapshot"])
@@ -49,10 +53,12 @@ class InventoryFullSnapshotRecordSchema(
 
 @Schema(
     name = "InventoryListedSnapshotRecord",
-    requiredProperties = ["record_id", "record_type", "entity_type", "effective_at", "snapshot_scope", "entries"],
+    requiredProperties = ["account_id", "record_id", "record_type", "entity_type", "effective_at", "snapshot_scope", "entries"],
     additionalProperties = Schema.AdditionalPropertiesValue.TRUE,
 )
 class InventoryListedSnapshotRecordSchema(
+    @field:Schema(minLength = 1, maxLength = 64, pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    val accountId: String,
     @field:Schema(minLength = 1, maxLength = 128)
     val recordId: String,
     @field:Schema(type = "string", allowableValues = ["stock_snapshot"])

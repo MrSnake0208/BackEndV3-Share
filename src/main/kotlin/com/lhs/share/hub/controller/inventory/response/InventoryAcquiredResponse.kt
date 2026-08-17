@@ -8,6 +8,7 @@ import java.time.Instant
  * 只聚合 record_type = reward_delta 的历史流水;区间为 [from, to)。
  */
 data class InventoryAcquiredResponse(
+    val accountId: String,
     val entityType: String,
     val from: Instant,
     val to: Instant,

@@ -5,12 +5,14 @@ import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryExportAccountDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportEntryDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportRecordDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
+import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
@@ -47,6 +49,7 @@ private val log = KotlinLogging.logger { }
  */
 @Service
 class InventoryService(
+    private val accountRepository: InventoryAccountRepository,
     private val currentRepository: InventoryCurrentRepository,
     private val recordRepository: InventoryRecordRepository,
     private val catalogService: EntityCatalogService,
@@ -61,7 +64,12 @@ class InventoryService(
      * 整体校验失败抛异常(整份拒绝,不部分写入);单条幂等冲突抛 409,
      * 重复(同正文)计入 duplicates 不算失败。
      */
-    fun import(userId: String, request: InventoryImportRequest): InventoryImportResult {
+    fun import(userId: String, request: InventoryImportRequest): InventoryImportResult = import(userId, request, null)
+
+    fun import(userId: String, accountId: String, request: InventoryImportRequest): InventoryImportResult =
+        import(userId, request, accountId)
+
+    private fun import(userId: String, request: InventoryImportRequest, restrictedAccountId: String?): InventoryImportResult {
         if (request.format != FORMAT) {
             throw schemaError("format must be $FORMAT")
         }
@@ -78,7 +86,7 @@ class InventoryService(
             throw schemaError("catalog_version must not be empty")
         }
 
-        val ordered = validateAndSort(request)
+        val ordered = validateAndSort(userId, request, restrictedAccountId)
         repeat(MAX_TRANSACTION_ATTEMPTS) { attempt ->
             try {
                 val prepared = prepareRecords(userId, ordered)
@@ -118,16 +126,17 @@ class InventoryService(
     }
 
     private fun prepareRecords(userId: String, ordered: List<ValidatedRecord>): List<PreparedRecord> {
-        val requestRecords = mutableMapOf<String, ValidatedRecord>()
+        val requestRecords = mutableMapOf<Pair<String, String>, ValidatedRecord>()
         return ordered.map { validated ->
             val record = validated.record
-            val prior = requestRecords[record.recordId]
+            val key = record.accountId to record.recordId
+            val prior = requestRecords[key]
             if (prior != null) {
                 if (!sameRequestBody(prior, validated)) throw recordConflict(record.recordId)
                 PreparedRecord(validated, duplicate = true)
             } else {
-                requestRecords[record.recordId] = validated
-                val existing = recordRepository.findByUserIdAndRecordId(userId, record.recordId)
+                requestRecords[key] = validated
+                val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
                 if (existing != null && !sameBody(existing, record)) throw recordConflict(record.recordId)
                 PreparedRecord(validated, duplicate = existing != null)
             }
@@ -138,9 +147,10 @@ class InventoryService(
      * 校验并排序:枚举/catalog/entries 唯一性/count 范围/时间解析,全通过后按
      * effective_at 升序(同时间 reward_delta 优先,让快照成为同一时间的最终权威)。
      */
-    private fun validateAndSort(request: InventoryImportRequest): List<ValidatedRecord> {
+    private fun validateAndSort(userId: String, request: InventoryImportRequest, restrictedAccountId: String?): List<ValidatedRecord> {
         val records = request.records
         if (records.isEmpty()) throw schemaError("records must contain at least one record")
+        validateAccounts(userId, request, restrictedAccountId)
         records.forEach { record ->
             if (record.recordId.isBlank() || record.recordId.length > 128) {
                 throw schemaError("record_id length must be 1..128", record.recordId.takeIf { it.isNotBlank() })
@@ -156,7 +166,48 @@ class InventoryService(
                 val effectiveAt = parseInstant(record.effectiveAt, "effective_at")
                 ValidatedRecord(record, effectiveAt)
             }
-            .sortedWith(compareBy<ValidatedRecord> { it.effectiveAt }.thenBy { if (it.record.recordType == REWARD_DELTA) 0 else 1 })
+            .sortedWith(
+                compareBy<ValidatedRecord> { it.record.accountId }
+                    .thenBy { it.effectiveAt }
+                    .thenBy { if (it.record.recordType == REWARD_DELTA) 0 else 1 },
+            )
+    }
+
+    private fun validateAccounts(userId: String, request: InventoryImportRequest, restrictedAccountId: String?) {
+        val ids = request.accounts.orEmpty().map { account ->
+            if (!ACCOUNT_ID.matches(account.id)) throw schemaError("accounts[].id is invalid")
+            if (account.name != null && (account.name.isEmpty() || account.name.length > 64)) {
+                throw schemaError("accounts[].name length must be 1..64")
+            }
+            account.id
+        }
+        if (ids.toSet().size != ids.size) throw schemaError("accounts[].id must be unique")
+
+        val referenced = request.records.map { record ->
+            if (!ACCOUNT_ID.matches(record.accountId)) {
+                throw schemaError("record account_id is invalid", record.recordId)
+            }
+            record.accountId
+        }.toSet()
+        if (restrictedAccountId != null && referenced != setOf(restrictedAccountId)) {
+            throw InventoryApiException(
+                HttpStatus.FORBIDDEN,
+                "account_scope_mismatch",
+                "Inventory document contains records outside the API token's account",
+            )
+        }
+        val owned = accountRepository.findAllByUserIdAndAccountIdIn(userId, referenced)
+            .map { it.accountId }
+            .toSet()
+        val unknown = referenced.firstOrNull { it !in owned }
+        if (unknown == null) {
+            return
+        }
+        throw InventoryApiException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "unknown_account_id",
+            "Unknown account_id: $unknown",
+        )
     }
 
     /**
@@ -227,6 +278,7 @@ class InventoryService(
         val entity = InventoryRecord(
             recordId = record.recordId,
             userId = userId,
+            accountId = record.accountId,
             recordType = record.recordType,
             entityType = record.entityType,
             acquisitionChannel = record.acquisitionChannel,
@@ -238,8 +290,8 @@ class InventoryService(
         )
 
         return when (record.recordType) {
-            REWARD_DELTA -> applyRewardDelta(userId, entity)
-            STOCK_SNAPSHOT -> applyStockSnapshot(userId, entity)
+            REWARD_DELTA -> applyRewardDelta(userId, record.accountId, entity)
+            STOCK_SNAPSHOT -> applyStockSnapshot(userId, record.accountId, entity)
             else -> throw IllegalStateException("已校验,不应到达")
         }
     }
@@ -287,11 +339,11 @@ class InventoryService(
      * stock_effect 为记录级标记:存在任一 applied 条目 → applied,否则 history_only。
      * 幂等唯一索引兜底:并发重复由外层 transaction 回滚并重新预检。
      */
-    private fun applyRewardDelta(userId: String, entity: InventoryRecord): Effect {
-        val comp = computeReward(userId, entity)
+    private fun applyRewardDelta(userId: String, accountId: String, entity: InventoryRecord): Effect {
+        val comp = computeReward(userId, accountId, entity)
         val stored = entity.copy(stockEffect = comp.effect.stock())
         recordRepository.save(stored)
-        applyRewardToCurrent(userId, entity.entityType, comp)
+        applyRewardToCurrent(userId, accountId, entity.entityType, comp)
         return comp.effect
     }
 
@@ -299,8 +351,8 @@ class InventoryService(
      * 计算奖励增量效果(纯计算,不写库):对每个 entry 比较其有效基线
      * max(full_baseline_at, listed_baseline_at),晚于基线 → applied。
      */
-    private fun computeReward(userId: String, entity: InventoryRecord): RewardComputation {
-        val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
+    private fun computeReward(userId: String, accountId: String, entity: InventoryRecord): RewardComputation {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
         val fullBaseline = current?.fullBaselineAt
         val listedBaselines = current?.entries?.mapValues { it.value.listedBaselineAt } ?: emptyMap()
 
@@ -318,10 +370,10 @@ class InventoryService(
     /**
      * 把奖励增量效果应用到当前库存。
      */
-    private fun applyRewardToCurrent(userId: String, entityType: String, comp: RewardComputation) {
+    private fun applyRewardToCurrent(userId: String, accountId: String, entityType: String, comp: RewardComputation) {
         if (comp.effect == Effect.APPLIED) {
             comp.appliedEntries.forEach { entry ->
-                incCurrent(userId, entityType, entry.id, entry.count)
+                incCurrent(userId, accountId, entityType, entry.id, entry.count)
             }
         }
     }
@@ -330,9 +382,9 @@ class InventoryService(
      * 增加当前库存某个对象的 count,并 touch updated_at;文档不存在时创建。
      * 注意不改变 full_baseline_at / listed_baseline_at。
      */
-    private fun incCurrent(userId: String, entityType: String, entityId: String, delta: Long) {
-        val current = currentRepository.findByUserIdAndEntityType(userId, entityType)
-            ?: InventoryCurrent(userId = userId, entityType = entityType)
+    private fun incCurrent(userId: String, accountId: String, entityType: String, entityId: String, delta: Long) {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)
+            ?: newCurrent(userId, accountId, entityType)
         val entries = current.entries.toMutableMap()
         val old = entries[entityId] ?: StockEntry()
         entries[entityId] = old.copy(count = old.count + delta)
@@ -342,12 +394,12 @@ class InventoryService(
     /**
      * 库存快照:先计算效果(基线比较),再落流水,最后应用快照。
      */
-    private fun applyStockSnapshot(userId: String, entity: InventoryRecord): Effect {
-        val comp = computeSnapshot(userId, entity)
+    private fun applyStockSnapshot(userId: String, accountId: String, entity: InventoryRecord): Effect {
+        val comp = computeSnapshot(userId, accountId, entity)
         val stored = entity.copy(stockEffect = comp.effect.stock())
         recordRepository.save(stored)
         if (comp.effect == Effect.APPLIED) {
-            applySnapshotToCurrent(userId, entity, comp)
+            applySnapshotToCurrent(userId, accountId, entity, comp)
         }
         return comp.effect
     }
@@ -356,8 +408,8 @@ class InventoryService(
      * 计算快照效果(纯计算,不写库):full 快照不早于现有 full 基线才生效;
      * listed 快照在所有列出对象的 listed 基线都晚于本快照时整条 superseded。
      */
-    private fun computeSnapshot(userId: String, entity: InventoryRecord): SnapshotComputation {
-        val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
+    private fun computeSnapshot(userId: String, accountId: String, entity: InventoryRecord): SnapshotComputation {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
         val existingFullBaseline = current?.fullBaselineAt
         val isFull = entity.snapshotScope == SNAPSHOT_FULL
         val effective = entity.effectiveAt
@@ -380,11 +432,11 @@ class InventoryService(
     /**
      * 把快照效果应用到当前库存。
      */
-    private fun applySnapshotToCurrent(userId: String, entity: InventoryRecord, computation: SnapshotComputation) {
+    private fun applySnapshotToCurrent(userId: String, accountId: String, entity: InventoryRecord, computation: SnapshotComputation) {
         if (entity.snapshotScope == SNAPSHOT_FULL) {
-            applyFullSnapshot(userId, entity)
+            applyFullSnapshot(userId, accountId, entity)
         } else {
-            applyListedSnapshot(userId, entity, computation.appliedEntries)
+            applyListedSnapshot(userId, accountId, entity, computation.appliedEntries)
         }
     }
 
@@ -392,8 +444,8 @@ class InventoryService(
      * full 快照:替换整个 entries(未列出归零)并更新 full_baseline_at;
      * 对拥有更晚 listed_baseline_at 的对象保留其更晚的局部值(item 粒度保留)。
      */
-    private fun applyFullSnapshot(userId: String, entity: InventoryRecord) {
-        val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
+    private fun applyFullSnapshot(userId: String, accountId: String, entity: InventoryRecord) {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
         val effective = entity.effectiveAt
 
         // 构建新 entries:以快照值为准;但保留更晚 listed 基线覆盖的 item(避免旧 full 覆盖新局部读取)
@@ -408,7 +460,7 @@ class InventoryService(
             }
         }
 
-        val updated = (current ?: InventoryCurrent(userId = userId, entityType = entity.entityType)).copy(
+        val updated = (current ?: newCurrent(userId, accountId, entity.entityType)).copy(
             fullBaselineAt = effective,
             entries = merged,
             updatedAt = Instant.now(),
@@ -419,15 +471,22 @@ class InventoryService(
     /**
      * listed 快照:只覆盖列出的对象并更新其 listed_baseline_at,未列出对象不变。
      */
-    private fun applyListedSnapshot(userId: String, entity: InventoryRecord, entries: List<RecordEntry>) {
-        val current = currentRepository.findByUserIdAndEntityType(userId, entity.entityType)
-            ?: InventoryCurrent(userId = userId, entityType = entity.entityType)
+    private fun applyListedSnapshot(userId: String, accountId: String, entity: InventoryRecord, entries: List<RecordEntry>) {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
+            ?: newCurrent(userId, accountId, entity.entityType)
         val updatedEntries = current.entries.toMutableMap()
         entries.forEach { entry ->
             updatedEntries[entry.id] = StockEntry(entry.count, entity.effectiveAt)
         }
         currentRepository.save(current.copy(entries = updatedEntries, updatedAt = Instant.now()))
     }
+
+    private fun newCurrent(userId: String, accountId: String, entityType: String) = InventoryCurrent(
+        id = "$userId:$accountId:$entityType",
+        userId = userId,
+        accountId = accountId,
+        entityType = entityType,
+    )
 
     // ==================== 记录管理(删除/重放/列表) ====================
 
@@ -443,25 +502,27 @@ class InventoryService(
      *
      * 协议 5.1 §6.1:错误记录由平台管理接口撤销;删除后历史统计不再包含该记录。
      */
-    fun deleteRecord(userId: String, recordId: String) {
-        val record = recordRepository.findByUserIdAndRecordId(userId, recordId)
+    fun deleteRecord(userId: String, accountId: String, recordId: String) {
+        requireAccount(userId, accountId)
+        val record = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
             ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "record_not_found", "Record not found", recordId)
         val entityType = record.entityType
 
         transactionTemplate.executeWithoutResult {
             recordRepository.deleteById(record.checkId())
-            currentRepository.findByUserIdAndEntityType(userId, entityType)?.let {
+            currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)?.let {
                 currentRepository.deleteById(it.checkId())
             }
-            val remaining = recordRepository.findByUserIdOrderByEffectiveAtAsc(userId)
+            val remaining = recordRepository.findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId, accountId)
                 .filter { it.entityType == entityType }
                 .sortedWith(
                     compareBy<InventoryRecord> { it.effectiveAt }
                         .thenBy { if (it.recordType == REWARD_DELTA) 0 else 1 },
                 )
-            remaining.forEach { replayRecord(userId, it) }
+            remaining.forEach { replayRecord(userId, accountId, it) }
             log.info {
-                "删除库存记录并重放完成: userId=$userId, recordId=$recordId, entityType=$entityType, 重放 ${remaining.size} 条"
+                "删除库存记录并重放完成: userId=$userId, accountId=$accountId, recordId=$recordId, " +
+                    "entityType=$entityType, 重放 ${remaining.size} 条"
             }
         }
     }
@@ -470,18 +531,18 @@ class InventoryService(
      * 重放一条已落库记录:重新计算效果、回写 stock_effect、更新当前库存。
      * 不插入流水(记录已在库里)。
      */
-    private fun replayRecord(userId: String, entity: InventoryRecord) {
+    private fun replayRecord(userId: String, accountId: String, entity: InventoryRecord) {
         when (entity.recordType) {
             REWARD_DELTA -> {
-                val comp = computeReward(userId, entity)
+                val comp = computeReward(userId, accountId, entity)
                 recordRepository.save(entity.copy(stockEffect = comp.effect.stock()))
-                applyRewardToCurrent(userId, entity.entityType, comp)
+                applyRewardToCurrent(userId, accountId, entity.entityType, comp)
             }
             STOCK_SNAPSHOT -> {
-                val comp = computeSnapshot(userId, entity)
+                val comp = computeSnapshot(userId, accountId, entity)
                 recordRepository.save(entity.copy(stockEffect = comp.effect.stock()))
                 if (comp.effect == Effect.APPLIED) {
-                    applySnapshotToCurrent(userId, entity, comp)
+                    applySnapshotToCurrent(userId, accountId, entity, comp)
                 }
             }
             else -> throw IllegalStateException("已落库记录类型非法: ${entity.recordType}")
@@ -493,17 +554,19 @@ class InventoryService(
      */
     fun listRecords(
         userId: String,
+        accountId: String,
         entityType: String?,
         from: Instant?,
         to: Instant?,
         cursor: String?,
         limit: Int,
     ): InventoryRecordPageResponse {
+        requireAccount(userId, accountId)
         validateEntityType(entityType)
         validateRange(from, to)
         if (limit !in 1..MAX_RECORDS_LIMIT) throw schemaError("limit must be between 1 and $MAX_RECORDS_LIMIT")
 
-        val criteria = Criteria.where("userId").`is`(userId)
+        val criteria = Criteria.where("userId").`is`(userId).and("accountId").`is`(accountId)
         if (entityType != null) criteria.and("entityType").`is`(entityType)
         if (from != null || to != null) {
             val time = criteria.and("effectiveAt")
@@ -534,12 +597,13 @@ class InventoryService(
     /**
      * 当前库存查询(entityType 可选;直接读 inventory_current,不扫流水)。
      */
-    fun current(userId: String, entityType: String?): List<InventoryCurrentResponse> {
+    fun current(userId: String, accountId: String, entityType: String?): List<InventoryCurrentResponse> {
+        requireAccount(userId, accountId)
         validateEntityType(entityType)
         val list = if (entityType != null) {
-            currentRepository.findByUserIdAndEntityType(userId, entityType)?.let { listOf(it) } ?: emptyList()
+            currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)?.let { listOf(it) } ?: emptyList()
         } else {
-            currentRepository.findByUserIdOrderByUpdatedAtDesc(userId)
+            currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId)
         }
         return list.map { InventoryCurrentResponse.of(it) }
     }
@@ -547,11 +611,13 @@ class InventoryService(
     /**
      * 时段获得量([from, to)),只聚合 reward_delta,返回 map<entity_id, count>。
      */
-    fun acquired(userId: String, entityType: String, from: Instant, to: Instant): InventoryAcquiredResponse {
+    fun acquired(userId: String, accountId: String, entityType: String, from: Instant, to: Instant): InventoryAcquiredResponse {
+        requireAccount(userId, accountId)
         validateEntityType(entityType)
         validateRange(from, to)
-        val result = aggregateRewardDelta(userId, entityType, from, to)
+        val result = aggregateRewardDelta(userId, accountId, entityType, from, to)
         return InventoryAcquiredResponse(
+            accountId = accountId,
             entityType = entityType,
             from = from,
             to = to,
@@ -563,10 +629,17 @@ class InventoryService(
      * 聚合:match(user, recordType=reward_delta, entityType, effective_at in [from,to)) →
      * unwind entries → group by entries.id → sum entries.count。
      */
-    private fun aggregateRewardDelta(userId: String, entityType: String, from: Instant, to: Instant): Map<String, Long> {
+    private fun aggregateRewardDelta(
+        userId: String,
+        accountId: String,
+        entityType: String,
+        from: Instant,
+        to: Instant,
+    ): Map<String, Long> {
         val match = Document(
             mapOf(
                 "userId" to userId,
+                "accountId" to accountId,
                 "recordType" to REWARD_DELTA,
                 "entityType" to entityType,
                 "effectiveAt" to Document(mapOf("\$gte" to from, "\$lt" to to)),
@@ -597,49 +670,62 @@ class InventoryService(
      * 导出:每种 entity_type 生成一条 full stock_snapshot(当前状态,由 current 直接读取);
      * 若 includeRewards,再附带区间 [from, to) 内的 reward_delta 流水(按 effective_at 升序)。
      */
-    fun export(userId: String, includeRewards: Boolean, from: Instant?, to: Instant?): InventoryExportResponse {
+    fun export(
+        userId: String,
+        accountId: String?,
+        scope: String?,
+        includeRewards: Boolean,
+        from: Instant?,
+        to: Instant?,
+    ): InventoryExportResponse {
         val now = Instant.now()
         val records = mutableListOf<InventoryExportRecordDto>()
         validateRange(from, to)
         val exportId = UUID.randomUUID().toString()
+        val accounts = exportAccounts(userId, accountId, scope)
 
-        // 当前状态快照:每个 entity_type 一条 full 快照;同一导出文档重传时 record_id 保持不变。
-        ENTITY_TYPES.forEach { type ->
-            val current = currentRepository.findByUserIdAndEntityType(userId, type)
-            val entries = current?.entries.orEmpty().map { (id, se) ->
-                InventoryExportEntryDto(id = id, name = null, count = se.count)
+        accounts.forEach { account ->
+            ENTITY_TYPES.forEach { type ->
+                val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, account.accountId, type)
+                val entries = current?.entries.orEmpty().map { (id, se) ->
+                    InventoryExportEntryDto(id = id, name = null, count = se.count)
+                }
+                records.add(
+                    InventoryExportRecordDto(
+                        accountId = account.accountId,
+                        recordId = "myshare:export:$exportId:${account.accountId}:$type",
+                        recordType = STOCK_SNAPSHOT,
+                        entityType = type,
+                        acquisitionChannel = "背包",
+                        effectiveAt = now,
+                        snapshotScope = SNAPSHOT_FULL,
+                        entries = entries,
+                    ),
+                )
             }
-            records.add(
-                InventoryExportRecordDto(
-                    recordId = "myshare:export:$exportId:$type",
-                    recordType = STOCK_SNAPSHOT,
-                    entityType = type,
-                    acquisitionChannel = "背包",
-                    effectiveAt = now,
-                    snapshotScope = SNAPSHOT_FULL,
-                    entries = entries,
-                ),
-            )
         }
 
         // 可选:奖励流水
         if (includeRewards) {
-            val rewards = recordRepository.findByUserIdOrderByEffectiveAtAsc(userId)
-                .filter { it.recordType == REWARD_DELTA }
-                .filter { from == null || !it.effectiveAt.isBefore(from) }
-                .filter { to == null || it.effectiveAt.isBefore(to) }
-            rewards.forEach { r ->
-                records.add(
-                    InventoryExportRecordDto(
-                        recordId = r.recordId,
-                        recordType = r.recordType,
-                        entityType = r.entityType,
-                        acquisitionChannel = r.acquisitionChannel,
-                        effectiveAt = r.effectiveAt,
-                        snapshotScope = r.snapshotScope,
-                        entries = r.entries.map { e -> InventoryExportEntryDto(id = e.id, name = e.name, count = e.count) },
-                    ),
-                )
+            accounts.forEach { account ->
+                val rewards = recordRepository.findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId, account.accountId)
+                    .filter { it.recordType == REWARD_DELTA }
+                    .filter { from == null || !it.effectiveAt.isBefore(from) }
+                    .filter { to == null || it.effectiveAt.isBefore(to) }
+                rewards.forEach { r ->
+                    records.add(
+                        InventoryExportRecordDto(
+                            accountId = r.accountId,
+                            recordId = r.recordId,
+                            recordType = r.recordType,
+                            entityType = r.entityType,
+                            acquisitionChannel = r.acquisitionChannel,
+                            effectiveAt = r.effectiveAt,
+                            snapshotScope = r.snapshotScope,
+                            entries = r.entries.map { e -> InventoryExportEntryDto(id = e.id, name = e.name, count = e.count) },
+                        ),
+                    )
+                }
             }
         }
 
@@ -647,8 +733,17 @@ class InventoryService(
             exportedAt = now,
             catalogVersion = catalogService.catalog().catalogVersion,
             producer = ProducerDto(platform = "myshare"),
+            accounts = accounts.map { InventoryExportAccountDto(it.accountId, it.name) },
             records = records,
         )
+    }
+
+    private fun exportAccounts(userId: String, accountId: String?, scope: String?) = when {
+        accountId != null && scope == null -> listOf(requireAccount(userId, accountId))
+        accountId == null && scope == "all" -> accountRepository.findAllByUserIdOrderByCreatedAtAsc(userId).ifEmpty {
+            throw schemaError("No inventory accounts are available to export")
+        }
+        else -> throw schemaError("Exactly one of account_id or scope=all must be provided")
     }
 
     // ==================== 工具 ====================
@@ -676,6 +771,9 @@ class InventoryService(
     private fun validateRange(from: Instant?, to: Instant?) {
         if (from != null && to != null && !from.isBefore(to)) throw schemaError("from must be earlier than to")
     }
+
+    private fun requireAccount(userId: String, accountId: String) = accountRepository.findByUserIdAndAccountId(userId, accountId)
+        ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
 
     private fun encodeCursor(record: InventoryRecord): String {
         val id = checkNotNull(record.id) { "Inventory record has no id" }
@@ -769,7 +867,7 @@ class InventoryService(
     private fun InventoryCurrent.checkId(): String = checkNotNull(id) { "库存实体未持久化" }
 
     companion object {
-        private const val SUPPORTED_VERSION = 1
+        private const val SUPPORTED_VERSION = 2
         private const val FORMAT = "myshare-inventory-exchange"
         private const val REWARD_DELTA = "reward_delta"
         private const val STOCK_SNAPSHOT = "stock_snapshot"
@@ -784,6 +882,7 @@ class InventoryService(
         private const val MAX_RECORDS_LIMIT = 100
         private const val MAX_TRANSACTION_ATTEMPTS = 3
         private val PRODUCER_PLATFORM = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
+        private val ACCOUNT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         private val ENTITY_TYPES = listOf(ENTITY_ITEM, ENTITY_AGENT)
     }
 }

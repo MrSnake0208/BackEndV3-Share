@@ -1,14 +1,18 @@
 {
   "format": "myshare-inventory-exchange",
-  "version": 1,
+  "version": 2,
   "exported_at": "2026-08-16T08:25:00+08:00",
   "catalog_version": "2026-08-16",
   "producer": {
     "platform": "myshare",
     "version": "5"
   },
+  "accounts": [
+    { "id": "main", "name": "大号" }
+  ],
   "records": [
     {
+      "account_id": "main",
       "record_id": "myshare:00cbab990ea14275bc815caabac5ed9e",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -23,6 +27,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:748d48af2e6c4dce86d07f4a53d01427",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -37,6 +42,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:bc6c8a83def64c27b69b10d9949b20a7",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -61,6 +67,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:0e7da16586c34317a071b89f53e94dee",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -100,6 +107,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:2af6a103e8fb499d8bd1118e6b7313fa",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -139,6 +147,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:af6374b2869c4460b529c09f21e4672a",
       "record_type": "reward_delta",
       "entity_type": "agent",
@@ -183,6 +192,7 @@
       ]
     },
     {
+      "account_id": "main",
       "record_id": "myshare:stock:item:example",
       "record_type": "stock_snapshot",
       "entity_type": "item",

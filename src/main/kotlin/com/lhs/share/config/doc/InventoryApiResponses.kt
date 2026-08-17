@@ -29,13 +29,18 @@ private const val JSON = "application/json"
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
+            responseCode = "404",
+            description = "account_not_found",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(
             responseCode = "409",
-            description = "record_conflict",
+            description = "record_conflict or account_name_conflict",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
             responseCode = "422",
-            description = "schema_validation_failed, unknown_entity_id, or unsupported_version",
+            description = "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
@@ -60,6 +65,11 @@ annotation class InventoryWriteResponses
         ApiResponse(
             responseCode = "403",
             description = "forbidden",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(
+            responseCode = "404",
+            description = "account_not_found",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
@@ -93,7 +103,7 @@ annotation class InventoryReadResponses
         ),
         ApiResponse(
             responseCode = "404",
-            description = "record_not_found",
+            description = "record_not_found or account_not_found",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(

@@ -9,7 +9,9 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.controller.inventory.request.InventoryAccountRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
+import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
@@ -17,6 +19,7 @@ import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.service.inventory.EntityCatalogService
+import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -26,6 +29,7 @@ import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -41,16 +45,48 @@ import java.time.OffsetDateTime
  * 其余接口需登录,userId 一律取自当前 JWT(authenticateHelper.requireUserId()),
  * 库存为私有数据,绝不由前端传入用户身份。
  *
- * 协议:规范/5.0 后端设计、规范/5.1 交换协议 v1。
+ * 协议:规范/5.0 后端设计、规范/5.1 交换协议 v2。
  */
 @Tag(name = "库存", description = "库存与奖励数据(HubBackend)")
 @RequestMapping("/v1/inventory", produces = [MediaType.APPLICATION_JSON_VALUE])
 @RestController
 class InventoryController(
     private val inventoryService: InventoryService,
+    private val accountService: InventoryAccountService,
     private val catalogService: EntityCatalogService,
     private val helper: AuthenticationHelper,
 ) {
+    @Operation(summary = "创建库存子账号")
+    @InventoryWriteResponses
+    @RequireJwt
+    @PostMapping("/accounts", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun createAccount(@Valid @RequestBody request: InventoryAccountRequest): ApiResult<InventoryAccountResponse> =
+        success(accountService.create(helper.requireUserId(), request.name))
+
+    @Operation(summary = "库存子账号列表")
+    @InventoryReadResponses
+    @RequireJwt
+    @GetMapping("/accounts")
+    fun accounts(): ApiResult<List<InventoryAccountResponse>> = success(accountService.list(helper.requireUserId()))
+
+    @Operation(summary = "修改库存子账号名称")
+    @InventoryWriteResponses
+    @RequireJwt
+    @PatchMapping("/accounts/{accountId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun renameAccount(
+        @PathVariable accountId: String,
+        @Valid @RequestBody request: InventoryAccountRequest,
+    ): ApiResult<InventoryAccountResponse> = success(accountService.rename(helper.requireUserId(), accountId, request.name))
+
+    @Operation(summary = "删除库存子账号及其库存和流水")
+    @InventoryDeleteResponses
+    @RequireJwt
+    @DeleteMapping("/accounts/{accountId}")
+    fun deleteAccount(@PathVariable accountId: String): ApiResult<Boolean> {
+        accountService.delete(helper.requireUserId(), accountId)
+        return success(true)
+    }
+
     /**
      * 导入库存/奖励交换文档(需登录;整份校验,幂等)。
      */
@@ -69,10 +105,11 @@ class InventoryController(
     @RequireJwt
     @GetMapping("/current")
     fun current(
+        @RequestParam(name = "account_id") accountId: String,
         @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type", required = false)
         entityType: String?,
-    ): ApiResult<List<InventoryCurrentResponse>> = success(inventoryService.current(helper.requireUserId(), entityType))
+    ): ApiResult<List<InventoryCurrentResponse>> = success(inventoryService.current(helper.requireUserId(), accountId, entityType))
 
     /**
      * 时段获得量查询(需登录;只聚合 reward_delta,区间 [from, to))。
@@ -82,12 +119,13 @@ class InventoryController(
     @RequireJwt
     @GetMapping("/acquired")
     fun acquired(
+        @RequestParam(name = "account_id") accountId: String,
         @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type") entityType: String,
         @RequestParam(name = "from") from: OffsetDateTime,
         @RequestParam(name = "to") to: OffsetDateTime,
     ): ApiResult<InventoryAcquiredResponse> =
-        success(inventoryService.acquired(helper.requireUserId(), entityType, from.toInstant(), to.toInstant()))
+        success(inventoryService.acquired(helper.requireUserId(), accountId, entityType, from.toInstant(), to.toInstant()))
 
     /**
      * 导出(需登录;默认仅当前状态 full 快照,include=rewards 时附带区间奖励流水)。
@@ -97,6 +135,9 @@ class InventoryController(
     @RequireJwt
     @GetMapping("/export")
     fun export(
+        @RequestParam(name = "account_id", required = false) accountId: String?,
+        @Parameter(schema = Schema(allowableValues = ["all"]))
+        @RequestParam(name = "scope", required = false) scope: String?,
         @Parameter(schema = Schema(allowableValues = ["current", "current,rewards"]))
         @RequestParam(name = "include", required = false, defaultValue = "current")
         include: String,
@@ -110,7 +151,14 @@ class InventoryController(
                 "include must be current or current,rewards",
             )
         }
-        return inventoryService.export(helper.requireUserId(), include == "current,rewards", from?.toInstant(), to?.toInstant())
+        return inventoryService.export(
+            helper.requireUserId(),
+            accountId,
+            scope,
+            include == "current,rewards",
+            from?.toInstant(),
+            to?.toInstant(),
+        )
     }
 
     /**
@@ -121,6 +169,7 @@ class InventoryController(
     @RequireJwt
     @GetMapping("/records")
     fun records(
+        @RequestParam(name = "account_id") accountId: String,
         @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type", required = false) entityType: String?,
         @RequestParam(name = "from", required = false) from: OffsetDateTime?,
@@ -139,6 +188,7 @@ class InventoryController(
     ): ApiResult<InventoryRecordPageResponse> = success(
         inventoryService.listRecords(
             helper.requireUserId(),
+            accountId,
             entityType,
             from?.toInstant(),
             to?.toInstant(),
@@ -156,8 +206,11 @@ class InventoryController(
     @RequireJwt
     @AccessLimit(times = 10, second = 60)
     @DeleteMapping("/records/{recordId}")
-    fun deleteRecord(@PathVariable(name = "recordId") recordId: String): ApiResult<Boolean> {
-        inventoryService.deleteRecord(helper.requireUserId(), recordId)
+    fun deleteRecord(
+        @PathVariable(name = "recordId") recordId: String,
+        @RequestParam(name = "account_id") accountId: String,
+    ): ApiResult<Boolean> {
+        inventoryService.deleteRecord(helper.requireUserId(), accountId, recordId)
         return success(true)
     }
 

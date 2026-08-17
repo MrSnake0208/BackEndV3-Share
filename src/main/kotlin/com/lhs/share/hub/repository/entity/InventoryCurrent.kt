@@ -10,7 +10,7 @@ import java.time.Instant
 /**
  * 用户当前库存(HubBackend.inventory_current)
  *
- * 每个用户、每种 entity_type 一个文档。entries 以 entity_id 为键,值为
+ * 每个用户、每个子账号、每种 entity_type 一个文档。entries 以 entity_id 为键,值为
  * [StockEntry],仅存源状态(count + listed_baseline_at),派生量(周/月获得量)
  * 由 inventory_records 按需聚合,绝不在本集合维护 acquired / total_acquired。
  *
@@ -24,8 +24,8 @@ import java.time.Instant
  */
 @Document("inventory_current")
 @CompoundIndex(
-    name = "idx_user_entity",
-    def = "{'userId': 1, 'entityType': 1}",
+    name = "idx_user_account_entity",
+    def = "{'userId': 1, 'accountId': 1, 'entityType': 1}",
     unique = true,
 )
 data class InventoryCurrent(
@@ -36,6 +36,7 @@ data class InventoryCurrent(
      */
     @Indexed
     val userId: String,
+    val accountId: String,
     /**
      * 对象类型: item(普通道具) | agent(角色关联物品)
      */

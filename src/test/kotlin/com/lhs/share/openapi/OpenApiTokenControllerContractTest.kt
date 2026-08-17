@@ -44,7 +44,7 @@ class OpenApiTokenControllerContractTest {
         mockMvc.perform(
             post("/user/open-api/token")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"scopes":[],"remark":null}"""),
+                .content("""{"account_id":"main","scopes":[],"remark":null}"""),
         )
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.status_code").value(400))
@@ -52,13 +52,13 @@ class OpenApiTokenControllerContractTest {
 
     @Test
     fun `token limit returns HTTP 429`() {
-        every { tokenService.generate("u1", listOf("inventory:read"), null) } throws
+        every { tokenService.generate("u1", "main", listOf("inventory:read"), null) } throws
             ApiResultException(429, "token limit reached")
 
         mockMvc.perform(
             post("/user/open-api/token")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"scopes":["inventory:read"],"remark":null}"""),
+                .content("""{"account_id":"main","scopes":["inventory:read"],"remark":null}"""),
         )
             .andExpect(status().isTooManyRequests)
             .andExpect(jsonPath("$.status_code").value(429))

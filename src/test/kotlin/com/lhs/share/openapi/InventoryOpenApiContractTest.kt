@@ -6,6 +6,7 @@ import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.service.inventory.EntityCatalogService
+import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtService
@@ -51,6 +52,9 @@ class InventoryOpenApiContractTest {
     lateinit var inventoryService: InventoryService
 
     @MockitoBean
+    lateinit var inventoryAccountService: InventoryAccountService
+
+    @MockitoBean
     lateinit var tokenService: OpenApiTokenService
 
     @MockitoBean
@@ -82,7 +86,12 @@ class InventoryOpenApiContractTest {
         assertEquals("bearer", scheme["scheme"].asText())
         assertTrue(root["servers"].first()["url"].asText().startsWith("https://"))
 
-        listOf("/open-api/inventory/current", "/open-api/inventory/import", "/open-api/inventory/export").forEach { path ->
+        listOf(
+            "/open-api/inventory/account",
+            "/open-api/inventory/current",
+            "/open-api/inventory/import",
+            "/open-api/inventory/export",
+        ).forEach { path ->
             val operation = root["paths"][path].properties().first().value
             assertTrue(operation["security"].any { it.has("OpenApiToken") })
             assertFalse(operation.path("parameters").any { it.path("name").asText() == "Authorization" })
@@ -97,13 +106,31 @@ class InventoryOpenApiContractTest {
         assertTrue(jwtImport["responses"].has("400"))
         assertTrue(jwtImport["responses"].has("409"))
         assertTrue(jwtImport["responses"].has("422"))
+        listOf(
+            "/v1/inventory/accounts",
+            "/v1/inventory/accounts/{accountId}",
+        ).forEach { assertTrue(root["paths"].has(it)) }
 
         val exportSchema = root.at("/paths/~1v1~1inventory~1export/get/responses/200/content/application~1json/schema")
         assertTrue(exportSchema["\$ref"].asText().endsWith("/InventoryExportResponse"))
         assertFalse(exportSchema["\$ref"].asText().contains("ApiResult"))
         assertTrue(root.at("/components/schemas/InventoryExportResponse/required").any { it.asText() == "producer" })
+        val exportVersion = root.at("/components/schemas/InventoryExportResponse/properties/version")
+        assertEquals(2, exportVersion["minimum"].asInt())
+        assertEquals(2, exportVersion["maximum"].asInt())
+        assertEquals(2, exportVersion["default"].asInt())
+        assertEquals(listOf(2), exportVersion["enum"].map { it.asInt() })
 
         assertEquals("date-time", root.at("/components/schemas/InventoryImportRequest/properties/exported_at/format").asText())
+        assertEquals(2, root.at("/components/schemas/InventoryImportRequest/properties/version/minimum").asInt())
+        assertEquals(1, root.at("/components/schemas/InventoryImportRequest/properties/accounts/minItems").asInt())
+        assertFalse(root.at("/components/schemas/InventoryImportRequest/required").any { it.asText() == "accounts" })
+        val importAccountRequired = root.at("/components/schemas/InventoryExchangeAccountDto/required")
+        assertTrue(importAccountRequired.any { it.asText() == "id" })
+        assertFalse(importAccountRequired.any { it.asText() == "name" })
+        val exportAccountRequired = root.at("/components/schemas/InventoryExportAccountDto/required")
+        assertTrue(exportAccountRequired.any { it.asText() == "id" })
+        assertTrue(exportAccountRequired.any { it.asText() == "name" })
         assertEquals(
             setOf("item", "agent"),
             root.at("/components/schemas/InventoryRecordRequest/properties/entity_type/enum").map { it.asText() }.toSet(),
@@ -132,6 +159,7 @@ class InventoryOpenApiContractTest {
         )
 
         val rewardRecord = root.at("/components/schemas/InventoryRewardRecord")
+        assertTrue(rewardRecord["required"].any { it.asText() == "account_id" })
         assertEquals(listOf("reward_delta"), rewardRecord.at("/properties/record_type/enum").map { it.asText() })
         assertEquals(1, rewardRecord.at("/properties/entries/minItems").asInt())
         assertTrue(rewardRecord["not"]["\$ref"].asText().endsWith("/InventorySnapshotScopePresent"))
@@ -146,6 +174,13 @@ class InventoryOpenApiContractTest {
         val listedSnapshot = root.at("/components/schemas/InventoryListedSnapshotRecord")
         assertEquals(listOf("listed"), listedSnapshot.at("/properties/snapshot_scope/enum").map { it.asText() })
         assertEquals(1, listedSnapshot.at("/properties/entries/minItems").asInt())
+        val exportParameters = root.at("/paths/~1v1~1inventory~1export/get/parameters")
+        assertTrue(exportParameters.any { it["name"].asText() == "account_id" })
+        assertTrue(exportParameters.any { it["name"].asText() == "scope" })
+        val openApiCurrentParameters = root.at("/paths/~1open-api~1inventory~1current/get/parameters")
+        assertFalse(openApiCurrentParameters.any { it["name"].asText() == "account_id" })
+        val openApiExportParameters = root.at("/paths/~1open-api~1inventory~1export/get/parameters")
+        assertFalse(openApiExportParameters.any { it["name"].asText() == "account_id" || it["name"].asText() == "scope" })
         val scopeItems = root.at("/components/schemas/OpenApiTokenGenerateRequest/properties/scopes/items")
         assertEquals("string", scopeItems["type"].asText())
         assertEquals(
@@ -154,13 +189,15 @@ class InventoryOpenApiContractTest {
         )
         val tokenList = root.at("/components/schemas/OpenApiTokenListItemDto/properties")
         assertTrue(tokenList.has("token_id"))
+        assertTrue(tokenList.has("account_id"))
+        assertTrue(tokenList.has("account_name"))
         assertTrue(tokenList.has("remark"))
         assertTrue(tokenList.has("scopes"))
         assertTrue(tokenList.has("created_at"))
         assertFalse(tokenList.has("last_used_at"))
         assertFalse(tokenList.has("token"))
         val tokenGenerateResponses = root.at("/paths/~1user~1open-api~1token/post/responses")
-        listOf("200", "400", "401", "429", "500").forEach { assertTrue(tokenGenerateResponses.has(it)) }
+        listOf("200", "400", "401", "404", "429", "500").forEach { assertTrue(tokenGenerateResponses.has(it)) }
         val tokenListResponses = root.at("/paths/~1user~1open-api~1tokens/get/responses")
         listOf("200", "401", "500").forEach { assertTrue(tokenListResponses.has(it)) }
         val tokenDelete = root.at("/paths/~1user~1open-api~1tokens~1{tokenId}/delete")

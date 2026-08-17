@@ -10,6 +10,7 @@ import java.time.Instant
  * acquisition_channel / effective_at / received_at / stock_effect。
  */
 data class InventoryRecordListItemDto(
+    val accountId: String,
     val recordId: String,
     val recordType: String,
     val entityType: String,
@@ -21,6 +22,7 @@ data class InventoryRecordListItemDto(
 ) {
     companion object {
         fun of(record: InventoryRecord): InventoryRecordListItemDto = InventoryRecordListItemDto(
+            accountId = record.accountId,
             recordId = record.recordId,
             recordType = record.recordType,
             entityType = record.entityType,

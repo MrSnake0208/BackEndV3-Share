@@ -23,6 +23,11 @@ data class OpenApiToken(
     @Indexed
     val userId: String,
     /**
+     * Token 绑定的库存子账号 id
+     */
+    @Indexed
+    val accountId: String,
+    /**
      * token 字符串(无连字符 UUID),唯一
      */
     @Indexed(unique = true)

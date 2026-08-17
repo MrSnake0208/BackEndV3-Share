@@ -14,24 +14,24 @@ import java.time.Instant
  * 保存已接收的交换记录,仅用于幂等上报、延迟上报处理与历史统计。
  * 一条记录只属于一种 entity_type,entries 内 id 不得重复。
  *
- * 幂等键:(userId, recordId) 全局唯一;不同用户相同 recordId 互不影响。
+ * 幂等键:(userId, accountId, recordId) 全局唯一;不同账号相同 recordId 互不影响。
  * recordId 建议使用 <platform>:<uuid> 形式(协议 5.1)。
  *
  * 时段获得量只聚合 record_type = "reward_delta" 的记录。
  */
 @Document("inventory_records")
 @CompoundIndex(
-    name = "idx_user_record_unique",
-    def = "{'userId': 1, 'recordId': 1}",
+    name = "idx_user_account_record_unique",
+    def = "{'userId': 1, 'accountId': 1, 'recordId': 1}",
     unique = true,
 )
 @CompoundIndex(
-    name = "idx_user_effective",
-    def = "{'userId': 1, 'effectiveAt': 1}",
+    name = "idx_user_account_effective",
+    def = "{'userId': 1, 'accountId': 1, 'effectiveAt': 1}",
 )
 @CompoundIndex(
-    name = "idx_user_type_effective",
-    def = "{'userId': 1, 'recordType': 1, 'effectiveAt': 1}",
+    name = "idx_user_account_type_effective",
+    def = "{'userId': 1, 'accountId': 1, 'recordType': 1, 'effectiveAt': 1}",
 )
 data class InventoryRecord(
     @Id
@@ -45,6 +45,7 @@ data class InventoryRecord(
      */
     @Indexed
     val userId: String,
+    val accountId: String,
     /**
      * 记录类型: reward_delta(奖励增量) | stock_snapshot(库存快照)
      */

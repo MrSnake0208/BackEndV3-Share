@@ -16,6 +16,8 @@ interface OpenApiTokenRepository : MongoRepository<OpenApiToken, String> {
      */
     fun findByUserIdOrderByCreateTimeDesc(userId: String): List<OpenApiToken>
 
+    fun findAllByUserIdAndAccountId(userId: String, accountId: String): List<OpenApiToken>
+
     /**
      * 按 token 查询,不存在时返回 null
      */
@@ -27,7 +29,9 @@ interface OpenApiTokenRepository : MongoRepository<OpenApiToken, String> {
     fun findByIdAndUserId(id: String, userId: String): OpenApiToken?
 
     /**
-     * 统计用户 token 数量(配额校验用)
+     * 统计子账号 token 数量(配额校验用)
      */
-    fun countByUserId(userId: String): Long
+    fun countByUserIdAndAccountId(userId: String, accountId: String): Long
+
+    fun deleteAllByUserIdAndAccountId(userId: String, accountId: String)
 }

@@ -1,7 +1,9 @@
 package com.lhs.share.openapi
 
 import com.lhs.share.controller.response.ApiResultException
+import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.OpenApiTokenRepository
+import com.lhs.share.hub.repository.entity.InventoryAccount
 import com.lhs.share.hub.repository.entity.OpenApiToken
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
@@ -19,18 +21,21 @@ import java.time.Instant
 
 class OpenApiTokenServiceTest {
     private val tokenRepository = mockk<OpenApiTokenRepository>()
+    private val accountRepository = mockk<InventoryAccountRepository>()
     private val redisCache = mockk<RedisCache>(relaxed = true)
-    private val service = OpenApiTokenService(tokenRepository, redisCache)
+    private val service = OpenApiTokenService(tokenRepository, accountRepository, redisCache)
 
     private fun entity(
         id: String = "token-id",
         userId: String = "u1",
+        accountId: String = "main",
         token: String = "tok123",
         scope: List<Int> = listOf(10001),
         remark: String? = "note",
     ) = OpenApiToken(
         id = id,
         userId = userId,
+        accountId = accountId,
         token = token,
         scope = scope,
         remark = remark,
@@ -39,33 +44,41 @@ class OpenApiTokenServiceTest {
 
     @Test
     fun `generation maps public scopes and returns the full token once`() {
-        every { tokenRepository.countByUserId("u1") } returns 0
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
         val saved = slot<OpenApiToken>()
         every { tokenRepository.save(capture(saved)) } answers { saved.captured }
 
-        val response = service.generate("u1", listOf("inventory:read", "inventory:write"), "script")
+        val response = service.generate("u1", "main", listOf("inventory:read", "inventory:write"), "script")
 
         assertEquals(32, response.token.length)
         assertEquals(listOf("inventory:read", "inventory:write"), response.scopes)
         assertEquals(listOf(10001, 10002), saved.captured.scope)
+        assertEquals("main", saved.captured.accountId)
+        assertEquals("大号", response.accountName)
         assertEquals(response.tokenId, saved.captured.id)
         verify { redisCache.setCache("open-api-token:${response.token}", any<TokenCacheData>(), 0) }
     }
 
     @Test
     fun `unknown public scope is rejected`() {
-        every { tokenRepository.countByUserId("u1") } returns 0
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
         val error = assertThrows(ApiResultException::class.java) {
-            service.generate("u1", listOf("inventory:admin"), null)
+            service.generate("u1", "main", listOf("inventory:admin"), null)
         }
         assertEquals(400, error.statusCode)
     }
 
     @Test
     fun `token limit is enforced`() {
-        every { tokenRepository.countByUserId("u1") } returns 5
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 5
         val error = assertThrows(ApiResultException::class.java) {
-            service.generate("u1", listOf("inventory:read"), null)
+            service.generate("u1", "main", listOf("inventory:read"), null)
         }
         assertEquals(429, error.statusCode)
     }
@@ -73,9 +86,9 @@ class OpenApiTokenServiceTest {
     @Test
     fun `valid bearer token with required scope returns owner`() {
         every { redisCache.getCache("open-api-token:tok123", TokenCacheData::class.java) } returns
-            TokenCacheData("u1", listOf(10002), 0)
+            TokenCacheData("u1", "main", listOf(10002), 0)
 
-        assertEquals("u1", service.validateAuthorization("Bearer tok123", OpenApiPermission.INVENTORY_WRITE))
+        assertEquals(OpenApiPrincipal("u1", "main"), service.validateAuthorization("Bearer tok123", OpenApiPermission.INVENTORY_WRITE))
     }
 
     @Test
@@ -98,7 +111,7 @@ class OpenApiTokenServiceTest {
         )
 
         every { redisCache.getCache("open-api-token:read-only", TokenCacheData::class.java) } returns
-            TokenCacheData("u1", listOf(10001), 0)
+            TokenCacheData("u1", "main", listOf(10001), 0)
         val forbidden = assertThrows(InventoryApiException::class.java) {
             service.validateAuthorization("Bearer read-only", OpenApiPermission.INVENTORY_WRITE)
         }
@@ -111,7 +124,7 @@ class OpenApiTokenServiceTest {
         every { redisCache.getCache("open-api-token:tok123", TokenCacheData::class.java) } returns null
         every { tokenRepository.findByToken("tok123") } returns entity(userId = "u2", scope = listOf(10003))
 
-        assertEquals("u2", service.validateAuthorization("Bearer tok123", OpenApiPermission.INVENTORY_EXPORT))
+        assertEquals(OpenApiPrincipal("u2", "main"), service.validateAuthorization("Bearer tok123", OpenApiPermission.INVENTORY_EXPORT))
     }
 
     @Test
@@ -126,14 +139,31 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `account revocation clears every bound token`() {
+        every { tokenRepository.findAllByUserIdAndAccountId("u1", "main") } returns
+            listOf(entity(id = "one", token = "tok1"), entity(id = "two", token = "tok2"))
+        every { tokenRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+
+        service.revokeByAccount("u1", "main")
+
+        verify { redisCache.delete("open-api-token:tok1") }
+        verify { redisCache.delete("open-api-token:tok2") }
+        verify { tokenRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+    }
+
+    @Test
     fun `token list uses DTO and never exposes secret or integer scopes`() {
         every { tokenRepository.findByUserIdOrderByCreateTimeDesc("u1") } returns listOf(
             entity(scope = listOf(10001, 10002, 10003)),
         )
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
 
         val item = service.list("u1").single()
 
         assertEquals("token-id", item.tokenId)
+        assertEquals("main", item.accountId)
+        assertEquals("大号", item.accountName)
         assertEquals(listOf("inventory:read", "inventory:write", "inventory:export"), item.scopes)
         assertFalse(item.toString().contains("tok123"))
         assertEquals(Instant.parse("2023-11-14T22:13:20Z"), item.createdAt)

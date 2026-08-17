@@ -24,6 +24,11 @@ private const val JSON = "application/json"
             content = [Content(mediaType = JSON, schema = Schema(implementation = ApiResult::class))],
         ),
         ApiResponse(
+            responseCode = "404",
+            description = "Inventory account not found",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = ApiResult::class))],
+        ),
+        ApiResponse(
             responseCode = "429",
             description = "Token limit reached",
             content = [Content(mediaType = JSON, schema = Schema(implementation = ApiResult::class))],

@@ -87,13 +87,19 @@ export JWT_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/login"
   | jq -er '.data.token')"
 ```
 
-使用 JWT 生成同时包含读、写、导出 scope 的本地 API Token：
+先创建库存子账号，再使用 JWT 为该账号生成同时包含读、写、导出 scope 的本地 API Token：
 
 ```bash
+export INVENTORY_ACCOUNT_ID="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/v1/inventory/accounts" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"本地烟测账号"}' \
+  | jq -er '.data.id')"
+
 export INVENTORY_API_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/open-api/token" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"scopes":["inventory:read","inventory:write","inventory:export"],"remark":"local inventory smoke"}' \
+  -d "{\"account_id\":\"$INVENTORY_ACCOUNT_ID\",\"scopes\":[\"inventory:read\",\"inventory:write\",\"inventory:export\"],\"remark\":\"local inventory smoke\"}" \
   | jq -er '.data.token')"
 ```
 
@@ -101,7 +107,7 @@ JWT 和完整 API Token 只保存在当前终端环境变量中，不要写入�
 
 ```bash
 curl --fail-with-body "$API_BASE_URL/user/open-api/tokens" \
-  -H "Authorization: Bearer $JWT_TOKEN" | jq '.data[] | {token_id, scopes, remark}'
+  -H "Authorization: Bearer $JWT_TOKEN" | jq '.data[] | {token_id, account_id, account_name, scopes, remark}'
 ```
 
 ### 库存联调 Smoke Test
@@ -113,7 +119,8 @@ export INVENTORY_API_TOKEN='replace-with-local-api-token'
 ./scripts/inventory-smoke.sh
 ```
 
-脚本默认访问 `http://127.0.0.1:8080`，也可通过 `API_BASE_URL` 覆盖。它从真实目录选择 item，使用唯一
+脚本默认访问 `http://127.0.0.1:8080`，也可通过 `API_BASE_URL` 覆盖。它从 Token 自动查询绑定的
+库存子账号，不要求另外配置 `account_id`。脚本从真实目录选择 item，使用唯一
 `record_id` 验证首次导入、幂等重传、409 冲突、当前库存、原始交换文档导出和直接回传导入；脚本不会打印 Token。
 
 ## 项目结构

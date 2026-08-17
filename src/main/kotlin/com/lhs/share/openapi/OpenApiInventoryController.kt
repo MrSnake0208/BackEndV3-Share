@@ -6,9 +6,11 @@ import com.lhs.share.config.doc.RequireOpenApiToken
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
+import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
+import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -36,7 +38,20 @@ import java.time.OffsetDateTime
 class OpenApiInventoryController(
     private val tokenService: OpenApiTokenService,
     private val inventoryService: InventoryService,
+    private val accountService: InventoryAccountService,
 ) {
+    @Operation(summary = "Token 绑定的库存子账号")
+    @InventoryReadResponses
+    @RequireOpenApiToken
+    @GetMapping("/inventory/account")
+    fun inventoryAccount(
+        @Parameter(hidden = true)
+        @RequestHeader(value = "Authorization", required = false) authorization: String?,
+    ): ApiResult<InventoryAccountResponse> {
+        val principal = tokenService.authenticateAuthorization(authorization)
+        return success(accountService.requireAccount(principal.userId, principal.accountId).let(InventoryAccountResponse::of))
+    }
+
     /**
      * 当前库存(第三方只读示例,需 API Token 且具备 inventory:read 权限)
      */
@@ -50,8 +65,8 @@ class OpenApiInventoryController(
         @Parameter(schema = Schema(allowableValues = ["item", "agent"]))
         @RequestParam(name = "entity_type", required = false) entityType: String?,
     ): ApiResult<List<InventoryCurrentResponse>> {
-        val userId = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_READ)
-        return success(inventoryService.current(userId, entityType))
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_READ)
+        return success(inventoryService.current(principal.userId, principal.accountId, entityType))
     }
 
     @Operation(summary = "导入库存/奖励")
@@ -62,8 +77,8 @@ class OpenApiInventoryController(
         @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false) authorization: String?,
         @Valid @RequestBody request: InventoryImportRequest,
     ): ApiResult<InventoryImportResult> {
-        val userId = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_WRITE)
-        return success(inventoryService.import(userId, request))
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_WRITE)
+        return success(inventoryService.import(principal.userId, principal.accountId, request))
     }
 
     @Operation(summary = "导出库存交换文档")
@@ -84,7 +99,14 @@ class OpenApiInventoryController(
                 "include must be current or current,rewards",
             )
         }
-        val userId = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_EXPORT)
-        return inventoryService.export(userId, include == "current,rewards", from?.toInstant(), to?.toInstant())
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_EXPORT)
+        return inventoryService.export(
+            principal.userId,
+            principal.accountId,
+            null,
+            include == "current,rewards",
+            from?.toInstant(),
+            to?.toInstant(),
+        )
     }
 }

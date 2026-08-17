@@ -14,12 +14,19 @@ import java.time.Instant
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class InventoryExportResponse(
     val format: String = "myshare-inventory-exchange",
-    val version: Int = 1,
+    @field:Schema(allowableValues = ["2"], minimum = "2", maximum = "2", defaultValue = "2")
+    val version: Int = 2,
     @field:Schema(format = "date-time")
     val exportedAt: Instant,
     val catalogVersion: String?,
     val producer: ProducerDto,
+    val accounts: List<InventoryExportAccountDto>,
     val records: List<InventoryExportRecordDto>,
+)
+
+data class InventoryExportAccountDto(
+    val id: String,
+    val name: String,
 )
 
 /**
@@ -27,6 +34,7 @@ data class InventoryExportResponse(
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class InventoryExportRecordDto(
+    val accountId: String,
     val recordId: String,
     @field:Schema(allowableValues = ["reward_delta", "stock_snapshot"])
     val recordType: String,

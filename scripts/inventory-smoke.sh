@@ -68,6 +68,12 @@ current_count() {
         "$body_file"
 }
 
+account_body="$tmp_dir/account.json"
+account_status="$(api_request GET "/open-api/inventory/account" "$account_body")"
+expect_status 200 "$account_status" "$account_body" "token account"
+expect_json "$account_body" '.status_code == 200 and (.data.id | type == "string")' "token account"
+inventory_account_id="$(jq -er '.data.id' "$account_body")"
+
 catalog_body="$tmp_dir/catalog.json"
 catalog_status="$(curl --silent --show-error --output "$catalog_body" --write-out '%{http_code}' \
     "$api_base_url/v1/inventory/catalog")"
@@ -82,7 +88,7 @@ record_id="local-smoke-$(date -u +%Y%m%dT%H%M%S%N)-$$"
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 before_body="$tmp_dir/current-before.json"
-before_status="$(api_request GET '/open-api/inventory/current?entity_type=item' "$before_body")"
+before_status="$(api_request GET "/open-api/inventory/current?entity_type=item" "$before_body")"
 expect_status 200 "$before_status" "$before_body" "current before import"
 expect_json "$before_body" '.status_code == 200 and (.data | type == "array")' "current before import"
 before_count="$(current_count "$before_body")"
@@ -96,13 +102,15 @@ jq -n \
     --arg effective_at "$now" \
     --arg item_id "$item_id" \
     --arg item_name "$item_name" \
+    --arg account_id "$inventory_account_id" \
     '{
         format: "myshare-inventory-exchange",
-        version: 1,
+        version: 2,
         exported_at: $exported_at,
         producer: {platform: "backendv3-local-smoke", version: "1"},
         catalog_version: $catalog_version,
         records: [{
+            account_id: $account_id,
             record_id: $record_id,
             record_type: "reward_delta",
             entity_type: "item",
@@ -118,7 +126,7 @@ expect_status 200 "$first_status" "$first_body" "first import"
 expect_json "$first_body" '.status_code == 200 and .data.accepted == 1 and .data.duplicates == 0' "first import"
 
 after_first_body="$tmp_dir/current-after-first.json"
-after_first_status="$(api_request GET '/open-api/inventory/current?entity_type=item' "$after_first_body")"
+after_first_status="$(api_request GET "/open-api/inventory/current?entity_type=item" "$after_first_body")"
 expect_status 200 "$after_first_status" "$after_first_body" "current after first import"
 after_first_count="$(current_count "$after_first_body")"
 if [[ "$after_first_count" -ne "$expected_count" ]]; then
@@ -132,7 +140,7 @@ expect_status 200 "$duplicate_status" "$duplicate_body" "duplicate import"
 expect_json "$duplicate_body" '.status_code == 200 and .data.accepted == 0 and .data.duplicates == 1' "duplicate import"
 
 after_duplicate_body="$tmp_dir/current-after-duplicate.json"
-after_duplicate_status="$(api_request GET '/open-api/inventory/current?entity_type=item' "$after_duplicate_body")"
+after_duplicate_status="$(api_request GET "/open-api/inventory/current?entity_type=item" "$after_duplicate_body")"
 expect_status 200 "$after_duplicate_status" "$after_duplicate_body" "current after duplicate"
 after_duplicate_count="$(current_count "$after_duplicate_body")"
 if [[ "$after_duplicate_count" -ne "$after_first_count" ]]; then
@@ -148,10 +156,10 @@ expect_status 409 "$conflict_status" "$conflict_body" "conflicting import"
 expect_json "$conflict_body" ".error.code == \"record_conflict\" and .error.record_id == \"$record_id\"" "conflicting import"
 
 export_body="$tmp_dir/export.json"
-export_status="$(api_request GET /open-api/inventory/export "$export_body")"
+export_status="$(api_request GET "/open-api/inventory/export" "$export_body")"
 expect_status 200 "$export_status" "$export_body" "inventory export"
 expect_json "$export_body" \
-    '.format == "myshare-inventory-exchange" and .version == 1 and (.records | length > 0) and (has("status_code") | not)' \
+    '.format == "myshare-inventory-exchange" and .version == 2 and (.accounts | length == 1) and (.records | length > 0) and (has("status_code") | not)' \
     "inventory export"
 
 roundtrip_body="$tmp_dir/import-roundtrip.json"

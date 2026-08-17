@@ -1,6 +1,7 @@
 package com.lhs.share.openapi
 
 import com.lhs.share.controller.response.ApiResultException
+import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.OpenApiTokenRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -19,16 +20,19 @@ import java.util.UUID
 @Service
 class OpenApiTokenService(
     private val tokenRepository: OpenApiTokenRepository,
+    private val accountRepository: InventoryAccountRepository,
     private val redisCache: RedisCache,
 ) {
     /**
-     * 生成第三方 API Token(每用户上限 [MAX_TOKENS_PER_USER] 个)
+     * 生成绑定库存子账号的第三方 API Token(每账号上限 [MAX_TOKENS_PER_ACCOUNT] 个)
      */
-    fun generate(userId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
-        if (tokenRepository.countByUserId(userId) >= MAX_TOKENS_PER_USER) {
+    fun generate(userId: String, accountId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
+        val account = accountRepository.findByUserIdAndAccountId(userId, accountId)
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "库存子账号不存在")
+        if (tokenRepository.countByUserIdAndAccountId(userId, accountId) >= MAX_TOKENS_PER_ACCOUNT) {
             throw ApiResultException(
                 HttpStatus.TOO_MANY_REQUESTS.value(),
-                "第三方API Token生成数量已达上限（最多${MAX_TOKENS_PER_USER}个）",
+                "该库存子账号的第三方API Token已达上限（最多${MAX_TOKENS_PER_ACCOUNT}个）",
             )
         }
 
@@ -46,13 +50,18 @@ class OpenApiTokenService(
         val now = Instant.now()
 
         // 写 Redis(不设过期,token 永不过期)
-        redisCache.setCache(redisKey(token), TokenCacheData(userId = userId, scope = scopeCodes, createTime = now.toEpochMilli()), 0)
+        redisCache.setCache(
+            redisKey(token),
+            TokenCacheData(userId = userId, accountId = accountId, scope = scopeCodes, createTime = now.toEpochMilli()),
+            0,
+        )
 
         // 落库
         tokenRepository.save(
             OpenApiToken(
                 id = tokenId,
                 userId = userId,
+                accountId = accountId,
                 token = token,
                 scope = scopeCodes,
                 remark = remark,
@@ -63,6 +72,8 @@ class OpenApiTokenService(
         return OpenApiTokenCreatedResponse(
             tokenId = tokenId,
             token = token,
+            accountId = accountId,
+            accountName = account.name,
             remark = remark,
             scopes = publicScopes,
             createdAt = now,
@@ -70,10 +81,10 @@ class OpenApiTokenService(
     }
 
     /**
-     * 校验 token 并校验权限,返回归属 userId。
+     * 校验 token 与权限,返回归属 userId 和 accountId。
      * token 空 → 401;Redis 无则回退 Mongo,仍无 → 401;scope 不含 requiredCode → 403。
      */
-    fun validateAuthorization(authorization: String?, permission: OpenApiPermission): String {
+    fun validateAuthorization(authorization: String?, permission: OpenApiPermission): OpenApiPrincipal {
         val token = authorization
             ?.takeIf { it.startsWith(BEARER_PREFIX) }
             ?.removePrefix(BEARER_PREFIX)
@@ -81,25 +92,33 @@ class OpenApiTokenService(
         return validate(token, permission.code)
     }
 
-    private fun validate(token: String?, requiredCode: Int): String {
+    fun authenticateAuthorization(authorization: String?): OpenApiPrincipal {
+        val token = authorization
+            ?.takeIf { it.startsWith(BEARER_PREFIX) }
+            ?.removePrefix(BEARER_PREFIX)
+            ?.trim()
+        return validate(token, null)
+    }
+
+    private fun validate(token: String?, requiredCode: Int?): OpenApiPrincipal {
         if (token.isNullOrBlank()) {
             throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is missing")
         }
         val cached = redisCache.getCache(redisKey(token), TokenCacheData::class.java)
         if (cached != null) {
-            if (!cached.scope.contains(requiredCode)) {
+            if (requiredCode != null && !cached.scope.contains(requiredCode)) {
                 throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
             }
-            return cached.userId
+            return OpenApiPrincipal(cached.userId, cached.accountId)
         }
 
         // 回退 Mongo(防 Redis 丢失)
         val entity = tokenRepository.findByToken(token)
             ?: throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is invalid")
-        if (!entity.scope.contains(requiredCode)) {
+        if (requiredCode != null && !entity.scope.contains(requiredCode)) {
             throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
         }
-        return entity.userId
+        return OpenApiPrincipal(entity.userId, entity.accountId)
     }
 
     /**
@@ -116,8 +135,13 @@ class OpenApiTokenService(
      * 列出当前用户的 token(按创建时间倒序)
      */
     fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map {
+        val accountName = checkNotNull(accountRepository.findByUserIdAndAccountId(userId, it.accountId)) {
+            "Token references a missing inventory account"
+        }.name
         OpenApiTokenListItemDto(
             tokenId = checkNotNull(it.id) { "Token document has no id" },
+            accountId = it.accountId,
+            accountName = accountName,
             remark = it.remark,
             scopes = it.scope.mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
                 .map { permission -> permission.key },
@@ -125,18 +149,26 @@ class OpenApiTokenService(
         )
     }
 
+    fun revokeByAccount(userId: String, accountId: String) {
+        val tokens = tokenRepository.findAllByUserIdAndAccountId(userId, accountId)
+        tokens.forEach { redisCache.delete(redisKey(it.token)) }
+        tokenRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+    }
+
     private fun redisKey(token: String): String = REDIS_KEY_PREFIX + token
 
     companion object {
         private const val REDIS_KEY_PREFIX = "open-api-token:"
         private const val BEARER_PREFIX = "Bearer "
-        private const val MAX_TOKENS_PER_USER = 5
+        private const val MAX_TOKENS_PER_ACCOUNT = 5
     }
 }
 
 data class OpenApiTokenCreatedResponse(
     val tokenId: String,
     val token: String,
+    val accountId: String,
+    val accountName: String,
     val remark: String?,
     val scopes: List<String>,
     val createdAt: Instant,
@@ -144,6 +176,8 @@ data class OpenApiTokenCreatedResponse(
 
 data class OpenApiTokenListItemDto(
     val tokenId: String,
+    val accountId: String,
+    val accountName: String,
     val remark: String?,
     val scopes: List<String>,
     val createdAt: Instant,
@@ -154,6 +188,12 @@ data class OpenApiTokenListItemDto(
  */
 data class TokenCacheData(
     val userId: String,
+    val accountId: String,
     val scope: List<Int>,
     val createTime: Long,
+)
+
+data class OpenApiPrincipal(
+    val userId: String,
+    val accountId: String,
 )

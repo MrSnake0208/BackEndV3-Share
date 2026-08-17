@@ -25,6 +25,10 @@
       "description": "用户管理"
     },
     {
+      "name": "local-readiness-controller",
+      "description": "Local profile readiness endpoint used by the integration workflow."
+    },
+    {
       "name": "库存",
       "description": "库存与奖励数据(HubBackend)"
     },
@@ -213,8 +217,18 @@
               }
             }
           },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "record_conflict",
+            "description": "record_conflict or account_name_conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -224,7 +238,187 @@
             }
           },
           "422": {
-            "description": "schema_validation_failed, unknown_entity_id, or unsupported_version",
+            "description": "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Jwt": []
+          }
+        ]
+      }
+    },
+    "/v1/inventory/accounts": {
+      "get": {
+        "tags": [
+          "库存"
+        ],
+        "summary": "库存子账号列表",
+        "operationId": "accounts",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResultListInventoryAccountResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "schema_validation_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Jwt": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "库存"
+        ],
+        "summary": "创建库存子账号",
+        "operationId": "createAccount",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResultInventoryAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "record_conflict or account_name_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
             "content": {
               "application/json": {
                 "schema": {
@@ -534,6 +728,16 @@
               }
             }
           },
+          "404": {
+            "description": "Inventory account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResult"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Token limit reached",
             "content": {
@@ -652,8 +856,18 @@
               }
             }
           },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "record_conflict",
+            "description": "record_conflict or account_name_conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -663,7 +877,7 @@
             }
           },
           "422": {
-            "description": "schema_validation_failed, unknown_entity_id, or unsupported_version",
+            "description": "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
             "content": {
               "application/json": {
                 "schema": {
@@ -871,6 +1085,196 @@
         }
       }
     },
+    "/v1/inventory/accounts/{accountId}": {
+      "delete": {
+        "tags": [
+          "库存"
+        ],
+        "summary": "删除库存子账号及其库存和流水",
+        "operationId": "deleteAccount",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResultBoolean"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "record_not_found or account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Jwt": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "库存"
+        ],
+        "summary": "修改库存子账号名称",
+        "operationId": "renameAccount",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResultInventoryAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "record_conflict or account_name_conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Jwt": []
+          }
+        ]
+      }
+    },
     "/version": {
       "get": {
         "tags": [
@@ -902,6 +1306,14 @@
         "description": "导入记录列表(需登录;entity_type/from/to 可选过滤,按 effective_at 倒序)。",
         "operationId": "records",
         "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "entity_type",
             "in": "query",
@@ -984,6 +1396,16 @@
               }
             }
           },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "schema_validation_failed",
             "content": {
@@ -1021,6 +1443,25 @@
         "description": "导出(需登录;默认仅当前状态 full 快照,include=rewards 时附带区间奖励流水)。",
         "operationId": "export",
         "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          },
           {
             "name": "include",
             "in": "query",
@@ -1083,6 +1524,16 @@
               }
             }
           },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "schema_validation_failed",
             "content": {
@@ -1121,6 +1572,14 @@
         "operationId": "current",
         "parameters": [
           {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "entity_type",
             "in": "query",
             "required": false,
@@ -1156,6 +1615,16 @@
           },
           "403": {
             "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1234,6 +1703,14 @@
         "operationId": "acquired",
         "parameters": [
           {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "entity_type",
             "in": "query",
             "required": true,
@@ -1287,6 +1764,16 @@
           },
           "403": {
             "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1475,6 +1962,26 @@
         }
       }
     },
+    "/ready": {
+      "get": {
+        "tags": [
+          "local-readiness-controller"
+        ],
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/open-api/inventory/export": {
       "get": {
         "tags": [
@@ -1537,6 +2044,16 @@
           },
           "403": {
             "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1618,6 +2135,92 @@
           },
           "403": {
             "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "schema_validation_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiToken": []
+          }
+        ]
+      }
+    },
+    "/open-api/inventory/account": {
+      "get": {
+        "tags": [
+          "OpenAPI Inventory"
+        ],
+        "summary": "Token 绑定的库存子账号",
+        "operationId": "inventoryAccount",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResultInventoryAccountResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account_not_found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1788,6 +2391,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1822,7 +2433,7 @@
             }
           },
           "404": {
-            "description": "record_not_found",
+            "description": "record_not_found or account_not_found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2325,9 +2936,33 @@
           "id"
         ]
       },
+      "InventoryExchangeAccountDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "InventoryFullSnapshotRecord": {
         "additionalProperties": true,
         "properties": {
+          "account_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
           "record_id": {
             "type": "string",
             "maxLength": 128,
@@ -2369,6 +3004,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -2390,8 +3026,8 @@
           "version": {
             "type": "integer",
             "format": "int32",
-            "maximum": 1,
-            "minimum": 1
+            "maximum": 2,
+            "minimum": 2
           },
           "exported_at": {
             "type": "string",
@@ -2405,6 +3041,14 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryExchangeAccountDto"
+            },
+            "maxItems": 1000,
+            "minItems": 1
           },
           "records": {
             "type": "array",
@@ -2426,6 +3070,12 @@
       "InventoryListedSnapshotRecord": {
         "additionalProperties": true,
         "properties": {
+          "account_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
           "record_id": {
             "type": "string",
             "maxLength": 128,
@@ -2468,6 +3118,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -2489,6 +3140,12 @@
           }
         ],
         "properties": {
+          "account_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
           "record_id": {
             "type": "string",
             "maxLength": 128,
@@ -2537,6 +3194,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -2575,6 +3233,12 @@
           "$ref": "#/components/schemas/InventorySnapshotScopePresent"
         },
         "properties": {
+          "account_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
           "record_id": {
             "type": "string",
             "maxLength": 128,
@@ -2611,6 +3275,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -2739,6 +3404,59 @@
           "history_only",
           "superseded",
           "warnings"
+        ]
+      },
+      "InventoryAccountRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ApiResultInventoryAccountResponse": {
+        "properties": {
+          "status_code": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InventoryAccountResponse"
+          }
+        },
+        "required": [
+          "status_code"
+        ]
+      },
+      "InventoryAccountResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "name",
+          "updated_at"
         ]
       },
       "PasswordUpdateDTO": {
@@ -2961,6 +3679,12 @@
       },
       "OpenApiTokenGenerateRequest": {
         "properties": {
+          "account_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
           "scopes": {
             "type": "array",
             "items": {
@@ -2979,6 +3703,7 @@
           }
         },
         "required": [
+          "account_id",
           "scopes"
         ]
       },
@@ -3024,6 +3749,12 @@
           "token": {
             "type": "string"
           },
+          "account_id": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
           "remark": {
             "type": "string"
           },
@@ -3039,6 +3770,8 @@
           }
         },
         "required": [
+          "account_id",
+          "account_name",
           "created_at",
           "scopes",
           "token",
@@ -3274,6 +4007,9 @@
       },
       "InventoryRecordListItemDto": {
         "properties": {
+          "account_id": {
+            "type": "string"
+          },
           "record_id": {
             "type": "string"
           },
@@ -3305,6 +4041,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -3330,6 +4067,20 @@
           "items"
         ]
       },
+      "InventoryExportAccountDto": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "InventoryExportEntryDto": {
         "properties": {
           "id": {
@@ -3350,6 +4101,9 @@
       },
       "InventoryExportRecordDto": {
         "properties": {
+          "account_id": {
+            "type": "string"
+          },
           "record_id": {
             "type": "string"
           },
@@ -3389,6 +4143,7 @@
           }
         },
         "required": [
+          "account_id",
           "effective_at",
           "entity_type",
           "entries",
@@ -3403,7 +4158,13 @@
           },
           "version": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "default": 2,
+            "enum": [
+              2
+            ],
+            "maximum": 2,
+            "minimum": 2
           },
           "exported_at": {
             "type": "string",
@@ -3415,6 +4176,12 @@
           "producer": {
             "$ref": "#/components/schemas/ProducerDto"
           },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryExportAccountDto"
+            }
+          },
           "records": {
             "type": "array",
             "items": {
@@ -3423,6 +4190,7 @@
           }
         },
         "required": [
+          "accounts",
           "exported_at",
           "format",
           "producer",
@@ -3455,6 +4223,9 @@
           "user_id": {
             "type": "string"
           },
+          "account_id": {
+            "type": "string"
+          },
           "entity_type": {
             "type": "string"
           },
@@ -3474,6 +4245,7 @@
           }
         },
         "required": [
+          "account_id",
           "entity_type",
           "entries",
           "updated_at",
@@ -3575,6 +4347,9 @@
       },
       "InventoryAcquiredResponse": {
         "properties": {
+          "account_id": {
+            "type": "string"
+          },
           "entity_type": {
             "type": "string"
           },
@@ -3595,10 +4370,31 @@
           }
         },
         "required": [
+          "account_id",
           "acquired",
           "entity_type",
           "from",
           "to"
+        ]
+      },
+      "ApiResultListInventoryAccountResponse": {
+        "properties": {
+          "status_code": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryAccountResponse"
+            }
+          }
+        },
+        "required": [
+          "status_code"
         ]
       },
       "ApiResultListMaaUserInfo": {
@@ -3646,6 +4442,12 @@
           "token_id": {
             "type": "string"
           },
+          "account_id": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
           "remark": {
             "type": "string"
           },
@@ -3661,6 +4463,8 @@
           }
         },
         "required": [
+          "account_id",
+          "account_name",
           "created_at",
           "scopes",
           "token_id"

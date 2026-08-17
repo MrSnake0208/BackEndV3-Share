@@ -2,12 +2,23 @@ package com.lhs.share.controller.request.openapi
 
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
+import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Pattern
+import jakarta.validation.constraints.Size
 
 /**
  * 生成第三方 API Token 请求
  */
 data class OpenApiTokenGenerateRequest(
+    @field:NotBlank(message = "account_id 不能为空")
+    @field:Size(min = 1, max = 64, message = "account_id 长度须在 1..64")
+    @field:Pattern(
+        regexp = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+        message = "account_id 格式无效",
+    )
+    val accountId: String,
+
     /**
      * Public stable scope keys. Integer permission codes remain an internal detail.
      */
