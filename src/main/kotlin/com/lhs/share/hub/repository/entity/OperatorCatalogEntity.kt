@@ -1,5 +1,7 @@
 package com.lhs.share.hub.repository.entity
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.mapping.Document
@@ -8,8 +10,10 @@ import java.time.Instant
 @Document("operator_catalog")
 @CompoundIndex(name = "idx_op_catalog_id_unique", def = "{'operatorId': 1}", unique = true)
 data class OperatorCatalogEntity(
-    @Id val id: String? = null,
-    val operatorId: String,
+    // Mongo 内部 _id，不应作为业务 id 暴露给客户端（前端契约里 id 即密探 id）。
+    @JsonIgnore @Id val id: String? = null,
+    // 序列化为 id，与目录契约 { id, name, ... } 一致；否则客户端会误用 Mongo _id。
+    @JsonProperty("id") val operatorId: String,
     val name: String,
     val alias: String? = null,
     val rarity: Int,

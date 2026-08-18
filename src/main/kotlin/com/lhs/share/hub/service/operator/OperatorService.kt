@@ -185,7 +185,22 @@ class OperatorService(
         const val GENERIC_GAME = "*"
         val SCOPES = setOf(FULL, LISTED)
         val GAMES = setOf("如鸢", "代号鸢")
-        val STONE_TYPES = setOf("main", "assist")
+        /**
+         * 星石槽位类型：
+         * - main / assist：旧协议兼容用（等价 main1 / assist1）
+         * - main1..3：3 个主星石槽位
+         * - assist1..3：3 个辅星石槽位
+         */
+        val STONE_TYPES = setOf(
+            "main",
+            "assist",
+            "main1",
+            "main2",
+            "main3",
+            "assist1",
+            "assist2",
+            "assist3",
+        )
         val ACCOUNT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     }
 }
