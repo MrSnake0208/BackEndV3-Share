@@ -27,6 +27,8 @@ data class OpenApiToken(
      */
     @Indexed
     val accountId: String,
+    /** Token domain; null is legacy INVENTORY. */
+    val kind: String? = null,
     /**
      * token 字符串(无连字符 UUID),唯一
      */

@@ -24,6 +24,9 @@ enum class OpenApiPermission(
      * 库存交换文档导出
      */
     INVENTORY_EXPORT(code = 10003, key = "inventory:export", desc = "库存数据导出"),
+    OPERATOR_READ(code = 20001, key = "operator:read", desc = "密探数据读取"),
+    OPERATOR_WRITE(code = 20002, key = "operator:write", desc = "密探数据写入"),
+    OPERATOR_EXPORT(code = 20003, key = "operator:export", desc = "密探数据导出"),
     ;
 
     companion object {

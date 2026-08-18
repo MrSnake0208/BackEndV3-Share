@@ -105,6 +105,7 @@ class SecurityConfig(
                 "/v3/api-docs/**",
                 "/swagger-ui/**",
                 "/v1/inventory/catalog",
+                "/v1/operator/catalog",
                 "/user/open-api/permissions",
                 "/open-api/**",
             )

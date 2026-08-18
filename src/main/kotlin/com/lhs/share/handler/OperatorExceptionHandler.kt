@@ -1,0 +1,22 @@
+package com.lhs.share.handler
+
+import com.lhs.share.hub.controller.operator.OperatorController
+import com.lhs.share.hub.controller.operator.response.OperatorError
+import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
+import com.lhs.share.hub.service.operator.OperatorApiException
+import com.lhs.share.openapi.OpenApiOperatorController
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.RestControllerAdvice
+
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RestControllerAdvice(assignableTypes=[OperatorController::class,OpenApiOperatorController::class])
+class OperatorExceptionHandler {
+    @ExceptionHandler(OperatorApiException::class) fun api(e: OperatorApiException) = ResponseEntity.status(e.status).body(OperatorErrorResponse(OperatorError(e.code,e.message,e.recordId,e.entryId)))
+    @ExceptionHandler(MethodArgumentNotValidException::class,HttpMessageNotReadableException::class) fun invalid(e: Exception) = ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(OperatorErrorResponse(OperatorError("schema_validation_failed",e.message ?: "Invalid request")))
+}
