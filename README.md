@@ -160,6 +160,14 @@ DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 （`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
 设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
 
+**把账号设为管理员**：管理员判定为 `maa_user.status >= 2`（`UserService.ADMIN_STATUS`），
+在 MaaBackend 数据库直接更新即可（建议先按 email 确认再改）：
+
+```bash
+mongosh 'mongodb://<host>:27017/MaaBackend' --quiet \
+  --eval 'db.maa_user.updateOne({ email: "someone@example.com" }, { $set: { status: 2 } })'
+```
+
 ## 项目结构
 
 沿用 MaaYuan-Share-Backend 的分层:

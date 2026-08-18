@@ -126,13 +126,7 @@ class OperatorService(
                         recordOf[id], id,
                     )
                 }
-                if (entry.level != base.level || entry.elite != base.elite) {
-                    throw apiError(
-                        HttpStatus.UNPROCESSABLE_ENTITY, SP_BUILD_MISMATCH,
-                        "SP operator " + id + " level/elite must match its base operator " + baseId,
-                        recordOf[id], id,
-                    )
-                }
+                // 数值无需在此校验：SP 的等级/修为在落库时由 applyRecord 以本体为准自动同步。
             }
         }
     }
@@ -144,16 +138,38 @@ class OperatorService(
         if (record.snapshotScope == FULL && current?.fullBaselineAt?.isAfter(item.effectiveAt) == true) return SUPERSEDED
         if (record.snapshotScope == LISTED && record.entries.all { entry -> current?.entries?.get(entry.id)?.listedBaselineAt?.isAfter(item.effectiveAt) == true }) return SUPERSEDED
         val now = Instant.now()
-        if (record.snapshotScope == FULL) {
-            val next = record.entries.associate { it.id to it.toCurrent(null) }.toMutableMap()
-            current?.entries?.forEach { (id, value) -> if (value.listedBaselineAt?.isAfter(item.effectiveAt) == true) next[id] = value }
-            currentRepository.save(OperatorCurrent(current?.id ?: key(userId, record.accountId, game), userId, record.accountId, game, item.effectiveAt, next, now))
+        val next: MutableMap<String, OperatorEntry> = if (record.snapshotScope == FULL) {
+            val m = record.entries.associate { it.id to it.toCurrent(null) }.toMutableMap()
+            current?.entries?.forEach { (id, value) -> if (value.listedBaselineAt?.isAfter(item.effectiveAt) == true) m[id] = value }
+            m
         } else {
-            val next = (current?.entries ?: emptyMap()).toMutableMap()
-            record.entries.forEach { next[it.id] = it.toCurrent(item.effectiveAt) }
-            currentRepository.save(OperatorCurrent(current?.id ?: key(userId, record.accountId, game), userId, record.accountId, game, current?.fullBaselineAt, next, now))
+            val m = (current?.entries ?: emptyMap()).toMutableMap()
+            record.entries.forEach { m[it.id] = it.toCurrent(item.effectiveAt) }
+            m
         }
+        // SP 形态同步：SP 的等级/修为（化极）始终以本体的值为准，覆盖客户端提交的数值。
+        syncSpFromBase(next, current)
+        val fullBaselineAt = if (record.snapshotScope == FULL) item.effectiveAt else current?.fullBaselineAt
+        currentRepository.save(OperatorCurrent(current?.id ?: key(userId, record.accountId, game), userId, record.accountId, game, fullBaselineAt, next, now))
         return APPLIED
+    }
+
+    /**
+     * SP 形态自动同步：对合并视图 `next` 里的每个 SP，取其本体（优先 `next` 内同快照
+     * 的本体，其次已存档的本体），把 SP 的 `level`/`elite` 覆盖为本体的值；`starLevel`、
+     * 命盘、星石等保持独立。找不到本体（例如删除本体记录后的重放）则拒绝，维持
+     * "必须有本体才能 SP"。
+     */
+    private fun syncSpFromBase(next: MutableMap<String, OperatorEntry>, current: OperatorCurrent?) {
+        next.keys.forEach { id ->
+            val baseId = catalogService.getOperator(id)?.spOf ?: return@forEach
+            val base = next[baseId] ?: current?.entries?.get(baseId)
+                ?: throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, SP_MISSING_BASE, "SP operator " + id + " requires its base operator " + baseId)
+            val sp = next.getValue(id)
+            if (sp.level != base.level || sp.elite != base.elite) {
+                next[id] = sp.copy(level = base.level, elite = base.elite)
+            }
+        }
     }
 
     fun current(userId: String, accountId: String, game: String?): List<OperatorCurrentResponse> {
@@ -223,9 +239,8 @@ class OperatorService(
         const val APPLIED = "applied"
         const val SUPERSEDED = "superseded"
         const val GENERIC_GAME = "*"
-        // SP 形态校验错误码：缺本体 / 等级或修为(化极)不一致
+        // SP 形态校验错误码：缺本体（等级/修为由本体重写为一致，不再单独报错）
         const val SP_MISSING_BASE = "sp_missing_base"
-        const val SP_BUILD_MISMATCH = "sp_build_mismatch"
         val SCOPES = setOf(FULL, LISTED)
         val GAMES = setOf("如鸢", "代号鸢")
         /**

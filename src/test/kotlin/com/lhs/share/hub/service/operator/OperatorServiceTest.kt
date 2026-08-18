@@ -13,6 +13,7 @@ import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.entity.OperatorAccount
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorCurrent
+import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.OperatorRecord
 import io.mockk.every
 import io.mockk.mockk
@@ -140,13 +141,13 @@ class OperatorServiceTest {
     private fun entry(id: String, level: Int, elite: Int = 0, starLevel: Int = 0) =
         OperatorEntryRequest(id = id, elite = elite, starLevel = starLevel, level = level)
 
-    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = null) = OperatorRecordRequest(
+    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = null, scope: String = "full") = OperatorRecordRequest(
         accountId = "acc1",
         recordId = recordId,
         recordType = "operator_snapshot",
         game = game,
         effectiveAt = "2026-08-16T10:00:00+08:00",
-        snapshotScope = "full",
+        snapshotScope = scope,
         entries = entries,
     )
 
@@ -184,6 +185,19 @@ class OperatorServiceTest {
         every { catalogService.getOperator(spId) } returns catalog(spId, baseId)
     }
 
+    /** 同上，但 current 仓库按 (account, game) 真实持久化，跨 record 之间可见前一条写入 */
+    private fun setUpSpRelationPersistent(baseId: String, spId: String) {
+        every { accountRepository.findAllByUserIdAndAccountIdIn(any(), any()) } returns
+            listOf(OperatorAccount(userId = "u1", accountId = "acc1", name = "账号"))
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } returns null
+        val store = mutableMapOf<String, OperatorCurrent>()
+        every { currentRepository.findByUserIdAndAccountIdAndGame(any(), any(), any()) } answers { store[arg<String>(2)] }
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { store[it.game] = it } }
+        every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
+        every { catalogService.getOperator(baseId) } returns catalog(baseId, null)
+        every { catalogService.getOperator(spId) } returns catalog(spId, baseId)
+    }
+
     @Test
     fun `SP without its base in the same snapshot is rejected`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
@@ -195,25 +209,29 @@ class OperatorServiceTest {
     }
 
     @Test
-    fun `SP with base but mismatched level is rejected`() {
+    fun `SP level is auto-synced from base instead of rejected`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        val e = assertThrows(OperatorApiException::class.java) {
-            service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 20, 1), entry("op1", 10, 1))))))
-        }
-        assertEquals("sp_build_mismatch", e.code)
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 20, 1), entry("op1", 10, 1))))))
+        val sp = saved!!.entries.getValue("op1")
+        assertEquals(20, sp.level) // 等级以本体为准
+        assertEquals(1, sp.elite)
     }
 
     @Test
-    fun `SP with base but mismatched elite cultivation is rejected`() {
+    fun `SP elite is auto-synced from base while star level stays independent`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        // 等级一致、修为(化极)不一致 => 拒绝；星级不同不影响
-        val e = assertThrows(OperatorApiException::class.java) {
-            service.import(
-                "u1",
-                importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 1, starLevel = 5), entry("op1", 10, 2, starLevel = 1))))),
-            )
-        }
-        assertEquals("sp_build_mismatch", e.code)
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        service.import(
+            "u1",
+            importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 1, starLevel = 5), entry("op1", 10, 2, starLevel = 1))))),
+        )
+        val sp = saved!!.entries.getValue("op1")
+        assertEquals(10, sp.level)
+        assertEquals(1, sp.elite)     // 修为(化极)以本体为准
+        assertEquals(1, sp.starLevel) // 星级保持独立
     }
 
     @Test
@@ -228,14 +246,41 @@ class OperatorServiceTest {
     }
 
     @Test
+    fun `updating base in a listed snapshot re-syncs the stored SP`() {
+        every { accountRepository.findAllByUserIdAndAccountIdIn(any(), any()) } returns
+            listOf(OperatorAccount(userId = "u1", accountId = "acc1", name = "账号"))
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } returns null
+        every { catalogService.getOperator("op2") } returns catalog("op2", null)
+        every { catalogService.getOperator("op1") } returns catalog("op1", "op2")
+        every { currentRepository.findByUserIdAndAccountIdAndGame(any(), any(), any()) } returns OperatorCurrent(
+            id = "u1:acc1:*", userId = "u1", accountId = "acc1", game = "*", fullBaselineAt = null,
+            entries = mapOf(
+                "op2" to OperatorEntry(elite = 1, starLevel = 5, level = 10),
+                "op1" to OperatorEntry(elite = 1, starLevel = 3, level = 10),
+            ),
+        )
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
+
+        // 只更新本体（listed 快照），SP 不随文档上传 —— 落库时 SP 自动跟本体同步
+        val result = service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 20, 2, starLevel = 6)), scope = "listed"))))
+        assertEquals(1, result.accepted)
+        val sp = saved!!.entries.getValue("op1")
+        assertEquals(20, sp.level)   // 本体升到 20，SP 自动同步
+        assertEquals(2, sp.elite)    // 修为同步
+        assertEquals(3, sp.starLevel) // 星级保持独立
+    }
+
+    @Test
     fun `SP and base split across records of the same snapshot are accepted`() {
-        setUpSpRelation(baseId = "op2", spId = "op1")
+        setUpSpRelationPersistent(baseId = "op2", spId = "op1")
         val result = service.import(
             "u1",
             importRequestWithRecords(
                 listOf(
-                    record(listOf(entry("op2", 10, 2)), recordId = "rec1"),
-                    record(listOf(entry("op1", 10, 2)), recordId = "rec2"),
+                    record(listOf(entry("op2", 10, 2)), recordId = "rec1", scope = "listed"),
+                    record(listOf(entry("op1", 10, 2)), recordId = "rec2", scope = "listed"),
                 ),
             ),
         )
