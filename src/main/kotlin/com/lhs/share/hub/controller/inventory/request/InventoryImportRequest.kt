@@ -100,6 +100,13 @@ data class InventoryRecordRequest(
     @field:Size(min = 1, max = 64, message = "acquisition_channel 长度须在 1..64")
     @field:JsonSetter(nulls = Nulls.FAIL)
     val acquisitionChannel: String? = null,
+    /**
+     * 派遣消耗体力数。acquisition_channel 包含“派遣”时必填，其他渠道不得携带。
+     */
+    @field:Min(value = 0, message = "stamina_cost 不能为负")
+    @field:Max(value = 2147483647, message = "stamina_cost 超出协议上限")
+    @field:JsonSetter(nulls = Nulls.FAIL)
+    val staminaCost: Long? = null,
     @field:NotNull(message = "effective_at 不能为空")
     @field:Schema(format = "date-time")
     val effectiveAt: String,

@@ -3174,6 +3174,12 @@
             "maxLength": 64,
             "minLength": 1
           },
+          "stamina_cost": {
+            "type": "integer",
+            "format": "int64",
+            "maximum": 2147483647,
+            "minimum": 0
+          },
           "effective_at": {
             "type": "string",
             "format": "date-time"
@@ -3261,6 +3267,13 @@
             "type": "string",
             "maxLength": 64,
             "minLength": 1
+          },
+          "stamina_cost": {
+            "type": "integer",
+            "format": "int64",
+            "description": "派遣消耗体力数；acquisition_channel 包含‘派遣’时必填，其他渠道不得携带",
+            "maximum": 2147483647,
+            "minimum": 0
           },
           "effective_at": {
             "type": "string",
@@ -4022,6 +4035,10 @@
           "acquisition_channel": {
             "type": "string"
           },
+          "stamina_cost": {
+            "type": "integer",
+            "format": "int64"
+          },
           "effective_at": {
             "type": "string",
             "format": "date-time"
@@ -4123,6 +4140,10 @@
           },
           "acquisition_channel": {
             "type": "string"
+          },
+          "stamina_cost": {
+            "type": "integer",
+            "format": "int64"
           },
           "effective_at": {
             "type": "string",
