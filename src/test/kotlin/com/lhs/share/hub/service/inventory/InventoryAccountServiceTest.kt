@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.inventory
 
 import com.lhs.share.hub.repository.InventoryAccountRepository
+import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.entity.InventoryAccount
@@ -25,6 +26,7 @@ class InventoryAccountServiceTest {
     private val accountRepository = mockk<InventoryAccountRepository>()
     private val currentRepository = mockk<InventoryCurrentRepository>()
     private val recordRepository = mockk<InventoryRecordRepository>()
+    private val favoriteRepository = mockk<InventoryAgentFavoriteRepository>()
     private val tokenService = mockk<OpenApiTokenService>()
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
@@ -33,7 +35,14 @@ class InventoryAccountServiceTest {
             override fun rollback(status: TransactionStatus) = Unit
         },
     )
-    private val service = InventoryAccountService(accountRepository, currentRepository, recordRepository, tokenService, transactionTemplate)
+    private val service = InventoryAccountService(
+        accountRepository,
+        currentRepository,
+        recordRepository,
+        favoriteRepository,
+        tokenService,
+        transactionTemplate,
+    )
 
     @Test
     fun `create list and rename preserve stable account id`() {
@@ -59,6 +68,7 @@ class InventoryAccountServiceTest {
         assertEquals("改名", renamed.name)
         verify(exactly = 0) { currentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { recordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { favoriteRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 
     @Test
@@ -93,6 +103,7 @@ class InventoryAccountServiceTest {
             InventoryAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
         every { currentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { recordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { tokenService.revokeByAccount("u1", "main") } just runs
         every { accountRepository.deleteById("mongo-id") } just runs
 
@@ -100,6 +111,7 @@ class InventoryAccountServiceTest {
 
         verify(exactly = 1) { currentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { recordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
     }

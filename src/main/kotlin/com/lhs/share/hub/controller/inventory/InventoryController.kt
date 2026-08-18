@@ -13,6 +13,8 @@ import com.lhs.share.hub.controller.inventory.request.InventoryAccountRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
@@ -20,6 +22,7 @@ import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAccountService
+import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -32,6 +35,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -53,6 +57,7 @@ import java.time.OffsetDateTime
 class InventoryController(
     private val inventoryService: InventoryService,
     private val accountService: InventoryAccountService,
+    private val favoriteService: InventoryAgentFavoriteService,
     private val catalogService: EntityCatalogService,
     private val helper: AuthenticationHelper,
 ) {
@@ -86,6 +91,35 @@ class InventoryController(
         accountService.delete(helper.requireUserId(), accountId)
         return success(true)
     }
+
+    @Operation(summary = "密探特别关注列表")
+    @InventoryReadResponses
+    @RequireJwt
+    @GetMapping("/agent-favorites")
+    fun agentFavorites(@RequestParam(name = "account_id") accountId: String): ApiResult<InventoryAgentFavoriteListResponse> =
+        success(favoriteService.list(helper.requireUserId(), accountId))
+
+    @Operation(summary = "特别关注密探")
+    @InventoryWriteResponses
+    @RequireJwt
+    @PutMapping("/agent-favorites/{agentId}")
+    fun addAgentFavorite(
+        @PathVariable agentId: String,
+        @RequestParam(name = "account_id") accountId: String,
+    ): ApiResult<InventoryAgentFavoriteResponse> = success(
+        favoriteService.add(helper.requireUserId(), accountId, agentId),
+    )
+
+    @Operation(summary = "取消特别关注密探")
+    @InventoryWriteResponses
+    @RequireJwt
+    @DeleteMapping("/agent-favorites/{agentId}")
+    fun removeAgentFavorite(
+        @PathVariable agentId: String,
+        @RequestParam(name = "account_id") accountId: String,
+    ): ApiResult<InventoryAgentFavoriteResponse> = success(
+        favoriteService.remove(helper.requireUserId(), accountId, agentId),
+    )
 
     /**
      * 导入库存/奖励交换文档(需登录;整份校验,幂等)。

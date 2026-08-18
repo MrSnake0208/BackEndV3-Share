@@ -1,5 +1,6 @@
 package com.lhs.share.openapi
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -7,10 +8,13 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.InventoryExceptionHandler
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.repository.entity.InventoryAccount
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAccountService
+import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.mockk.every
@@ -26,6 +30,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delet
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -35,6 +40,7 @@ import java.time.Instant
 class InventoryControllerContractTest {
     private val inventoryService = mockk<InventoryService>()
     private val accountService = mockk<InventoryAccountService>()
+    private val favoriteService = mockk<InventoryAgentFavoriteService>()
     private val tokenService = mockk<OpenApiTokenService>()
     private val catalogService = mockk<EntityCatalogService>()
     private val helper = mockk<AuthenticationHelper>()
@@ -45,10 +51,11 @@ class InventoryControllerContractTest {
         val mapper = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         val validator = LocalValidatorFactoryBean().apply { afterPropertiesSet() }
         mockMvc = MockMvcBuilders
             .standaloneSetup(
-                InventoryController(inventoryService, accountService, catalogService, helper),
+                InventoryController(inventoryService, accountService, favoriteService, catalogService, helper),
                 OpenApiInventoryController(tokenService, inventoryService, accountService),
             )
             .setControllerAdvice(InventoryExceptionHandler())
@@ -159,6 +166,83 @@ class InventoryControllerContractTest {
         verify { accountService.list("jwt-user") }
         verify { accountService.rename("jwt-user", "main", "改名") }
         verify { accountService.delete("jwt-user", "main") }
+    }
+
+    @Test
+    fun `JWT agent favorite endpoints use snake case responses and authenticated owner`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        every { favoriteService.list("jwt-user", "acc_a") } returns
+            InventoryAgentFavoriteListResponse("acc_a", listOf("char_038_luxun", "char_102_jianyong"))
+        every { favoriteService.add("jwt-user", "acc_a", "char_102_jianyong") } returns
+            InventoryAgentFavoriteResponse("acc_a", "char_102_jianyong", true)
+        every { favoriteService.remove("jwt-user", "acc_a", "char_102_jianyong") } returns
+            InventoryAgentFavoriteResponse("acc_a", "char_102_jianyong", false)
+
+        mockMvc.perform(get("/v1/inventory/agent-favorites").param("account_id", "acc_a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.account_id").value("acc_a"))
+            .andExpect(jsonPath("$.data.agent_ids[0]").value("char_038_luxun"))
+        mockMvc.perform(put("/v1/inventory/agent-favorites/char_102_jianyong").param("account_id", "acc_a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.agent_id").value("char_102_jianyong"))
+            .andExpect(jsonPath("$.data.favorite").value(true))
+        mockMvc.perform(delete("/v1/inventory/agent-favorites/char_102_jianyong").param("account_id", "acc_a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.favorite").value(false))
+
+        verify { favoriteService.list("jwt-user", "acc_a") }
+        verify { favoriteService.add("jwt-user", "acc_a", "char_102_jianyong") }
+        verify { favoriteService.remove("jwt-user", "acc_a", "char_102_jianyong") }
+        verify(exactly = 0) { inventoryService.current(any(), any(), any()) }
+        verify(exactly = 0) { inventoryService.acquired(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { inventoryService.listRecords(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { inventoryService.export(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `agent inventory ignores forged catalog metadata fields`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        every { inventoryService.import("jwt-user", any()) } returns InventoryImportResult(accepted = 1)
+        val forgedDocument =
+            """
+            {
+              "format": "myshare-inventory-exchange",
+              "version": 2,
+              "exported_at": "2026-08-16T10:00:00Z",
+              "producer": { "platform": "test" },
+              "records": [{
+                "account_id": "acc_a",
+                "record_id": "agent:forged",
+                "record_type": "stock_snapshot",
+                "entity_type": "agent",
+                "effective_at": "2026-08-16T10:00:00Z",
+                "snapshot_scope": "full",
+                "entries": [{
+                  "id": "char_102_jianyong",
+                  "name": "伪造名称",
+                  "count": 12,
+                  "rarity": 1,
+                  "prof": "伪造属性",
+                  "sub_prof": "伪造职业"
+                }]
+              }]
+            }
+            """.trimIndent()
+
+        mockMvc.perform(post("/v1/inventory/import").contentType(MediaType.APPLICATION_JSON).content(forgedDocument))
+            .andExpect(status().isOk)
+
+        verify {
+            inventoryService.import(
+                "jwt-user",
+                match { request ->
+                    request.records.single().entries.single().let { entry ->
+                        entry.id == "char_102_jianyong" && entry.name == "伪造名称" && entry.count == 12L
+                    }
+                },
+            )
+        }
+        verify(exactly = 0) { catalogService.catalog() }
     }
 
     @Test
