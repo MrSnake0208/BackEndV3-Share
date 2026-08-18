@@ -54,8 +54,10 @@ data class OperatorCatalogEntryResponse(
     val subProf: List<String>,
     val games: List<String>,
     val discs: List<OperatorDiscCatalog>,
+    // SP 形态指向其"本体"密探 id（如 史子眇·赴烛 -> 史子眇）；普通密探为 null。
+    val spOf: String? = null,
 ) {
-    companion object { fun of(e: OperatorCatalogEntity) = OperatorCatalogEntryResponse(e.operatorId, e.name, e.alias, e.rarity, e.prof, e.subProf, e.games, e.discs) }
+    companion object { fun of(e: OperatorCatalogEntity) = OperatorCatalogEntryResponse(e.operatorId, e.name, e.alias, e.rarity, e.prof, e.subProf, e.games, e.discs, e.spOf) }
 }
 data class OperatorCatalogResponse(val format: String = "myshare-operator-catalog", val version: Int = 1, val catalogVersion: String, val operators: List<OperatorCatalogEntryResponse>)
 data class OperatorErrorResponse(val error: OperatorError)

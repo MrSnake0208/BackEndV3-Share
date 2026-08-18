@@ -22,6 +22,8 @@ data class OperatorCatalogEntity(
     val games: List<String>,
     val discs: List<OperatorDiscCatalog>,
     val starStones: List<OperatorStarStoneCatalog>,
+    // SP 形态的"本体"密探 id（如 史子眇·赴烛 -> 史子眇）；普通密探为 null。
+    val spOf: String? = null,
     val catalogVersion: String,
     val createdAt: Instant = Instant.now(),
 )

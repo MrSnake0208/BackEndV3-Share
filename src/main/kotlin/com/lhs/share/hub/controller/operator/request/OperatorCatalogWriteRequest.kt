@@ -32,6 +32,8 @@ data class OperatorCatalogWriteRequest(
     @JsonProperty("starStones")
     @field:Valid
     val starStones: List<OperatorCatalogStarStoneRequest> = emptyList(),
+    @JsonProperty("spOf")
+    val spOf: String? = null,
 )
 
 data class OperatorCatalogDiscRequest(

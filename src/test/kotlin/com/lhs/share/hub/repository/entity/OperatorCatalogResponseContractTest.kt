@@ -50,4 +50,31 @@ class OperatorCatalogResponseContractTest {
         assertFalse(json.contains("主星石"), json)
         assertFalse(json.contains("辅星石"), json)
     }
+
+    @Test
+    fun `catalog entry exposes the base operator id of an SP form`() {
+        val json = objectMapper.writeValueAsString(
+            OperatorCatalogResponse(
+                catalogVersion = "2026-08-16",
+                operators = listOf(
+                    OperatorCatalogEntryResponse.of(
+                        OperatorCatalogEntity(
+                            operatorId = "char_085_shizimiaosp",
+                            name = "史子眇·赴烛",
+                            rarity = 5,
+                            prof = listOf("混沌"),
+                            subProf = emptyList(),
+                            games = listOf("如鸢", "代号鸢"),
+                            discs = emptyList(),
+                            starStones = emptyList(),
+                            spOf = "char_023_shizimiao",
+                            catalogVersion = "2026-08-16",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        assertTrue(json.contains("\"spOf\":\"char_023_shizimiao\""), json)
+        assertFalse(json.contains("operatorId"), json)
+    }
 }

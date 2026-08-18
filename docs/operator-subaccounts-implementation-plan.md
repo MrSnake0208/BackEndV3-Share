@@ -36,6 +36,12 @@
 沿用 6.0/6.1 术语：`operator`（密探，`char_xxx` 稳定 ID）、`build`（养成状态）、
 `game`（如鸢/代号鸢/空）、`operator_snapshot`、`full`/`listed`、养成基线。
 
+**约定（后续扩展不得违反）**：
+- **SP 形态关系（`spOf`）属于服务端目录字典，不属于交换协议**。客户端
+  `entries` 载荷中**不得**上报 `spOf`，本协议（v2）也不承载该字段；SP→本体 的
+  判定只依据服务端 `operator_catalog`（与公共图鉴 `GET /v1/operator/catalog`）。
+  该字段只属于目录与公共图鉴层，见 §3.3 与 §5。
+
 ---
 
 ## 2. 关键设计决策
@@ -100,6 +106,16 @@
 **starStone**：`name`（可选）、`type`（必填 `main`/`assist`）、`level`（必填 ≥0）。
 同一密探内 `type` 不得重复；`type` 非法 → `invalid_star_stone`。
 
+> ⚠️ **`spOf` 不在本协议中（约定写死）**：SP 形态 → 本体的关系（如 史子眇·赴烛
+> → 史子眇）是游戏静态属性，属于服务端目录字典 `operator_catalog` 与公共图鉴
+> `GET /v1/operator/catalog`，**不在 entry/record 载荷里**。本协议 v2 的
+> `entries` 只含养成字段（`id/name/alias/rarity/prof/subProf/games/
+> elite/starLevel/level/discs/starStones`），**客户端不得上传 `spOf`**；接收方
+> 也一律以自身目录判定 SP，并在导入时校验「本体必须同文档 + 等级/修为一致」
+> （`sp_missing_base` / `sp_build_mismatch`，见 §3.5）。
+> 后续新增 SP 只扩目录，不升级协议载荷；若确需让载荷携带该关系，属 v2 → v3 的
+> major 升级，且必须同步明确定义"载荷声明与目录冲突时以谁为准"。
+
 ### 3.4 完整示例
 
 ```json
@@ -158,7 +174,12 @@
 12. starStones：`type` 枚举（`invalid_star_stone`）、不重复。
 13. 幂等：`(userId, accountId, recordId)` 已存在且正文相同 → 计入 `duplicates`（成功）；
     已存在但正文不同 → `record_conflict`（409）。
-14. 整份校验失败 → 整份拒绝，不做部分写入（与库存一致）。
+14. **SP 形态**（目录 `spOf` 非空的密探，如 史子眇·赴烛）：
+    在**同一份导入文档、同一 `(account_id, game)` 分组**内必须有本体条目，且
+    SP 的 `level`（等级）与 `elite`（修为/化极）必须与本体一致。
+    缺本体 → `sp_missing_base`；等级/修为不一致 → `sp_build_mismatch`（均 422，整份拒绝）。
+    `starLevel`（星级）、命盘、星石不受此约束（SP 与本体相互独立）。
+15. 整份校验失败 → 整份拒绝，不做部分写入（与库存一致）。
 
 > "正文相同"判定：直接比较协议业务字段（record_type / game / snapshot_scope /
 > effective_at / entries 的 id、养成字段、discs、starStones，name/alias 计入比较）。
@@ -188,6 +209,8 @@
 | 422 | `unknown_operator_id` | 目录不存在该 char_xxx |
 | 422 | `unknown_account_id` | account_id 不属于当前用户 |
 | 422 | `invalid_game` | game 不支持或 entry.games 不含该版本 |
+| 422 | `sp_missing_base` | SP 形态在文档内无本体（同 account,game） |
+| 422 | `sp_build_mismatch` | SP 的等级/修为(化极)与本体不一致 |
 | 422 | `invalid_disc` / `invalid_star_stone` | 命盘/星石字段非法 |
 | 422 | `unsupported_version` | 协议版本不支持 |
 | 429 | `account_limit_reached` | 子账号数量达上限 |
@@ -309,6 +332,7 @@ data class OperatorCatalogEntity(
     val games: List<String>,
     val discs: List<OperatorDiscCatalog>,        // 该密探全部可用命盘
     val starStones: List<OperatorStarStoneCatalog>, // 星石槽位配置
+    val spOf: String? = null,                    // SP 形态的本体密探 id（如 史子眇·赴烛 -> 史子眇）
     val catalogVersion: String,
     val createdAt: Instant = Instant.now(),
 )
@@ -340,9 +364,15 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
   "starStones": [
     { "name": "主星石", "type": "main" },
     { "name": "辅星石", "type": "assist" }
-  ]
+  ],
+  "spOf": "char_023_shizimiao"
 }
 ```
+
+> `spOf`（可选）：SP 形态密探指向其"本体"密探 id。普通密探省略或为 null。
+> 目前目录中 `char_085_shizimiaosp`（史子眇·赴烛 -> `char_023_shizimiao`）与
+> `char_084_chendengsp`（陈登·黍王 -> `char_013_chendeng`）为此形态。
+> **该字段只存在于目录（并暴露于公共图鉴）层，不属于交换协议 v2 的载荷**，详见 §1.3 与 §3.3。
 
 > ⚠️ **前置依赖**：此资源需要从 MaaYuan 仓库的 `agent/operators.json` 完整版获取
 > （协议 6.0 §4.3 明确目录来源）。若实现时拿不到完整版，可用 `inventory/operators.json`
@@ -368,7 +398,7 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
 | 端点 | `GET /v1/operator/catalog` | `/v1/operator/**`（除 catalog）+ `/open-api/operator/**` |
 | 认证 | **无需登录**（`SecurityConfig.URL_PERMIT_ALL`） | 登录 JWT，或绑定子账号的 OpenAPI token |
 | 数据来源 | `operator_catalog` 集合（全局字典） | `operator_current` / `operator_records`（用户数据） |
-| 包含的信息 | 密探静态属性：`id/name/alias/rarity/prof/subProf/games` + `discs`（该密探**全部可用**命盘目录）。**无 starStones** —— 星石属于用户养成档案，不进公共图鉴 | 用户编辑的养成状态：`elite/starLevel/level` + **已装备的** `discs`（装备选择） + **已装备的** `starStones`（含等级 `level`） |
+| 包含的信息 | 密探静态属性：`id/name/alias/rarity/prof/subProf/games` + `discs`（该密探**全部可用**命盘目录）+ `spOf`（SP 形态的本体 id，普通密探为 null）。**无 starStones** —— 星石属于用户养成档案，不进公共图鉴 | 用户编辑的养成状态：`elite/starLevel/level` + **已装备的** `discs`（装备选择） + **已装备的** `starStones`（含等级 `level`） |
 | 明确不含 | **任何用户数据**：不返回用户装备的星石等级、命盘装备、养成数值、`account_id`、基线时间 | 公开目录（不返回其他用户数据） |
 
 要点：

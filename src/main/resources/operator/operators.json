@@ -8396,7 +8396,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "spOf": "char_013_chendeng"
   },
   {
     "id": "char_085_shizimiaosp",
@@ -8496,7 +8497,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "spOf": "char_023_shizimiao"
   },
   {
     "id": "char_086_kuaiyue",
