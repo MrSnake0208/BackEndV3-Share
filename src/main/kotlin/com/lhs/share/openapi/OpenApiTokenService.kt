@@ -36,7 +36,12 @@ class OpenApiTokenService(
         val kinds = permissions.map { if (it.key.startsWith("operator:")) OPERATOR else INVENTORY }.toSet()
         if (kinds.size != 1) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不能同时包含库存与密探权限")
         val kind = kinds.single()
-        val accountName = if (kind == OPERATOR) operatorAccountRepository?.findByUserIdAndAccountId(userId, accountId)?.name else accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
+        val accountName =
+            if (kind == OPERATOR) {
+                operatorAccountRepository?.findByUserIdAndAccountId(userId, accountId)?.name
+            } else {
+                accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
+            }
         if (accountName == null) throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
         if (tokenRepository.countByUserIdAndAccountId(userId, accountId) >= MAX_TOKENS_PER_ACCOUNT) {
             throw ApiResultException(
@@ -137,26 +142,35 @@ class OpenApiTokenService(
     /**
      * 列出当前用户的 token(按创建时间倒序)
      */
-    fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map {
-        val accountName = if (it.kind == OPERATOR) {
-            checkNotNull(operatorAccountRepository?.findByUserIdAndAccountId(userId, it.accountId)) { "Token references a missing operator account" }.name
-        } else {
-            checkNotNull(accountRepository.findByUserIdAndAccountId(userId, it.accountId)) { "Token references a missing inventory account" }.name
-        }
+    fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map { token ->
+        val accountName =
+            if (token.kind == OPERATOR) {
+                checkNotNull(operatorAccountRepository?.findByUserIdAndAccountId(userId, token.accountId)) {
+                    "Token references a missing operator account"
+                }.name
+            } else {
+                checkNotNull(accountRepository.findByUserIdAndAccountId(userId, token.accountId)) {
+                    "Token references a missing inventory account"
+                }.name
+            }
         OpenApiTokenListItemDto(
-            tokenId = checkNotNull(it.id) { "Token document has no id" },
-            accountId = it.accountId,
+            tokenId = checkNotNull(token.id) { "Token document has no id" },
+            accountId = token.accountId,
             accountName = accountName,
-            remark = it.remark,
-            scopes = it.scope.mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
+            remark = token.remark,
+            scopes = token.scope
+                .mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
                 .map { permission -> permission.key },
-            createdAt = it.createTime,
+            createdAt = token.createTime,
         )
     }
 
     fun revokeByAccount(userId: String, accountId: String, kind: String = INVENTORY) {
         val tokens = tokenRepository.findAllByUserIdAndAccountId(userId, accountId).filter { (it.kind ?: INVENTORY) == kind }
-        tokens.forEach { redisCache.delete(redisKey(it.token)); tokenRepository.delete(it) }
+        tokens.forEach {
+            redisCache.delete(redisKey(it.token))
+            tokenRepository.delete(it)
+        }
     }
 
     private fun redisKey(token: String): String = REDIS_KEY_PREFIX + token

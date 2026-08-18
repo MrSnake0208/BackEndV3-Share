@@ -141,6 +141,25 @@ DELETE /v1/inventory/agent-favorites/{agentId}?account_id=acc_xxx
 GET 返回按 ID 升序排列的 `agent_ids`。PUT 与 DELETE 均幂等，所有操作先按 JWT 当前用户校验库存子账号归属。
 部署前运行 [密探关注迁移](docs/inventory-agent-favorites-migration.md)。
 
+### 密探公共图鉴与管理员管理
+
+密探公共 API = 公共图鉴 `GET /v1/operator/catalog`（无需登录，全局只读密探目录：有哪些密探、长什么样），
+与个人密探数据严格分离——`/v1/operator/**`（除 catalog）与 `/open-api/operator/**` 只能访问自己的养成档案。
+
+**管理员（用户 `status >= 2`）管理公共图鉴的数据面**，即在 `/v1/admin/operator-catalog/**` 上增删改查
+`operator_catalog` 字典，改动即时反映到公共图鉴与导入校验：
+
+```text
+GET    /v1/admin/operator-catalog                 # 管理端全量（含 starStones / catalogVersion / createdAt）
+POST   /v1/admin/operator-catalog                 # 新增密探（Body 见 OperatorCatalogWriteRequest）
+PUT    /v1/admin/operator-catalog/{operatorId}    # 更新（path/body id 必须一致）
+DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
+```
+
+以上端点需要 JWT 登录且必须是管理员，否则 403；失败统一返回 `OperatorErrorResponse`
+（`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
+设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
+
 ## 项目结构
 
 沿用 MaaYuan-Share-Backend 的分层:
