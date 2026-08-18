@@ -142,13 +142,13 @@ class OpenApiTokenServiceTest {
     fun `account revocation clears every bound token`() {
         every { tokenRepository.findAllByUserIdAndAccountId("u1", "main") } returns
             listOf(entity(id = "one", token = "tok1"), entity(id = "two", token = "tok2"))
-        every { tokenRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { tokenRepository.delete(any()) } just runs
 
         service.revokeByAccount("u1", "main")
 
         verify { redisCache.delete("open-api-token:tok1") }
         verify { redisCache.delete("open-api-token:tok2") }
-        verify { tokenRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 2) { tokenRepository.delete(any()) }
     }
 
     @Test

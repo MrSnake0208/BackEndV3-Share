@@ -123,6 +123,24 @@ export INVENTORY_API_TOKEN='replace-with-local-api-token'
 库存子账号，不要求另外配置 `account_id`。脚本从真实目录选择 item，使用唯一
 `record_id` 验证首次导入、幂等重传、409 冲突、当前库存、原始交换文档导出和直接回传导入；脚本不会打印 Token。
 
+### 密探心纸库存与特别关注
+
+密探心纸沿用库存交换协议 v2，不提供单独的库存写接口。使用 `POST /v1/inventory/import` 导入
+`record_type=stock_snapshot`、`entity_type=agent` 的记录，再通过
+`GET /v1/inventory/current?account_id=...&entity_type=agent` 查询。`full` 快照替换该子账号的完整密探库存，
+`listed` 只覆盖列出的密探。条目中的 `name` 仅作为流水展示值，库存写入不会修改公共目录。
+
+特别关注只支持普通登录 JWT，不属于 OpenAPI Token scope，也不进入库存流水或交换档案 v2：
+
+```text
+GET    /v1/inventory/agent-favorites?account_id=acc_xxx
+PUT    /v1/inventory/agent-favorites/{agentId}?account_id=acc_xxx
+DELETE /v1/inventory/agent-favorites/{agentId}?account_id=acc_xxx
+```
+
+GET 返回按 ID 升序排列的 `agent_ids`。PUT 与 DELETE 均幂等，所有操作先按 JWT 当前用户校验库存子账号归属。
+部署前运行 [密探关注迁移](docs/inventory-agent-favorites-migration.md)。
+
 ## 项目结构
 
 沿用 MaaYuan-Share-Backend 的分层:

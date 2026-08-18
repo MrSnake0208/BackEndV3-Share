@@ -7,6 +7,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAccountService
+import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtService
@@ -53,6 +54,9 @@ class InventoryOpenApiContractTest {
 
     @MockitoBean
     lateinit var inventoryAccountService: InventoryAccountService
+
+    @MockitoBean
+    lateinit var inventoryAgentFavoriteService: InventoryAgentFavoriteService
 
     @MockitoBean
     lateinit var tokenService: OpenApiTokenService
@@ -109,7 +113,14 @@ class InventoryOpenApiContractTest {
         listOf(
             "/v1/inventory/accounts",
             "/v1/inventory/accounts/{accountId}",
+            "/v1/inventory/agent-favorites",
+            "/v1/inventory/agent-favorites/{agentId}",
         ).forEach { assertTrue(root["paths"].has(it)) }
+
+        val favoritePath = root.at("/paths/~1v1~1inventory~1agent-favorites~1{agentId}")
+        assertTrue(favoritePath["put"]["security"].any { it.has("Jwt") })
+        assertTrue(favoritePath["delete"]["security"].any { it.has("Jwt") })
+        assertFalse(favoritePath["put"]["security"].any { it.has("OpenApiToken") })
 
         val exportSchema = root.at("/paths/~1v1~1inventory~1export/get/responses/200/content/application~1json/schema")
         assertTrue(exportSchema["\$ref"].asText().endsWith("/InventoryExportResponse"))
@@ -184,7 +195,14 @@ class InventoryOpenApiContractTest {
         val scopeItems = root.at("/components/schemas/OpenApiTokenGenerateRequest/properties/scopes/items")
         assertEquals("string", scopeItems["type"].asText())
         assertEquals(
-            setOf("inventory:read", "inventory:write", "inventory:export"),
+            setOf(
+                "inventory:read",
+                "inventory:write",
+                "inventory:export",
+                "operator:read",
+                "operator:write",
+                "operator:export",
+            ),
             scopeItems["enum"].map { it.asText() }.toSet(),
         )
         val tokenList = root.at("/components/schemas/OpenApiTokenListItemDto/properties")

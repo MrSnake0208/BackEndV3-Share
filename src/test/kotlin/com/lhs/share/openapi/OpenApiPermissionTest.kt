@@ -38,12 +38,13 @@ class OpenApiPermissionTest {
     fun listAll_returns_key_code_desc_entries() {
         val list = OpenApiPermission.listAll()
 
-        assertEquals(3, list.size)
+        assertEquals(6, list.size)
         val read = list.first { it.scope == "inventory:read" }
         assertEquals("库存数据读取", read.description)
 
         val write = list.first { it.scope == "inventory:write" }
         assertEquals("库存数据写入", write.description)
         assertEquals("inventory:export", list.first { it.scope == "inventory:export" }.scope)
+        assertEquals("密探数据读取", list.first { it.scope == "operator:read" }.description)
     }
 }

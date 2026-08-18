@@ -175,6 +175,101 @@ class InventoryServiceTest {
     }
 
     @Test
+    fun `agent full and listed snapshots follow inventory semantics`() {
+        service.import(
+            "u1",
+            document(
+                agentSnapshot(
+                    "agent-full-1",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "main",
+                    entry("char_038_luxun", 4),
+                    entry("char_102_jianyong", 8),
+                ),
+                agentSnapshot(
+                    "agent-listed",
+                    "2026-08-16T11:00:00Z",
+                    "listed",
+                    "main",
+                    entry("char_102_jianyong", 12),
+                ),
+            ),
+        )
+
+        assertEquals(4, count("u1", "char_038_luxun", entityType = "agent"))
+        assertEquals(12, count("u1", "char_102_jianyong", entityType = "agent"))
+
+        service.import(
+            "u1",
+            document(
+                agentSnapshot(
+                    "agent-full-2",
+                    "2026-08-16T12:00:00Z",
+                    "full",
+                    "main",
+                    entry("char_102_jianyong", 3),
+                ),
+            ),
+        )
+
+        assertEquals(0, count("u1", "char_038_luxun", entityType = "agent"))
+        assertEquals(3, count("u1", "char_102_jianyong", entityType = "agent"))
+        assertEquals(
+            3,
+            service.current("u1", "main", "agent").single().entries.getValue("char_102_jianyong").count,
+        )
+    }
+
+    @Test
+    fun `agent snapshots do not affect items or another account`() {
+        service.import(
+            "u1",
+            document(
+                snapshot("item-full", "2026-08-16T10:00:00Z", "full", entry("baijinbi", 9)),
+                agentSnapshot(
+                    "agent-main",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "main",
+                    entry("char_102_jianyong", 5),
+                ),
+                agentSnapshot(
+                    "agent-alt",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "alt",
+                    entry("char_102_jianyong", 17),
+                ),
+            ),
+        )
+
+        assertEquals(9, count("u1", "baijinbi"))
+        assertEquals(5, count("u1", "char_102_jianyong", "main", "agent"))
+        assertEquals(17, count("u1", "char_102_jianyong", "alt", "agent"))
+    }
+
+    @Test
+    fun `agent snapshot name remains record display data only`() {
+        service.import(
+            "u1",
+            document(
+                agentSnapshot(
+                    "agent-forged-name",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "main",
+                    InventoryEntryRequest("char_102_jianyong", "伪造名称", 12),
+                ),
+            ),
+        )
+
+        assertEquals(12, count("u1", "char_102_jianyong", entityType = "agent"))
+        assertEquals("伪造名称", records[Triple("u1", "main", "agent-forged-name")]!!.entries.single().name)
+        verify(exactly = 1) { catalogService.exists("agent", "char_102_jianyong") }
+    }
+
+    @Test
     fun `delayed reward is history only and newer listed value survives older full snapshot`() {
         service.import("u1", document(snapshot("full-1", "2026-08-16T11:00:00Z", "full", entry("baijinbi", 10))))
         val delayed = service.import("u1", document(reward("late", "2026-08-16T10:00:00Z", "baijinbi", 4)))
@@ -528,10 +623,26 @@ class InventoryServiceTest {
         entries = entries.toList(),
     )
 
+    private fun agentSnapshot(
+        id: String,
+        at: String,
+        scope: String,
+        accountId: String,
+        vararg entries: InventoryEntryRequest,
+    ): InventoryRecordRequest = InventoryRecordRequest(
+        accountId = accountId,
+        recordId = id,
+        recordType = "stock_snapshot",
+        entityType = "agent",
+        effectiveAt = at,
+        snapshotScope = scope,
+        entries = entries.toList(),
+    )
+
     private fun entry(id: String, count: Long) = InventoryEntryRequest(id, null, count)
 
-    private fun count(userId: String, entityId: String, accountId: String = "main"): Long =
-        currents[Triple(userId, accountId, "item")]?.entries?.get(entityId)?.count ?: 0
+    private fun count(userId: String, entityId: String, accountId: String = "main", entityType: String = "item"): Long =
+        currents[Triple(userId, accountId, entityType)]?.entries?.get(entityId)?.count ?: 0
 
     private fun storedRecord(id: String, recordId: String, effectiveAt: String) = InventoryRecord(
         id = id,

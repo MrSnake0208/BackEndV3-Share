@@ -84,10 +84,19 @@ class EntityCatalogService(
     }
 
     private fun seed() {
-        itemsResource()?.let { upsertAll(parseCatalog(it, "item")) }
-        operatorsResource()?.let { upsertAll(parseCatalog(it, "agent")) }
+        seedFromResources(itemsResource(), operatorsResource())
         catalogVersion = resolveCatalogVersion()
         log.info { "对象目录播种完成,版本: $catalogVersion" }
+    }
+
+    /**
+     * 两份资源均完整通过校验后才开始写入，失败时保留数据库中的上一份有效目录。
+     */
+    internal fun seedFromResources(itemResource: Resource?, agentResource: Resource?) {
+        val items = itemResource?.let { parseCatalog(it, "item") }.orEmpty()
+        val agents = agentResource?.let { parseCatalog(it, "agent") }.orEmpty()
+        upsertAll(items)
+        upsertAll(agents)
     }
 
     private fun currentCatalogVersion(): String = catalogVersion.ifEmpty { resolveCatalogVersion() }
@@ -104,14 +113,17 @@ class EntityCatalogService(
     private fun parseCatalog(resource: Resource, entityType: String): List<EntityCatalogEntity> {
         val root: JsonNode = objectMapper.readTree(resource.inputStream)
         if (!root.isArray) {
-            log.warn { "目录资源不是 JSON 数组,跳过: ${resource.description}" }
-            return emptyList()
+            throw IllegalStateException("Catalog resource is not a JSON array: ${resource.description}")
         }
         val version = resolveCatalogVersion()
-        return root.mapNotNull { node ->
+        val entities = root.map { node ->
             val id = node.get("id")?.asText()?.takeIf { it.isNotBlank() }
-                ?: return@mapNotNull null
-            val name = node.get("name")?.asText()?.takeIf { it.isNotBlank() } ?: id
+                ?: throw IllegalStateException("Catalog entry id is required: ${resource.description}")
+            if (!idPattern(entityType).matches(id)) {
+                throw IllegalStateException("Invalid $entityType catalog id: $id")
+            }
+            val name = node.get("name")?.asText()?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("Catalog entry name is required: $id")
             EntityCatalogEntity(
                 entityType = entityType,
                 entityId = id,
@@ -119,6 +131,11 @@ class EntityCatalogService(
                 catalogVersion = version,
             )
         }
+        val duplicate = entities.groupingBy { it.entityId }.eachCount().entries.firstOrNull { it.value > 1 }?.key
+        if (duplicate != null) {
+            throw IllegalStateException("Duplicate $entityType catalog id: $duplicate")
+        }
+        return entities
     }
 
     /**
@@ -149,5 +166,13 @@ class EntityCatalogService(
 
     companion object {
         private val ENTITY_TYPES = listOf("item", "agent")
+        private val ITEM_ID = Regex("^[a-z0-9_]+$")
+        private val AGENT_ID = Regex("^char_[0-9]+_[a-z0-9_]+$")
+
+        private fun idPattern(entityType: String): Regex = when (entityType) {
+            "item" -> ITEM_ID
+            "agent" -> AGENT_ID
+            else -> throw IllegalArgumentException("Unsupported catalog entity type: $entityType")
+        }
     }
 }
