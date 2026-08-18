@@ -111,8 +111,9 @@
 > `GET /v1/operator/catalog`，**不在 entry/record 载荷里**。本协议 v2 的
 > `entries` 只含养成字段（`id/name/alias/rarity/prof/subProf/games/
 > elite/starLevel/level/discs/starStones`），**客户端不得上传 `spOf`**；接收方
-> 也一律以自身目录判定 SP，并在导入时校验「本体必须同文档 + 等级/修为一致」
-> （`sp_missing_base` / `sp_build_mismatch`，见 §3.5）。
+> 也一律以自身目录判定 SP，并在导入时要求「本体必须同文档」
+> （`sp_missing_base`）。SP 的等级/修为 **不由客户端提交值决定**：落库时接收方
+> 以本体的值自动同步覆盖（见 §3.5）。
 > 后续新增 SP 只扩目录，不升级协议载荷；若确需让载荷携带该关系，属 v2 → v3 的
 > major 升级，且必须同步明确定义"载荷声明与目录冲突时以谁为准"。
 
@@ -175,10 +176,12 @@
 13. 幂等：`(userId, accountId, recordId)` 已存在且正文相同 → 计入 `duplicates`（成功）；
     已存在但正文不同 → `record_conflict`（409）。
 14. **SP 形态**（目录 `spOf` 非空的密探，如 史子眇·赴烛）：
-    在**同一份导入文档、同一 `(account_id, game)` 分组**内必须有本体条目，且
-    SP 的 `level`（等级）与 `elite`（修为/化极）必须与本体一致。
-    缺本体 → `sp_missing_base`；等级/修为不一致 → `sp_build_mismatch`（均 422，整份拒绝）。
-    `starLevel`（星级）、命盘、星石不受此约束（SP 与本体相互独立）。
+    在**同一份导入文档、同一 `(account_id, game)` 分组**内必须有本体条目，
+    缺本体 → `sp_missing_base`（422，整份拒绝）。
+    **SP 的 `level`（等级）与 `elite`（修为/化极）不采纳客户端提交值**：落库时
+    接收方以本体为准自动同步覆盖（`applyRecord` 归一化），因此 SP 落库后必然与
+    本体一致；`starLevel`（星级）、命盘、星石保持独立（SP 与本体相互独立）。
+    已存档的 SP 在后续只更新本体的快照中也会被同步（无需每次随本体一起上传）。
 15. 整份校验失败 → 整份拒绝，不做部分写入（与库存一致）。
 
 > "正文相同"判定：直接比较协议业务字段（record_type / game / snapshot_scope /
@@ -210,7 +213,6 @@
 | 422 | `unknown_account_id` | account_id 不属于当前用户 |
 | 422 | `invalid_game` | game 不支持或 entry.games 不含该版本 |
 | 422 | `sp_missing_base` | SP 形态在文档内无本体（同 account,game） |
-| 422 | `sp_build_mismatch` | SP 的等级/修为(化极)与本体不一致 |
 | 422 | `invalid_disc` / `invalid_star_stone` | 命盘/星石字段非法 |
 | 422 | `unsupported_version` | 协议版本不支持 |
 | 429 | `account_limit_reached` | 子账号数量达上限 |
