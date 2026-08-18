@@ -73,7 +73,7 @@ class OperatorService(
         if (restricted != null && referenced != setOf(restricted)) throw apiError(HttpStatus.FORBIDDEN, "account_scope_mismatch", "Document contains records outside the API token account")
         val owned = accountRepository.findAllByUserIdAndAccountIdIn(userId, referenced).map { it.accountId }.toSet()
         referenced.firstOrNull { it !in owned }?.let { throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_account_id", "Unknown account_id: " + it) }
-        return request.records.map { record ->
+        val validated = request.records.map { record ->
             if (record.recordId.isBlank() || record.recordId.length > 128) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "record_id length must be 1..128", record.recordId)
             if (record.recordType != RECORD_TYPE || record.snapshotScope !in SCOPES) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Invalid operator record enum", record.recordId)
             if (record.snapshotScope == LISTED && record.entries.isEmpty()) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "listed snapshots require at least one entry", record.recordId)
@@ -95,6 +95,46 @@ class OperatorService(
             }
             Validated(record, effective)
         }.sortedWith(compareBy<Validated> { it.record.accountId }.thenBy { it.effectiveAt })
+        validateSpRelationships(validated.map { it.record })
+        return validated
+    }
+
+    /**
+     * SP 形态（如 史子眇·赴烛 -> 史子眇）校验：
+     * 在同一份导入文档、同一 (account_id, game) 分组内，SP 必须有"本体"，且
+     * 等级(level) 与 修为(elite) 必须与本体一致。违反则整份文档拒绝。
+     */
+    private fun validateSpRelationships(records: List<OperatorRecordRequest>) {
+        if (records.isEmpty()) return
+        records.groupBy { it.accountId to (it.game ?: GENERIC_GAME) }.forEach { (_, group) ->
+            // 组内 records 已按 (accountId, effectiveAt) 升序，同一 id 后者覆盖前者 => 每个密探的最新值。
+            val latestById = LinkedHashMap<String, OperatorEntryRequest>()
+            val recordOf = LinkedHashMap<String, String>()
+            group.forEach { record ->
+                record.entries.forEach { entry ->
+                    latestById[entry.id] = entry
+                    recordOf[entry.id] = record.recordId
+                }
+            }
+            latestById.forEach { (id, entry) ->
+                val baseId = catalogService.getOperator(id)?.spOf ?: return@forEach
+                val base = latestById[baseId]
+                if (base == null) {
+                    throw apiError(
+                        HttpStatus.UNPROCESSABLE_ENTITY, SP_MISSING_BASE,
+                        "SP operator " + id + " requires its base operator " + baseId + " in the same snapshot",
+                        recordOf[id], id,
+                    )
+                }
+                if (entry.level != base.level || entry.elite != base.elite) {
+                    throw apiError(
+                        HttpStatus.UNPROCESSABLE_ENTITY, SP_BUILD_MISMATCH,
+                        "SP operator " + id + " level/elite must match its base operator " + baseId,
+                        recordOf[id], id,
+                    )
+                }
+            }
+        }
     }
 
     private fun applyRecord(userId: String, item: Validated): String {
@@ -183,6 +223,9 @@ class OperatorService(
         const val APPLIED = "applied"
         const val SUPERSEDED = "superseded"
         const val GENERIC_GAME = "*"
+        // SP 形态校验错误码：缺本体 / 等级或修为(化极)不一致
+        const val SP_MISSING_BASE = "sp_missing_base"
+        const val SP_BUILD_MISMATCH = "sp_build_mismatch"
         val SCOPES = setOf(FULL, LISTED)
         val GAMES = setOf("如鸢", "代号鸢")
         /**

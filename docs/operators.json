@@ -7725,7 +7725,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "spOf": "char_013_chendeng"
     },
     {
       "id": "char_085_shizimiaosp",
@@ -7817,7 +7818,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "spOf": "char_023_shizimiao"
     },
     {
       "id": "char_086_kuaiyue",

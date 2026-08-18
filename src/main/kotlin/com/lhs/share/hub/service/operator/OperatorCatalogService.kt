@@ -78,6 +78,14 @@ class OperatorCatalogService(
         if (stoneTypes.toSet().size != stoneTypes.size) {
             throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_star_stone", "star stone type must be unique")
         }
+        request.spOf?.let { base ->
+            if (base == request.id) {
+                throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "spOf cannot reference itself")
+            }
+            if (getOperator(base) == null) {
+                throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_operator_id", "spOf base operator not found: " + base)
+            }
+        }
     }
 
     private fun OperatorCatalogWriteRequest.toEntity(
@@ -95,6 +103,7 @@ class OperatorCatalogService(
         games = games,
         discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
         starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
+        spOf = spOf,
         catalogVersion = catalogVersion,
         createdAt = createdAt,
     )
@@ -124,6 +133,7 @@ class OperatorCatalogService(
                             games = node.path("games").map { it.asText() }.ifEmpty { SUPPORTED_GAMES },
                             discs = node.path("discs").map { OperatorDiscCatalog(it.path("ot_name").asText(), it.get("abbreviation")?.asText(), it.get("color")?.asText(), it.get("desp")?.asText()) },
                             starStones = node.path("starStones").map { OperatorStarStoneCatalog(it.path("name").asText(), it.path("type").asText()) }.ifEmpty { DEFAULT_STONES },
+                            spOf = node.get("spOf")?.asText(),
                             catalogVersion = version,
                         ))
                     }
