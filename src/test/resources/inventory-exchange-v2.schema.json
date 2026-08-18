@@ -84,10 +84,21 @@
         "record_type": { "const": "reward_delta" },
         "entity_type": { "$ref": "#/$defs/entityType" },
         "acquisition_channel": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "stamina_cost": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
         "effective_at": { "$ref": "#/$defs/effectiveAt" },
         "snapshot_scope": false,
         "entries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/rewardEntry" } }
       },
+      "allOf": [
+        {
+          "if": {
+            "required": ["acquisition_channel"],
+            "properties": { "acquisition_channel": { "pattern": "派遣" } }
+          },
+          "then": { "required": ["stamina_cost"] },
+          "else": { "not": { "required": ["stamina_cost"] } }
+        }
+      ],
       "additionalProperties": true
     },
     "fullSnapshotRecord": {
@@ -99,6 +110,7 @@
         "record_type": { "const": "stock_snapshot" },
         "entity_type": { "$ref": "#/$defs/entityType" },
         "acquisition_channel": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "stamina_cost": false,
         "effective_at": { "$ref": "#/$defs/effectiveAt" },
         "snapshot_scope": { "const": "full" },
         "entries": { "type": "array", "items": { "$ref": "#/$defs/snapshotEntry" } }
@@ -114,6 +126,7 @@
         "record_type": { "const": "stock_snapshot" },
         "entity_type": { "$ref": "#/$defs/entityType" },
         "acquisition_channel": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "stamina_cost": false,
         "effective_at": { "$ref": "#/$defs/effectiveAt" },
         "snapshot_scope": { "const": "listed" },
         "entries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/snapshotEntry" } }

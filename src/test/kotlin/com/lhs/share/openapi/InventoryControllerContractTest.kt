@@ -79,7 +79,13 @@ class InventoryControllerContractTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.accepted").value(1))
 
-        verify { inventoryService.import("token-user", "main", match { it.records.single().recordId == "test:1" }) }
+        verify {
+            inventoryService.import(
+                "token-user",
+                "main",
+                match { it.records.single().let { record -> record.recordId == "test:1" && record.staminaCost == 80L } },
+            )
+        }
     }
 
     @Test
@@ -293,6 +299,8 @@ class InventoryControllerContractTest {
             "record_id": "test:1",
             "record_type": "reward_delta",
             "entity_type": "item",
+            "acquisition_channel": "派遣",
+            "stamina_cost": 80,
             "effective_at": "2026-08-16T10:00:00Z",
             "entries": [{ "id": "baijinbi", "count": 1 }]
           }]

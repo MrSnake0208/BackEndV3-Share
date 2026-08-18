@@ -158,6 +158,22 @@ class InventoryServiceTest {
     }
 
     @Test
+    fun `dispatch reward requires and persists stamina cost`() {
+        val dispatch = reward("dispatch", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(
+            acquisitionChannel = "自动派遣",
+            staminaCost = 80,
+        )
+
+        service.import("u1", document(dispatch))
+
+        assertEquals(80, records[Triple("u1", "main", "dispatch")]?.staminaCost)
+        val conflict = assertThrows(InventoryApiException::class.java) {
+            service.import("u1", document(dispatch.copy(staminaCost = 40)))
+        }
+        assertEquals("record_conflict", conflict.code)
+    }
+
+    @Test
     fun `reward full and listed snapshots follow inventory semantics`() {
         service.import(
             "u1",
@@ -472,6 +488,15 @@ class InventoryServiceTest {
             document(reward("id", "2026-08-16T10:00:00Z", "", 1)),
             document(reward("count", "2026-08-16T10:00:00Z", "baijinbi", 0)),
             document(reward("channel", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(acquisitionChannel = "")),
+            document(reward("dispatch-missing", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(acquisitionChannel = "派遣")),
+            document(reward("non-dispatch", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(staminaCost = 80)),
+            document(
+                reward("negative-stamina", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(
+                    acquisitionChannel = "派遣",
+                    staminaCost = -1,
+                ),
+            ),
+            document(snapshot("snapshot-stamina", "2026-08-16T10:00:00Z", "full").copy(staminaCost = 80)),
             document(
                 reward("duplicate", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(
                     entries = listOf(entry("baijinbi", 1), entry("baijinbi", 2)),
@@ -495,7 +520,15 @@ class InventoryServiceTest {
     @Test
     fun `export is a complete protocol document and can be reimported unchanged`() {
         service.import("u1", document(snapshot("full", "2026-08-16T10:00:00Z", "full", entry("baijinbi", 8))))
-        service.import("u1", document(reward("reward", "2026-08-16T11:00:00Z", "baijinbi", 2)))
+        service.import(
+            "u1",
+            document(
+                reward("reward", "2026-08-16T11:00:00Z", "baijinbi", 2).copy(
+                    acquisitionChannel = "派遣",
+                    staminaCost = 80,
+                ),
+            ),
+        )
 
         val exported = service.export("u1", accountId = "main", scope = null, includeRewards = true, from = null, to = null)
         val mapper = jacksonObjectMapper()
@@ -515,6 +548,7 @@ class InventoryServiceTest {
         assertEquals("大号", exported.accounts.single().name)
         assertTrue(exported.records.all { it.accountId == "main" })
         assertEquals(setOf("item", "agent"), exported.records.map { it.entityType }.toSet())
+        assertEquals(80, exported.records.single { it.recordId == "reward" }.staminaCost)
         assertTrue(schema.validate(json).isEmpty())
         assertEquals(1, sameUser.duplicates)
         assertEquals(10, count("u1", "baijinbi"))
@@ -536,6 +570,15 @@ class InventoryServiceTest {
         }
         assertTrue(schema.validate(automaticReport).isEmpty())
         assertTrue(schema.validate(idOnlyDirectory).isEmpty())
+
+        val dispatchWithoutStamina = example.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
+            (this["records"][0] as com.fasterxml.jackson.databind.node.ObjectNode).remove("stamina_cost")
+        }
+        val nonDispatchWithStamina = example.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
+            (this["records"][3] as com.fasterxml.jackson.databind.node.ObjectNode).put("stamina_cost", 80)
+        }
+        assertTrue(schema.validate(dispatchWithoutStamina).isNotEmpty())
+        assertTrue(schema.validate(nonDispatchWithStamina).isNotEmpty())
     }
 
     @Test
