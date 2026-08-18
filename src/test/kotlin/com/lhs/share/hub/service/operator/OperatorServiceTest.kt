@@ -91,6 +91,7 @@ class OperatorServiceTest {
         every { accountRepository.findAllByUserIdAndAccountIdIn(any(), any()) } returns
             listOf(OperatorAccount(userId = "u1", accountId = "acc1", name = "账号"))
         every { catalogService.getOperator("op1") } returns catalog()
+        every { catalogService.spFormsOf(any()) } returns emptyList()
         every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } returns null
         every { currentRepository.findByUserIdAndAccountIdAndGame(any(), any(), any()) } returns null
         every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
@@ -183,6 +184,8 @@ class OperatorServiceTest {
         every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>() }
         every { catalogService.getOperator(baseId) } returns catalog(baseId, null)
         every { catalogService.getOperator(spId) } returns catalog(spId, baseId)
+        every { catalogService.spFormsOf(any()) } returns emptyList()
+        every { catalogService.spFormsOf(baseId) } returns listOf(spId)
     }
 
     /** 同上，但 current 仓库按 (account, game) 真实持久化，跨 record 之间可见前一条写入 */
@@ -196,16 +199,22 @@ class OperatorServiceTest {
         every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
         every { catalogService.getOperator(baseId) } returns catalog(baseId, null)
         every { catalogService.getOperator(spId) } returns catalog(spId, baseId)
+        every { catalogService.spFormsOf(any()) } returns emptyList()
+        every { catalogService.spFormsOf(baseId) } returns listOf(spId)
     }
 
     @Test
-    fun `SP without its base in the same snapshot is rejected`() {
+    fun `SP submitted alone materializes its base with synced level and elite`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        val e = assertThrows(OperatorApiException::class.java) {
-            service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 10, 2))))))
-        }
-        assertEquals("sp_missing_base", e.code)
-        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, e.status)
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 100, 17)), scope = "listed"))))
+        val base = saved!!.entries.getValue("op2")
+        assertEquals(100, base.level) // 本体从 SP 补齐
+        assertEquals(17, base.elite)
+        val sp = saved!!.entries.getValue("op1")
+        assertEquals(100, sp.level)
+        assertEquals(17, sp.elite)
     }
 
     @Test
@@ -234,29 +243,46 @@ class OperatorServiceTest {
     }
 
     @Test
-    fun `SP level is auto-synced from base instead of rejected`() {
+    fun `storing the base alone materializes and syncs its SP`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
         var saved: OperatorCurrent? = null
         every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
-        service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 20, 1), entry("op1", 10, 1))))))
+        service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 20, 1)), scope = "listed"))))
         val sp = saved!!.entries.getValue("op1")
-        assertEquals(20, sp.level) // 等级以本体为准
+        assertEquals(20, sp.level)     // 本体落库时 SP 自动显形
         assertEquals(1, sp.elite)
+        assertEquals(0, sp.starLevel)  // 自动生成的 SP 星级默认 0
     }
 
     @Test
-    fun `SP elite is auto-synced from base while star level stays independent`() {
-        setUpSpRelation(baseId = "op2", spId = "op1")
+    fun `editing the SP updates the base level and elite in both directions`() {
+        every { accountRepository.findAllByUserIdAndAccountIdIn(any(), any()) } returns
+            listOf(OperatorAccount(userId = "u1", accountId = "acc1", name = "账号"))
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } returns null
+        every { catalogService.getOperator("op2") } returns catalog("op2", null)
+        every { catalogService.getOperator("op1") } returns catalog("op1", "op2")
+        every { catalogService.spFormsOf(any()) } returns emptyList()
+        every { catalogService.spFormsOf("op2") } returns listOf("op1")
+        every { currentRepository.findByUserIdAndAccountIdAndGame(any(), any(), any()) } returns OperatorCurrent(
+            id = "u1:acc1:*", userId = "u1", accountId = "acc1", game = "*", fullBaselineAt = null,
+            entries = mapOf(
+                "op2" to OperatorEntry(elite = 1, starLevel = 5, level = 10),
+                "op1" to OperatorEntry(elite = 1, starLevel = 3, level = 10),
+            ),
+        )
         var saved: OperatorCurrent? = null
         every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
-        service.import(
-            "u1",
-            importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 1, starLevel = 5), entry("op1", 10, 2, starLevel = 1))))),
-        )
+        every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
+
+        // 只编辑 SP：level 20 / elite 2 —— 本体也跟随（双向同步）；星级各自独立
+        val result = service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 20, 2, starLevel = 9)), scope = "listed"))))
+        assertEquals(1, result.accepted)
+        val base = saved!!.entries.getValue("op2")
+        assertEquals(20, base.level)
+        assertEquals(2, base.elite)
+        assertEquals(5, base.starLevel) // 本体星级独立
         val sp = saved!!.entries.getValue("op1")
-        assertEquals(10, sp.level)
-        assertEquals(1, sp.elite)     // 修为(化极)以本体为准
-        assertEquals(1, sp.starLevel) // 星级保持独立
+        assertEquals(9, sp.starLevel)   // SP 星级保留独立编辑
     }
 
     @Test
@@ -277,6 +303,8 @@ class OperatorServiceTest {
         every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } returns null
         every { catalogService.getOperator("op2") } returns catalog("op2", null)
         every { catalogService.getOperator("op1") } returns catalog("op1", "op2")
+        every { catalogService.spFormsOf(any()) } returns emptyList()
+        every { catalogService.spFormsOf("op2") } returns listOf("op1")
         every { currentRepository.findByUserIdAndAccountIdAndGame(any(), any(), any()) } returns OperatorCurrent(
             id = "u1:acc1:*", userId = "u1", accountId = "acc1", game = "*", fullBaselineAt = null,
             entries = mapOf(
@@ -313,19 +341,33 @@ class OperatorServiceTest {
     }
 
     @Test
-    fun `base in a different game does not satisfy SP in this game`() {
+    fun `base and SP submitted in different games each materialize within their own game`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        val e = assertThrows(OperatorApiException::class.java) {
-            service.import(
-                "u1",
-                importRequestWithRecords(
-                    listOf(
-                        record(listOf(entry("op2", 10, 2)), game = "如鸢", recordId = "rec1"),
-                        record(listOf(entry("op1", 10, 2)), game = "代号鸢", recordId = "rec2"),
-                    ),
+        val result = service.import(
+            "u1",
+            importRequestWithRecords(
+                listOf(
+                    record(listOf(entry("op2", 10, 2)), game = "如鸢", recordId = "rec1"),
+                    record(listOf(entry("op1", 10, 2)), game = "代号鸢", recordId = "rec2"),
                 ),
-            )
-        }
-        assertEquals("sp_missing_base", e.code)
+            ),
+        )
+        // 每个 (account, game) 单元独立：如鸢 里有 op2(+其 SP)，代号鸢 里有 op1(+其本体)
+        assertEquals(2, result.accepted)
+    }
+
+    @Test
+    fun `SP submitted under a specific game materializes its base in that same game`() {
+        setUpSpRelation(baseId = "op2", spId = "op1")
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 5, 6)), game = "如鸢", scope = "listed"))))
+
+        val sp = saved!!.entries.getValue("op1")
+        assertEquals(5, sp.level)
+        assertEquals(6, sp.elite)
+        val base = saved!!.entries.getValue("op2")
+        assertEquals(5, base.level)  // 本体在同一 game 单元补齐
+        assertEquals(6, base.elite)
     }
 }

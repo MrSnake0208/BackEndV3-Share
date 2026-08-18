@@ -28,7 +28,9 @@ class OperatorCatalogServiceTest {
     private val service = OperatorCatalogService(repository, ObjectMapper())
 
     private fun seed(existing: List<OperatorCatalogEntity> = emptyList()) {
-        every { repository.count() } returns 1L // 跳过资源文件播种
+        every { repository.count() } returns 1L // 跳过资源文件整体播种，走"老库回填"路径
+        // 回填扫描：老库行一律视为不存在 => 不产生任何 save
+        every { repository.findByOperatorId(any()) } returns null
         every { repository.findAllByOrderByOperatorIdAsc() } returns existing
     }
 
@@ -194,6 +196,39 @@ class OperatorCatalogServiceTest {
         }
         assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, e.status)
         assertEquals("unknown_operator_id", e.code)
+    }
+
+    @Test
+    fun `already-seeded catalog is backfilled with spOf from the resource`() {
+        // 模拟升级前播种的老库：目录非空、SP 行没有 spOf。
+        val oldSp = existing("char_085_shizimiaosp").copy(rarity = 5, prof = listOf("混沌"), games = listOf("如鸢", "代号鸢"))
+        every { repository.count() } returns 1L
+        every { repository.findByOperatorId(any()) } returns null
+        every { repository.findByOperatorId("char_085_shizimiaosp") } returns oldSp
+        every { repository.findAllByOrderByOperatorIdAsc() } returns listOf(oldSp)
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        service.catalog() // 触发 ensureSeeded 回填
+
+        // 资源文件中 char_085_shizimiaosp 的 spOf = char_023_shizimiao
+        assertEquals("char_023_shizimiao", saved.captured.spOf)
+        assertEquals(oldSp.id, saved.captured.id)          // 保留 mongo _id
+        assertEquals(oldSp.createdAt, saved.captured.createdAt) // 保留创建时间
+        assertEquals("2026-08-16", saved.captured.catalogVersion) // 版本不重置
+    }
+
+    @Test
+    fun `already-set spOf is never overwritten by backfill`() {
+        val withSp = existing("char_085_shizimiaosp").copy(spOf = "char_evil")
+        every { repository.count() } returns 1L
+        every { repository.findByOperatorId(any()) } returns null
+        every { repository.findByOperatorId("char_085_shizimiaosp") } returns withSp
+        every { repository.findAllByOrderByOperatorIdAsc() } returns listOf(withSp)
+
+        service.catalog() // 触发 ensureSeeded
+
+        verify(exactly = 0) { repository.save(any()) }
     }
 
     private fun existing(id: String, createdAt: Instant = Instant.parse("2026-08-01T00:00:00Z")) = OperatorCatalogEntity(
