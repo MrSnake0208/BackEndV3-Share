@@ -96,40 +96,7 @@ class OperatorService(
             }
             Validated(record, effective)
         }.sortedWith(compareBy<Validated> { it.record.accountId }.thenBy { it.effectiveAt })
-        validateSpRelationships(validated.map { it.record })
         return validated
-    }
-
-    /**
-     * SP 形态（如 史子眇·赴烛 -> 史子眇）校验：
-     * 在同一份导入文档、同一 (account_id, game) 分组内，SP 必须有"本体"，且
-     * 等级(level) 与 修为(elite) 必须与本体一致。违反则整份文档拒绝。
-     */
-    private fun validateSpRelationships(records: List<OperatorRecordRequest>) {
-        if (records.isEmpty()) return
-        records.groupBy { it.accountId to (it.game ?: GENERIC_GAME) }.forEach { (_, group) ->
-            // 组内 records 已按 (accountId, effectiveAt) 升序，同一 id 后者覆盖前者 => 每个密探的最新值。
-            val latestById = LinkedHashMap<String, OperatorEntryRequest>()
-            val recordOf = LinkedHashMap<String, String>()
-            group.forEach { record ->
-                record.entries.forEach { entry ->
-                    latestById[entry.id] = entry
-                    recordOf[entry.id] = record.recordId
-                }
-            }
-            latestById.forEach { (id, entry) ->
-                val baseId = catalogService.getOperator(id)?.spOf ?: return@forEach
-                val base = latestById[baseId]
-                if (base == null) {
-                    throw apiError(
-                        HttpStatus.UNPROCESSABLE_ENTITY, SP_MISSING_BASE,
-                        "SP operator " + id + " requires its base operator " + baseId + " in the same snapshot",
-                        recordOf[id], id,
-                    )
-                }
-                // 数值无需在此校验：SP 的等级/修为在落库时由 applyRecord 以本体为准自动同步。
-            }
-        }
     }
 
     private fun applyRecord(userId: String, item: Validated): String {
@@ -148,28 +115,50 @@ class OperatorService(
             record.entries.forEach { m[it.id] = it.toCurrent(item.effectiveAt) }
             m
         }
-        // SP 形态同步：SP 的等级(level)与修为(elite)始终以本体的值为准；
-        // 星级(starLevel)、命盘、星石保持独立。
-        syncSpFromBase(next, current)
+        // 本体/SP 成对归一化：二者都显性出现，level/elite 双向共享，其余字段独立。
+        normalizeSpRelations(next, record.entries.map { it.id }.toSet())
         val fullBaselineAt = if (record.snapshotScope == FULL) item.effectiveAt else current?.fullBaselineAt
         currentRepository.save(OperatorCurrent(current?.id ?: key(userId, record.accountId, game), userId, record.accountId, game, fullBaselineAt, next, now))
         return APPLIED
     }
 
     /**
-     * SP 形态自动同步：对合并视图 `next` 里的每个 SP，取其本体（优先 `next` 内同快照
-     * 的本体，其次已存档的本体），把 SP 的 `level`（等级）与 `elite`（修为）覆盖为
-     * 本体的值；星级(starLevel)、命盘、星石保持独立。找不到本体（例如删除本体记录后
-     * 的重放）则拒绝，维持 "必须有本体才能 SP"。
+     * 本体/SP 形态归一化（"偶对恒成对出现 + level/elite 双向共享"）：
+     * 1) 补齐：本体存在 → 缺失的 SP 自动生成；SP 存在 → 缺失的本体自动生成。
+     *    新生成的一方 level/elite 取已有那一方，星级(starLevel)、命盘、星石默认 0/空。
+     * 2) 双向共享：本次快照写了哪个成员，就以它的 level/elite 为准覆盖另一个；
+     *    星级(starLevel)、命盘、星石各自独立保留，互不同步。
      */
-    private fun syncSpFromBase(next: MutableMap<String, OperatorEntry>, current: OperatorCurrent?) {
-        next.keys.forEach { id ->
+    private fun normalizeSpRelations(next: MutableMap<String, OperatorEntry>, writtenIds: Set<String>) {
+        val ids = next.keys.toList()
+
+        // 1) 补齐缺失成员
+        ids.forEach { id ->
+            val baseId = catalogService.getOperator(id)?.spOf
+            if (baseId == null) {
+                catalogService.spFormsOf(id).forEach { spId ->
+                    if (spId !in next) {
+                        val base = next.getValue(id)
+                        next[spId] = OperatorEntry(elite = base.elite, starLevel = 0, level = base.level)
+                    }
+                }
+            } else if (baseId !in next) {
+                val sp = next.getValue(id)
+                next[baseId] = OperatorEntry(elite = sp.elite, starLevel = 0, level = sp.level)
+            }
+        }
+
+        // 2) level/elite 双向共享：以本次被写的那一方为准
+        ids.forEach { id ->
             val baseId = catalogService.getOperator(id)?.spOf ?: return@forEach
-            val base = next[baseId] ?: current?.entries?.get(baseId)
-                ?: throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, SP_MISSING_BASE, "SP operator " + id + " requires its base operator " + baseId)
-            val sp = next.getValue(id)
-            if (sp.level != base.level || sp.elite != base.elite) {
-                next[id] = sp.copy(level = base.level, elite = base.elite)
+            if (baseId in next && id in next) {
+                val base = next.getValue(baseId)
+                val sp = next.getValue(id)
+                when {
+                    id in writtenIds && baseId !in writtenIds -> next[baseId] = base.copy(level = sp.level, elite = sp.elite)
+                    baseId in writtenIds && id !in writtenIds -> next[id] = sp.copy(level = base.level, elite = base.elite)
+                    // 双方都写/都没写：保持客户端给出的值（应已一致）
+                }
             }
         }
     }
@@ -241,8 +230,6 @@ class OperatorService(
         const val APPLIED = "applied"
         const val SUPERSEDED = "superseded"
         const val GENERIC_GAME = "*"
-        // SP 形态校验错误码：缺本体（等级/修为由本体重写为一致，不再单独报错）
-        const val SP_MISSING_BASE = "sp_missing_base"
         // 星级(starLevel)：0 = 未拥有；1..30 = 星级·节点（1星·0 .. 5星·5，starLevel = 6×(星-1)+节点+1）；31 = 觉醒
         const val MAX_STAR_LEVEL = 31
         val SCOPES = setOf(FULL, LISTED)

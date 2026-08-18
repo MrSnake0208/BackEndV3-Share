@@ -115,9 +115,8 @@
 > `GET /v1/operator/catalog`，**不在 entry/record 载荷里**。本协议 v2 的
 > `entries` 只含养成字段（`id/name/alias/rarity/prof/subProf/games/
 > elite/starLevel/level/discs/starStones`），**客户端不得上传 `spOf`**；接收方
-> 也一律以自身目录判定 SP，并在导入时要求「本体必须同文档」
-> （`sp_missing_base`）。SP 的等级/修为 **不由客户端提交值决定**：落库时接收方
-> 以本体的值自动同步覆盖（见 §3.5）。
+> 也一律以自身目录判定 SP，并在落库时进行**本体/SP 成对归一化**：二者恒成对出现，
+> `level`（等级）与 `elite`（修为）双向共享，其余字段独立（见 §3.5）。
 > 后续新增 SP 只扩目录，不升级协议载荷；若确需让载荷携带该关系，属 v2 → v3 的
 > major 升级，且必须同步明确定义"载荷声明与目录冲突时以谁为准"。
 
@@ -179,13 +178,12 @@
 12. starStones：`type` 枚举（`invalid_star_stone`）、不重复。
 13. 幂等：`(userId, accountId, recordId)` 已存在且正文相同 → 计入 `duplicates`（成功）；
     已存在但正文不同 → `record_conflict`（409）。
-14. **SP 形态**（目录 `spOf` 非空的密探，如 史子眇·赴烛）：
-    在**同一份导入文档、同一 `(account_id, game)` 分组**内必须有本体条目，
-    缺本体 → `sp_missing_base`（422，整份拒绝）。
-    **SP 的 `level`（等级）与 `elite`（修为/化极）不采纳客户端提交值**：落库时
-    接收方以本体为准自动同步覆盖（`applyRecord` 归一化），因此 SP 落库后必然与
-    本体一致；`starLevel`（星级）、命盘、星石保持独立（SP 与本体相互独立）。
-    已存档的 SP 在后续只更新本体的快照中也会被同步（无需每次随本体一起上传）。
+14. **本体/SP 形态归一化**（目录 `spOf` 非空的密探成对，如 史子眇·赴烛 ⟷ 史子眇）：
+    **二者恒成对出现**：只要本体或 SP 任一落在该 `(account, game)` 的有效状态，
+    另一端自动补齐（缺 SP → 以本体生成；缺本体 → 以 SP 生成），**不再因缺本体而拒绝**。
+    **`level`（等级）与 `elite`（修为）双向共享**：本次快照写了本体或 SP 的哪一个，
+    就以它为准覆盖另一个；`starLevel`（星级）、命盘、星石**各自独立、互不同步**。
+    自动补齐的一方星级/命盘/星石默认 0/空，可随后独立编辑。
 15. 整份校验失败 → 整份拒绝，不做部分写入（与库存一致）。
 
 > "正文相同"判定：直接比较协议业务字段（record_type / game / snapshot_scope /
@@ -216,7 +214,6 @@
 | 422 | `unknown_operator_id` | 目录不存在该 char_xxx |
 | 422 | `unknown_account_id` | account_id 不属于当前用户 |
 | 422 | `invalid_game` | game 不支持或 entry.games 不含该版本 |
-| 422 | `sp_missing_base` | SP 形态在文档内无本体（同 account,game） |
 | 422 | `invalid_disc` / `invalid_star_stone` | 命盘/星石字段非法 |
 | 422 | `unsupported_version` | 协议版本不支持 |
 | 429 | `account_limit_reached` | 子账号数量达上限 |
@@ -386,8 +383,10 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
 > 校验依赖真实的 discs/starStones 目录数据，占位目录会令这两个校验形同虚设（空目录时任何 ot_name 都 invalid）。
 > 这是本模块唯一的外部数据依赖，建议实现第一步就确认。
 
-`OperatorCatalogService` 仿照 `EntityCatalogService`：首次访问惰性播种（`ensureSeeded` 单例）、
-只 upsert 缺失行、`catalogVersion` 默认取播种日期、`exists(id)` / `get(id)` / `catalog()` 只读。
+`OperatorCatalogService` 仿照 `EntityCatalogService`：首次访问惰性执行一次（`ensureSeeded` 单例）——
+**全新库整体播种；已播种过的老库自动回填新增字段（如 `spOf`）**，回填只补 `spOf=null` 的
+行、不覆盖管理员改动、不重插被删除的行（约 121 行，仅首次访问执行一次）。
+`catalogVersion` 默认取播种日期、`exists(id)` / `get(id)` / `catalog()` 只读。
 命盘/星石校验需要按密探精准查询：提供 `getOperator(id): OperatorCatalogEntity?`。
 
 ---
