@@ -368,13 +368,13 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
 | 端点 | `GET /v1/operator/catalog` | `/v1/operator/**`（除 catalog）+ `/open-api/operator/**` |
 | 认证 | **无需登录**（`SecurityConfig.URL_PERMIT_ALL`） | 登录 JWT，或绑定子账号的 OpenAPI token |
 | 数据来源 | `operator_catalog` 集合（全局字典） | `operator_current` / `operator_records`（用户数据） |
-| 包含的信息 | 密探静态属性：`id/name/alias/rarity/prof/subProf/games` + `discs`（该密探**全部可用**命盘目录） + `starStones`（槽位定义：`type: main/assist` + 槽位名） | 用户编辑的养成状态：`elite/starLevel/level` + **已装备的** `discs`（装备选择） + **已装备的** `starStones`（含等级 `level`） |
+| 包含的信息 | 密探静态属性：`id/name/alias/rarity/prof/subProf/games` + `discs`（该密探**全部可用**命盘目录）。**无 starStones** —— 星石属于用户养成档案，不进公共图鉴 | 用户编辑的养成状态：`elite/starLevel/level` + **已装备的** `discs`（装备选择） + **已装备的** `starStones`（含等级 `level`） |
 | 明确不含 | **任何用户数据**：不返回用户装备的星石等级、命盘装备、养成数值、`account_id`、基线时间 | 公开目录（不返回其他用户数据） |
 
 要点：
 
 - 公共 API 回答"**有哪些 operator、长什么样**"（图鉴/字典）；个人 API 回答"**我的密探练到多少**"。
-- 星石的"有主/辅两个槽位"是目录信息 → 进公共 API；"我主星石 60 级"是用户信息 → 只进个人 API。
+- 星石槽位与等级全是用户档案信息（目录里每个密探都是同一份 `主星石/辅星石` 模板，放了只会诱导前端当养成数据展示）→ 只进个人 API。
 - 命盘同理：该密探命盘库里**有哪些**命盘（ot_name/颜色/描述）→ 公共；"我装备了初始能量+2" → 个人。
 - `GET /v1/operator/catalog` 无须也不接受 `account_id`/token，返回的就是 6.0 §4.3 的只读目录接口。
 - OpenAPI token 接口（`/open-api/operator/**`）也属于个人数据 API，绑定子账号后只能访问该账号数据。
@@ -420,7 +420,8 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
   | `rarity` / `prof` / `subProf` | 稀有度 / 属性列表 / 职业列表 |
   | `games` | 该密探存在哪些版本 |
   | `discs` | **目录**命盘：`{ot_name, abbreviation?, color?, desp?}`（该密探全部可用命盘，非用户装备） |
-  | `starStones` | **槽位定义**：`{name, type}`（`main`/`assist`），**不含等级** |
+
+  响应条目**不含 `starStones`**（星石属用户养成字段，见 6.0）。
 
   响应示例：
 
@@ -440,10 +441,6 @@ data class OperatorStarStoneCatalog(val name: String, val type: String)   // typ
         "games": ["如鸢", "代号鸢"],
         "discs": [
           { "ot_name": "初始能量+2", "abbreviation": "初始+2", "color": "金", "desp": "初始能量+2" }
-        ],
-        "starStones": [
-          { "name": "主星石", "type": "main" },
-          { "name": "辅星石", "type": "assist" }
         ]
       }
     ]

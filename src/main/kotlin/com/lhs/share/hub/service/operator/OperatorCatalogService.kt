@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.operator
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
+import com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
 import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
@@ -24,7 +25,13 @@ class OperatorCatalogService(
     fun getOperator(id: String): OperatorCatalogEntity? { ensureSeeded(); return repository.findByOperatorId(id) }
     fun exists(id: String): Boolean = getOperator(id) != null
     fun currentCatalogVersion(): String { ensureSeeded(); return catalogVersion.ifEmpty { LocalDate.now().toString() } }
-    fun catalog(): OperatorCatalogResponse { ensureSeeded(); return OperatorCatalogResponse(catalogVersion = currentCatalogVersion(), operators = repository.findAllByOrderByOperatorIdAsc()) }
+    fun catalog(): OperatorCatalogResponse {
+        ensureSeeded()
+        return OperatorCatalogResponse(
+            catalogVersion = currentCatalogVersion(),
+            operators = repository.findAllByOrderByOperatorIdAsc().map { OperatorCatalogEntryResponse.of(it) },
+        )
+    }
 
     fun create(request: OperatorCatalogWriteRequest): OperatorCatalogEntity {
         ensureSeeded()
