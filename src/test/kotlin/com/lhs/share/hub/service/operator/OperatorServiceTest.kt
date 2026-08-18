@@ -209,6 +209,31 @@ class OperatorServiceTest {
     }
 
     @Test
+    fun `starLevel above awakening cap 31 is rejected`() {
+        setUpHappyPath()
+        val e = assertThrows(OperatorApiException::class.java) {
+            service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 10, elite = 0, starLevel = 32))))))
+        }
+        assertEquals("schema_validation_failed", e.code)
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, e.status)
+    }
+
+    @Test
+    fun `starLevel 31 awakening and 30 max node are accepted`() {
+        setUpHappyPath()
+        val result = service.import(
+            "u1",
+            importRequestWithRecords(
+                listOf(
+                    record(listOf(entry("op1", 10, elite = 0, starLevel = 30)), recordId = "rec1"), // 5星·5
+                    record(listOf(entry("op1", 10, elite = 1, starLevel = 31)), recordId = "rec2"), // 觉醒
+                ),
+            ),
+        )
+        assertEquals(2, result.accepted)
+    }
+
+    @Test
     fun `SP level is auto-synced from base instead of rejected`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
         var saved: OperatorCurrent? = null

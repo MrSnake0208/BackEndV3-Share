@@ -84,6 +84,7 @@ class OperatorService(
                 if (!entryIds.add(entry.id)) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Duplicate entry id", record.recordId, entry.id)
                 val catalog = catalogService.getOperator(entry.id) ?: throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_operator_id", "Unknown operator id: " + entry.id, record.recordId, entry.id)
                 if (listOf(entry.elite, entry.starLevel, entry.level).any { it < 0 }) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Operator levels must be non-negative", record.recordId, entry.id)
+                if (entry.starLevel > MAX_STAR_LEVEL) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "starLevel must be 0.." + MAX_STAR_LEVEL + " (0 = 未拥有, " + MAX_STAR_LEVEL + " = 觉醒)", record.recordId, entry.id)
                 if (record.game != null && record.game !in catalog.games) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_game", "Operator is not available in game", record.recordId, entry.id)
                 if (entry.rarity != null && entry.rarity != catalog.rarity) warnings.add(entry.id + ": rarity conflicts with catalog")
                 if (entry.prof != null && entry.prof != catalog.prof) warnings.add(entry.id + ": prof conflicts with catalog")
@@ -147,7 +148,8 @@ class OperatorService(
             record.entries.forEach { m[it.id] = it.toCurrent(item.effectiveAt) }
             m
         }
-        // SP 形态同步：SP 的等级/修为（化极）始终以本体的值为准，覆盖客户端提交的数值。
+        // SP 形态同步：SP 的等级(level)与修为(elite)始终以本体的值为准；
+        // 星级(starLevel)、命盘、星石保持独立。
         syncSpFromBase(next, current)
         val fullBaselineAt = if (record.snapshotScope == FULL) item.effectiveAt else current?.fullBaselineAt
         currentRepository.save(OperatorCurrent(current?.id ?: key(userId, record.accountId, game), userId, record.accountId, game, fullBaselineAt, next, now))
@@ -156,9 +158,9 @@ class OperatorService(
 
     /**
      * SP 形态自动同步：对合并视图 `next` 里的每个 SP，取其本体（优先 `next` 内同快照
-     * 的本体，其次已存档的本体），把 SP 的 `level`/`elite` 覆盖为本体的值；`starLevel`、
-     * 命盘、星石等保持独立。找不到本体（例如删除本体记录后的重放）则拒绝，维持
-     * "必须有本体才能 SP"。
+     * 的本体，其次已存档的本体），把 SP 的 `level`（等级）与 `elite`（修为）覆盖为
+     * 本体的值；星级(starLevel)、命盘、星石保持独立。找不到本体（例如删除本体记录后
+     * 的重放）则拒绝，维持 "必须有本体才能 SP"。
      */
     private fun syncSpFromBase(next: MutableMap<String, OperatorEntry>, current: OperatorCurrent?) {
         next.keys.forEach { id ->
@@ -241,6 +243,8 @@ class OperatorService(
         const val GENERIC_GAME = "*"
         // SP 形态校验错误码：缺本体（等级/修为由本体重写为一致，不再单独报错）
         const val SP_MISSING_BASE = "sp_missing_base"
+        // 星级(starLevel)：0 = 未拥有；1..30 = 星级·节点（1星·0 .. 5星·5，starLevel = 6×(星-1)+节点+1）；31 = 觉醒
+        const val MAX_STAR_LEVEL = 31
         val SCOPES = setOf(FULL, LISTED)
         val GAMES = setOf("如鸢", "代号鸢")
         /**

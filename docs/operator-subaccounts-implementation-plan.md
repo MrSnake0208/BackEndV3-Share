@@ -94,9 +94,9 @@
 | `rarity` | 否 | integer | 3..5；目录属性，冲突以目录为准 + warning |
 | `prof` / `subProf` | 否 | array<enum> | 目录属性，冲突以目录为准 + warning |
 | `games` | 否 | array | 目录属性，用于校验 `game` |
-| `elite` | 是 | integer | 化极 ≥0 |
-| `starLevel` | 是 | integer | 星级 ≥0 |
-| `level` | 是 | integer | 等级 ≥0 |
+| `elite` | 是 | integer | 修为 ≥0（SP 与本体自动同步） |
+| `starLevel` | 是 | integer | 星级 0..31（0 = 未拥有；1..30 = 1星·0..5星·5；31 = 觉醒；SP 独立） |
+| `level` | 是 | integer | 等级 ≥0（SP 与本体自动同步） |
 | `discs` | 否 | array<disc> | 已装备命盘；空数组=未装备 |
 | `starStones` | 否 | array<starStone> | 已装备星石；空数组=未装备 |
 
@@ -105,6 +105,10 @@
 
 **starStone**：`name`（可选）、`type`（必填 `main`/`assist`）、`level`（必填 ≥0）。
 同一密探内 `type` 不得重复；`type` 非法 → `invalid_star_stone`。
+
+**星级（`starLevel`）映射**：节点整体后移 1 位，`starLevel = 6 × (星级 − 1) + 节点 + 1`
+（每星节点 0~5，共 6 档）。**0 = 未拥有**；1..6 = 1星·0~5，7..12 = 2星·0~5，
+13..18 = 3星·0~5，19..24 = 4星·0~5，25..30 = 5星·0~5（**5星·5 = 30**）；**31 = 觉醒**（仅一档）。
 
 > ⚠️ **`spOf` 不在本协议中（约定写死）**：SP 形态 → 本体的关系（如 史子眇·赴烛
 > → 史子眇）是游戏静态属性，属于服务端目录字典 `operator_catalog` 与公共图鉴
