@@ -1,5 +1,6 @@
 package com.lhs.share.handler
 
+import com.lhs.share.hub.controller.operator.AdminOperatorCatalogController
 import com.lhs.share.hub.controller.operator.OperatorController
 import com.lhs.share.hub.controller.operator.response.OperatorError
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
@@ -15,8 +16,21 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes=[OperatorController::class,OpenApiOperatorController::class])
+@RestControllerAdvice(
+    assignableTypes = [OperatorController::class, OpenApiOperatorController::class, AdminOperatorCatalogController::class],
+)
 class OperatorExceptionHandler {
-    @ExceptionHandler(OperatorApiException::class) fun api(e: OperatorApiException) = ResponseEntity.status(e.status).body(OperatorErrorResponse(OperatorError(e.code,e.message,e.recordId,e.entryId)))
-    @ExceptionHandler(MethodArgumentNotValidException::class,HttpMessageNotReadableException::class) fun invalid(e: Exception) = ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(OperatorErrorResponse(OperatorError("schema_validation_failed",e.message ?: "Invalid request")))
+    @ExceptionHandler(OperatorApiException::class)
+    fun api(e: OperatorApiException) =
+        ResponseEntity.status(e.status).body(OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId)))
+
+    @ExceptionHandler(MethodArgumentNotValidException::class, HttpMessageNotReadableException::class)
+    fun invalid(e: Exception) = ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(
+        OperatorErrorResponse(
+            OperatorError(
+                "schema_validation_failed",
+                e.message ?: "Invalid request",
+            ),
+        ),
+    )
 }

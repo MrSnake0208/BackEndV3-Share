@@ -20,17 +20,33 @@ class OperatorCatalogService(
     private val objectMapper: ObjectMapper,
 ) {
     @Volatile private var seeded = false
+
     @Volatile private var catalogVersion = ""
 
-    fun getOperator(id: String): OperatorCatalogEntity? { ensureSeeded(); return repository.findByOperatorId(id) }
+    fun getOperator(id: String): OperatorCatalogEntity? {
+        ensureSeeded()
+        return repository.findByOperatorId(id)
+    }
     fun exists(id: String): Boolean = getOperator(id) != null
-    fun currentCatalogVersion(): String { ensureSeeded(); return catalogVersion.ifEmpty { LocalDate.now().toString() } }
+    fun currentCatalogVersion(): String {
+        ensureSeeded()
+        return catalogVersion.ifEmpty { LocalDate.now().toString() }
+    }
     fun catalog(): OperatorCatalogResponse {
         ensureSeeded()
         return OperatorCatalogResponse(
             catalogVersion = currentCatalogVersion(),
             operators = repository.findAllByOrderByOperatorIdAsc().map { OperatorCatalogEntryResponse.of(it) },
         )
+    }
+
+    /**
+     * 管理端全量列表：返回原始实体（含 starStones / catalogVersion / createdAt 等内部字段），
+     * 供管理员编辑公共图鉴使用。与只读公共图鉴 [catalog] 不同，不做任何裁剪。
+     */
+    fun listForAdmin(): List<OperatorCatalogEntity> {
+        ensureSeeded()
+        return repository.findAllByOrderByOperatorIdAsc()
     }
 
     fun create(request: OperatorCatalogWriteRequest): OperatorCatalogEntity {
@@ -60,6 +76,16 @@ class OperatorCatalogService(
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         repository.delete(existing)
+        bumpCatalogVersion()
+    }
+
+    /**
+     * 目录内容变化后生成新版本号并持久化。
+     *
+     * create/update 会随新写入行自然带上新版本号；delete 不产生新行，因此挑一条剩余行
+     * 回写版本号（无剩余行时版本号只在内存更新，下次重新播种时自然刷新）。
+     */
+    private fun bumpCatalogVersion() {
         val version = nextCatalogVersion()
         repository.findAllByOrderByOperatorIdAsc().firstOrNull()?.let {
             repository.save(it.copy(catalogVersion = version))
@@ -88,25 +114,22 @@ class OperatorCatalogService(
         }
     }
 
-    private fun OperatorCatalogWriteRequest.toEntity(
-        id: String? = null,
-        createdAt: Instant = Instant.now(),
-        catalogVersion: String,
-    ) = OperatorCatalogEntity(
-        id = id,
-        operatorId = this.id,
-        name = name,
-        alias = alias,
-        rarity = rarity,
-        prof = prof,
-        subProf = subProf,
-        games = games,
-        discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
-        starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
-        spOf = spOf,
-        catalogVersion = catalogVersion,
-        createdAt = createdAt,
-    )
+    private fun OperatorCatalogWriteRequest.toEntity(id: String? = null, createdAt: Instant = Instant.now(), catalogVersion: String) =
+        OperatorCatalogEntity(
+            id = id,
+            operatorId = this.id,
+            name = name,
+            alias = alias,
+            rarity = rarity,
+            prof = prof,
+            subProf = subProf,
+            games = games,
+            discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
+            starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
+            spOf = spOf,
+            catalogVersion = catalogVersion,
+            createdAt = createdAt,
+        )
 
     private fun nextCatalogVersion(): String {
         catalogVersion = Instant.now().toString()
@@ -123,19 +146,30 @@ class OperatorCatalogService(
                 objectMapper.readTree(resource.inputStream).forEach { node ->
                     val id = node.path("id").asText()
                     if (id.isNotBlank()) {
-                        repository.save(OperatorCatalogEntity(
-                            operatorId = id,
-                            name = node.path("name").asText(id),
-                            alias = node.get("alias")?.asText(),
-                            rarity = node.path("rarity").asInt(5),
-                            prof = node.path("prof").map { it.asText() },
-                            subProf = node.path("subProf").map { it.asText() },
-                            games = node.path("games").map { it.asText() }.ifEmpty { SUPPORTED_GAMES },
-                            discs = node.path("discs").map { OperatorDiscCatalog(it.path("ot_name").asText(), it.get("abbreviation")?.asText(), it.get("color")?.asText(), it.get("desp")?.asText()) },
-                            starStones = node.path("starStones").map { OperatorStarStoneCatalog(it.path("name").asText(), it.path("type").asText()) }.ifEmpty { DEFAULT_STONES },
-                            spOf = node.get("spOf")?.asText(),
-                            catalogVersion = version,
-                        ))
+                        repository.save(
+                            OperatorCatalogEntity(
+                                operatorId = id,
+                                name = node.path("name").asText(id),
+                                alias = node.get("alias")?.asText(),
+                                rarity = node.path("rarity").asInt(5),
+                                prof = node.path("prof").map { it.asText() },
+                                subProf = node.path("subProf").map { it.asText() },
+                                games = node.path("games").map { it.asText() }.ifEmpty { SUPPORTED_GAMES },
+                                discs = node.path("discs").map {
+                                    OperatorDiscCatalog(
+                                        it.path("ot_name").asText(),
+                                        it.get("abbreviation")?.asText(),
+                                        it.get("color")?.asText(),
+                                        it.get("desp")?.asText(),
+                                    )
+                                },
+                                starStones = node.path("starStones").map {
+                                    OperatorStarStoneCatalog(it.path("name").asText(), it.path("type").asText())
+                                }.ifEmpty { DEFAULT_STONES },
+                                spOf = node.get("spOf")?.asText(),
+                                catalogVersion = version,
+                            ),
+                        )
                     }
                 }
             }

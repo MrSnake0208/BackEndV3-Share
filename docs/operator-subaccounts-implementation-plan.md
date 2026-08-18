@@ -517,6 +517,43 @@ OPERATOR_EXPORT(code = 20003, key = "operator:export", desc = "密探数据导�
 > `OpenApiPermission.kt` / `OpenApiTokenController.kt`（如 scheme 文档）时，
 > **不得破坏现有库存 token 流程**；库存相关测试（OpenApiTokenServiceTest 等）必须保持通过。
 
+### 6.5 管理员管理密探公共图鉴（公共 API 的数据面）
+
+> 公共开放 API（`GET /v1/operator/catalog`）回答"有哪些密探、长什么样"，是**全局只读图鉴**。
+> "管理员管理密探公共 API" = 管理员对支撑这份公共数据的 `operator_catalog` 字典做增删改查，
+> **不是**管理任何个人子账号的密探养成档案（`/v1/operator/**` 与 `/open-api/operator/**` 属个人数据 API）。
+
+管理员端点独立命名空间 `/v1/admin/operator-catalog/**`（与个人/公共 API 严格分离）：
+
+| 方法 | 路径 | 说明 | 认证 |
+| ---- | ---- | ---- | ---- |
+| GET | `/v1/admin/operator-catalog` | 管理端全量列表（**含内部字段** starStones / catalogVersion / createdAt，供管理端编辑） | JWT + 管理员 |
+| POST | `/v1/admin/operator-catalog` | 新增密探目录（body = `OperatorCatalogWriteRequest`） | JWT + 管理员 |
+| PUT | `/v1/admin/operator-catalog/{operatorId}` | 更新（path id 与 body id 必须一致） | JWT + 管理员 |
+| DELETE | `/v1/admin/operator-catalog/{operatorId}` | 删除 | JWT + 管理员 |
+
+要点：
+
+- **管理员判定**：用户 `status >= 2`（`UserService.hasAdminPrivileges` / `ADMIN_STATUS`），
+  与权限模型一致；非管理员统一 403 `forbidden`（OperatorErrorResponse）。
+- **即时生效**：目录写操作直接改 `operator_catalog`，公共图鉴 `GET /v1/operator/catalog`、
+  导入校验（`unknown_operator_id` / `invalid_disc` / `spOf` 校验）与 SP 判定随即使用新目录，
+  无需刷新/重启。
+- **写接口校验复用**：`OperatorCatalogService.create/update/delete` 复用公共导入的目录规则
+  （id 格式、rarity 3..5、games 枚举、命盘/星石唯一、`spOf` 必须指向已存在且非自身）。
+- **版本号语义**：每次增删改都会更新 `catalogVersion`（`Instant.now()` 字符串）；
+  delete 由 `bumpCatalogVersion()` 挑一条剩余行回写，保证 `currentCatalogVersion()` 感知变更。
+- 新增/删除不影响既有密探子账号数据（current/records 与目录解耦，按 id 关联展示）。
+
+错误码沿用密探模块：`operator_conflict`(409)、`operator_not_found`(404)、
+`schema_validation_failed`/`invalid_game`/`invalid_disc`/`invalid_star_stone`/`unknown_operator_id`(422)、
+403 `forbidden`（非管理员）。
+
+实现落点：`AdminOperatorCatalogController`（原混在 `OperatorController` 里的
+`POST/PUT/DELETE /v1/operator/catalog/operators` 三个管理员端点迁移至此）、
+`OperatorCatalogService.listForAdmin()`、`config/doc/OperatorApiResponses.kt`；
+`OperatorExceptionHandler` 的 `assignableTypes` 覆盖新控制器。
+
 ---
 
 ## 7. 业务逻辑细则

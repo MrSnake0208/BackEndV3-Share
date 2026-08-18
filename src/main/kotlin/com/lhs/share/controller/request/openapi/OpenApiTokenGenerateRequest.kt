@@ -26,7 +26,16 @@ data class OpenApiTokenGenerateRequest(
     @field:ArraySchema(
         minItems = 1,
         uniqueItems = true,
-        schema = Schema(allowableValues = ["inventory:read", "inventory:write", "inventory:export", "operator:read", "operator:write", "operator:export"]),
+        schema = Schema(
+            allowableValues = [
+                "inventory:read",
+                "inventory:write",
+                "inventory:export",
+                "operator:read",
+                "operator:write",
+                "operator:export",
+            ],
+        ),
     )
     val scopes: List<String>,
 

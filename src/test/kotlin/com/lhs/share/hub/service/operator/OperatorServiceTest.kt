@@ -140,16 +140,15 @@ class OperatorServiceTest {
     private fun entry(id: String, level: Int, elite: Int = 0, starLevel: Int = 0) =
         OperatorEntryRequest(id = id, elite = elite, starLevel = starLevel, level = level)
 
-    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = null) =
-        OperatorRecordRequest(
-            accountId = "acc1",
-            recordId = recordId,
-            recordType = "operator_snapshot",
-            game = game,
-            effectiveAt = "2026-08-16T10:00:00+08:00",
-            snapshotScope = "full",
-            entries = entries,
-        )
+    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = null) = OperatorRecordRequest(
+        accountId = "acc1",
+        recordId = recordId,
+        recordType = "operator_snapshot",
+        game = game,
+        effectiveAt = "2026-08-16T10:00:00+08:00",
+        snapshotScope = "full",
+        entries = entries,
+    )
 
     private fun importRequestWithRecords(records: List<OperatorRecordRequest>): OperatorImportRequest = OperatorImportRequest(
         format = "myshare-operator-exchange",
@@ -209,7 +208,10 @@ class OperatorServiceTest {
         setUpSpRelation(baseId = "op2", spId = "op1")
         // 等级一致、修为(化极)不一致 => 拒绝；星级不同不影响
         val e = assertThrows(OperatorApiException::class.java) {
-            service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 1, starLevel = 5), entry("op1", 10, 2, starLevel = 1))))))
+            service.import(
+                "u1",
+                importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 1, starLevel = 5), entry("op1", 10, 2, starLevel = 1))))),
+            )
         }
         assertEquals("sp_build_mismatch", e.code)
     }
@@ -217,7 +219,10 @@ class OperatorServiceTest {
     @Test
     fun `SP matching base level and elite is accepted regardless of star level`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        val result = service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 2, starLevel = 5), entry("op1", 10, 2, starLevel = 0))))))
+        val result = service.import(
+            "u1",
+            importRequestWithRecords(listOf(record(listOf(entry("op2", 10, 2, starLevel = 5), entry("op1", 10, 2, starLevel = 0))))),
+        )
         assertEquals(1, result.accepted)
         assertEquals(0, result.duplicates)
     }
