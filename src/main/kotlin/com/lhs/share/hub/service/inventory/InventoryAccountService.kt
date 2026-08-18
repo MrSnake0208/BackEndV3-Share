@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.inventory
 
 import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.repository.InventoryAccountRepository
+import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.entity.InventoryAccount
@@ -18,6 +19,7 @@ class InventoryAccountService(
     private val accountRepository: InventoryAccountRepository,
     private val currentRepository: InventoryCurrentRepository,
     private val recordRepository: InventoryRecordRepository,
+    private val favoriteRepository: InventoryAgentFavoriteRepository,
     private val tokenService: OpenApiTokenService,
     private val transactionTemplate: TransactionTemplate,
 ) {
@@ -64,6 +66,7 @@ class InventoryAccountService(
         transactionTemplate.executeWithoutResult {
             currentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             recordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }

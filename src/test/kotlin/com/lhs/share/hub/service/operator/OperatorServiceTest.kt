@@ -37,7 +37,14 @@ class OperatorServiceTest {
         override fun commit(status: TransactionStatus) = Unit
         override fun rollback(status: TransactionStatus) = Unit
     })
-    private val service = OperatorService(accountRepository, currentRepository, recordRepository, catalogRepository, catalogService, transactionTemplate)
+    private val service = OperatorService(
+        accountRepository,
+        currentRepository,
+        recordRepository,
+        catalogRepository,
+        catalogService,
+        transactionTemplate,
+    )
 
     private fun catalog() = OperatorCatalogEntity(
         operatorId = "op1",

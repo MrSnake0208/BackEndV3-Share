@@ -40,7 +40,7 @@ private const val JSON = "application/json"
         ),
         ApiResponse(
             responseCode = "422",
-            description = "schema_validation_failed, unknown_account_id, unknown_entity_id, or unsupported_version",
+            description = "schema_validation_failed, unknown entity or agent, invalid agent id, or unsupported version",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
