@@ -12,6 +12,7 @@ import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
 import org.springframework.core.io.ClassPathResource
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.web.multipart.MultipartFile
 import java.time.Instant
 import java.time.LocalDate
 
@@ -19,6 +20,7 @@ import java.time.LocalDate
 class OperatorCatalogService(
     private val repository: OperatorCatalogRepository,
     private val objectMapper: ObjectMapper,
+    private val avatarStorage: AvatarStorage,
 ) {
     @Volatile private var seeded = false
 
@@ -96,7 +98,31 @@ class OperatorCatalogService(
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         validate(request)
         val version = nextCatalogVersion()
-        return repository.save(request.toEntity(id = existing.id, createdAt = existing.createdAt, catalogVersion = version)).also { spIndexCache = null }
+        // avatar 不在写请求内，普通编辑整条覆盖时必须显式保留既有头像，否则会把已上传头像冲掉。
+        return repository.save(
+            request.toEntity(id = existing.id, createdAt = existing.createdAt, catalogVersion = version).copy(avatar = existing.avatar),
+        ).also { spIndexCache = null }
+    }
+
+    /**
+     * 上传/替换密探头像：文件落盘后把相对路径写入字典，即时反映到公共图鉴。
+     * 同 id 重传即幂等覆盖；不 bump catalogVersion（头像不算目录内容变更）。
+     */
+    fun setAvatar(operatorId: String, file: MultipartFile): OperatorCatalogEntity {
+        ensureSeeded()
+        val existing = repository.findByOperatorId(operatorId)
+            ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
+        val path = avatarStorage.save(operatorId, file)
+        return repository.save(existing.copy(avatar = path))
+    }
+
+    /** 清除密探头像：删除磁盘文件并置空字段。 */
+    fun clearAvatar(operatorId: String): OperatorCatalogEntity {
+        ensureSeeded()
+        val existing = repository.findByOperatorId(operatorId)
+            ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
+        avatarStorage.delete(operatorId)
+        return repository.save(existing.copy(avatar = null))
     }
 
     fun delete(operatorId: String) {
@@ -104,6 +130,8 @@ class OperatorCatalogService(
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         repository.delete(existing)
+        // 级联清理头像文件：失败仅遗留孤儿文件，不阻断目录删除。
+        avatarStorage.delete(operatorId)
         spIndexCache = null
         bumpCatalogVersion()
     }

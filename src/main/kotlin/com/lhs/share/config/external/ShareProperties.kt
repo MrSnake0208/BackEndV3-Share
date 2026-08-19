@@ -26,6 +26,8 @@ data class ShareProperties(
     var mongo: Mongo = Mongo(),
     @NestedConfigurationProperty
     var ledger: Ledger = Ledger(),
+    @NestedConfigurationProperty
+    var avatar: Avatar = Avatar(),
 ) {
     /**
      * JWT 配置
@@ -112,5 +114,16 @@ data class ShareProperties(
         var pass: String = "",
         var starttls: Boolean = true,
         var ssl: Boolean = false,
+    )
+
+    /**
+     * 密探头像配置
+     */
+    data class Avatar(
+        /**
+         * 头像文件目录({operatorId}.webp 直接存在该目录),
+         * 生产用环境变量 SHARE_AVATAR_DIR / Docker volume 覆盖
+         */
+        var dir: String = "./data/avatar",
     )
 }

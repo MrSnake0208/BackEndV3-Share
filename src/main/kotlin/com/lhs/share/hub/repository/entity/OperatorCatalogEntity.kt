@@ -24,6 +24,9 @@ data class OperatorCatalogEntity(
     val starStones: List<OperatorStarStoneCatalog>,
     // SP 形态的"本体"密探 id（如 史子眇·赴烛 -> 史子眇）；普通密探为 null。
     val spOf: String? = null,
+    // 密探头像 webp 相对路径（如 "/avatar/char_001_yangxiu.webp"）；未上传为 null。
+    // 只能经管理员上传/删除头像接口写入，非自由文本字段。
+    val avatar: String? = null,
     val catalogVersion: String,
     val createdAt: Instant = Instant.now(),
 )

@@ -13,6 +13,8 @@ share:
     secret: local-development-only-jwt-secret-do-not-use-in-production
   mongo:
     hub-uri: mongodb://127.0.0.1:27017/HubBackend?replicaSet=rs0
+  avatar:
+    dir: ./data/avatar
 
 debug:
   email:
