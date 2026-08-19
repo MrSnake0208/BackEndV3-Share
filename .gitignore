@@ -16,7 +16,6 @@ gen/
 bin/
 application-dev.yml
 application-prod.yml
-/data/
 .tools/
 .env
 .agent-teams
