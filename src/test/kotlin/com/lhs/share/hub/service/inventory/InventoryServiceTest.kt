@@ -10,14 +10,14 @@ import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
-import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
-import com.lhs.share.hub.repository.entity.InventoryAccount
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
 import com.lhs.share.hub.repository.entity.InventoryRecord
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
+import com.lhs.share.hub.repository.entity.SubAccount
 import com.mongodb.client.AggregateIterable
 import com.mongodb.client.MongoCollection
 import com.mongodb.client.MongoCursor
@@ -43,12 +43,12 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
 class InventoryServiceTest {
-    private val accountRepository = mockk<InventoryAccountRepository>()
+    private val accountRepository = mockk<SubAccountRepository>()
     private val currentRepository = mockk<InventoryCurrentRepository>()
     private val recordRepository = mockk<InventoryRecordRepository>()
     private val catalogService = mockk<EntityCatalogService>()
     private val mongoTemplate = mockk<MongoTemplate>()
-    private val accounts = mutableMapOf<Pair<String, String>, InventoryAccount>()
+    private val accounts = mutableMapOf<Pair<String, String>, SubAccount>()
     private val currents = mutableMapOf<Triple<String, String, String>, InventoryCurrent>()
     private val records = mutableMapOf<Triple<String, String, String>, InventoryRecord>()
     private var nextRecordId = 1
@@ -70,10 +70,10 @@ class InventoryServiceTest {
         currents.clear()
         records.clear()
         accounts.clear()
-        accounts["u1" to "main"] = InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
-        accounts["u1" to "alt"] = InventoryAccount(id = "a2", userId = "u1", accountId = "alt", name = "小号")
-        accounts["u2" to "main"] = InventoryAccount(id = "a3", userId = "u2", accountId = "main", name = "导入账号")
-        accounts["u2" to "foreign"] = InventoryAccount(id = "a4", userId = "u2", accountId = "foreign", name = "他人账号")
+        accounts["u1" to "main"] = SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        accounts["u1" to "alt"] = SubAccount(id = "a2", userId = "u1", accountId = "alt", name = "小号")
+        accounts["u2" to "main"] = SubAccount(id = "a3", userId = "u2", accountId = "main", name = "导入账号")
+        accounts["u2" to "foreign"] = SubAccount(id = "a4", userId = "u2", accountId = "foreign", name = "他人账号")
         nextRecordId = 1
         every { catalogService.exists(any(), any()) } returns true
         every { catalogService.catalog() } returns InventoryCatalogResponse(catalogVersion = "2026-08-16", entities = emptyList())

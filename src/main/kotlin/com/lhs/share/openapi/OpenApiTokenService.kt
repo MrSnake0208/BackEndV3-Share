@@ -1,9 +1,8 @@
 package com.lhs.share.openapi
 
 import com.lhs.share.controller.response.ApiResultException
-import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.OpenApiTokenRepository
-import com.lhs.share.hub.repository.OperatorAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
@@ -21,32 +20,24 @@ import java.util.UUID
 @Service
 class OpenApiTokenService(
     private val tokenRepository: OpenApiTokenRepository,
-    private val accountRepository: InventoryAccountRepository,
+    private val accountRepository: SubAccountRepository,
     private val redisCache: RedisCache,
-    private val operatorAccountRepository: OperatorAccountRepository? = null,
 ) {
     /**
-     * 生成绑定库存子账号的第三方 API Token(每账号上限 [MAX_TOKENS_PER_ACCOUNT] 个)
+     * 生成绑定统一子账号的第三方 API Token(每账号上限 [MAX_TOKENS_PER_ACCOUNT] 个)。
+     * 子账号由库存、密探共用;可访问的域完全由 scopes 决定(可混合 inventory:* 与 operator:*)。
      */
     fun generate(userId: String, accountId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
         val permissions = scopes.map { scope ->
             OpenApiPermission.byKey(scope) ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "未知 scope: $scope")
         }
         if (permissions.distinct().size != permissions.size) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不得重复")
-        val kinds = permissions.map { if (it.key.startsWith("operator:")) OPERATOR else INVENTORY }.toSet()
-        if (kinds.size != 1) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不能同时包含库存与密探权限")
-        val kind = kinds.single()
-        val accountName =
-            if (kind == OPERATOR) {
-                operatorAccountRepository?.findByUserIdAndAccountId(userId, accountId)?.name
-            } else {
-                accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
-            }
-        if (accountName == null) throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
+        val accountName = accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
         if (tokenRepository.countByUserIdAndAccountId(userId, accountId) >= MAX_TOKENS_PER_ACCOUNT) {
             throw ApiResultException(
                 HttpStatus.TOO_MANY_REQUESTS.value(),
-                "该库存子账号的第三方API Token已达上限（最多${MAX_TOKENS_PER_ACCOUNT}个）",
+                "该子账号的第三方API Token已达上限（最多${MAX_TOKENS_PER_ACCOUNT}个）",
             )
         }
 
@@ -69,7 +60,6 @@ class OpenApiTokenService(
                 id = tokenId,
                 userId = userId,
                 accountId = accountId,
-                kind = kind,
                 token = token,
                 scope = scopeCodes,
                 remark = remark,
@@ -143,16 +133,9 @@ class OpenApiTokenService(
      * 列出当前用户的 token(按创建时间倒序)
      */
     fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map { token ->
-        val accountName =
-            if (token.kind == OPERATOR) {
-                checkNotNull(operatorAccountRepository?.findByUserIdAndAccountId(userId, token.accountId)) {
-                    "Token references a missing operator account"
-                }.name
-            } else {
-                checkNotNull(accountRepository.findByUserIdAndAccountId(userId, token.accountId)) {
-                    "Token references a missing inventory account"
-                }.name
-            }
+        val accountName = checkNotNull(accountRepository.findByUserIdAndAccountId(userId, token.accountId)) {
+            "Token references a missing account"
+        }.name
         OpenApiTokenListItemDto(
             tokenId = checkNotNull(token.id) { "Token document has no id" },
             accountId = token.accountId,
@@ -165,9 +148,8 @@ class OpenApiTokenService(
         )
     }
 
-    fun revokeByAccount(userId: String, accountId: String, kind: String = INVENTORY) {
-        val tokens = tokenRepository.findAllByUserIdAndAccountId(userId, accountId).filter { (it.kind ?: INVENTORY) == kind }
-        tokens.forEach {
+    fun revokeByAccount(userId: String, accountId: String) {
+        tokenRepository.findAllByUserIdAndAccountId(userId, accountId).forEach {
             redisCache.delete(redisKey(it.token))
             tokenRepository.delete(it)
         }
@@ -179,8 +161,6 @@ class OpenApiTokenService(
         private const val REDIS_KEY_PREFIX = "open-api-token:"
         private const val BEARER_PREFIX = "Bearer "
         private const val MAX_TOKENS_PER_ACCOUNT = 5
-        const val INVENTORY = "INVENTORY"
-        const val OPERATOR = "OPERATOR"
     }
 }
 

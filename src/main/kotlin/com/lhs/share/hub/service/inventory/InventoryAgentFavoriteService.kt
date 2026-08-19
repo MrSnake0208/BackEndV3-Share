@@ -4,6 +4,7 @@ import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteLis
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.entity.InventoryAgentFavorite
+import com.lhs.share.hub.service.account.SubAccountService
 import com.mongodb.MongoException
 import org.springframework.dao.DataAccessException
 import org.springframework.dao.DuplicateKeyException
@@ -14,7 +15,7 @@ import org.springframework.transaction.support.TransactionTemplate
 @Service
 class InventoryAgentFavoriteService(
     private val repository: InventoryAgentFavoriteRepository,
-    private val accountService: InventoryAccountService,
+    private val accountService: SubAccountService,
     private val catalogService: EntityCatalogService,
     private val transactionTemplate: TransactionTemplate,
 ) {

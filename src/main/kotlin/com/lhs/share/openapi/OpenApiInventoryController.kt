@@ -5,12 +5,12 @@ import com.lhs.share.config.doc.InventoryWriteResponses
 import com.lhs.share.config.doc.RequireOpenApiToken
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
-import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
-import com.lhs.share.hub.service.inventory.InventoryAccountService
+import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -38,18 +38,18 @@ import java.time.OffsetDateTime
 class OpenApiInventoryController(
     private val tokenService: OpenApiTokenService,
     private val inventoryService: InventoryService,
-    private val accountService: InventoryAccountService,
+    private val accountService: SubAccountService,
 ) {
-    @Operation(summary = "Token 绑定的库存子账号")
+    @Operation(summary = "Token 绑定的子账号")
     @InventoryReadResponses
     @RequireOpenApiToken
     @GetMapping("/inventory/account")
     fun inventoryAccount(
         @Parameter(hidden = true)
         @RequestHeader(value = "Authorization", required = false) authorization: String?,
-    ): ApiResult<InventoryAccountResponse> {
+    ): ApiResult<SubAccountResponse> {
         val principal = tokenService.authenticateAuthorization(authorization)
-        return success(accountService.requireAccount(principal.userId, principal.accountId).let(InventoryAccountResponse::of))
+        return success(accountService.requireAccount(principal.userId, principal.accountId).let(SubAccountResponse::of))
     }
 
     /**

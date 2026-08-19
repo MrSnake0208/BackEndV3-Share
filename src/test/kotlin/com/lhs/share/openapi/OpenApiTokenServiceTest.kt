@@ -1,10 +1,10 @@
 package com.lhs.share.openapi
 
 import com.lhs.share.controller.response.ApiResultException
-import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.OpenApiTokenRepository
-import com.lhs.share.hub.repository.entity.InventoryAccount
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
+import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
 import io.mockk.every
@@ -21,7 +21,7 @@ import java.time.Instant
 
 class OpenApiTokenServiceTest {
     private val tokenRepository = mockk<OpenApiTokenRepository>()
-    private val accountRepository = mockk<InventoryAccountRepository>()
+    private val accountRepository = mockk<SubAccountRepository>()
     private val redisCache = mockk<RedisCache>(relaxed = true)
     private val service = OpenApiTokenService(tokenRepository, accountRepository, redisCache)
 
@@ -45,7 +45,7 @@ class OpenApiTokenServiceTest {
     @Test
     fun `generation maps public scopes and returns the full token once`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
-            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
         every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
         val saved = slot<OpenApiToken>()
         every { tokenRepository.save(capture(saved)) } answers { saved.captured }
@@ -58,13 +58,37 @@ class OpenApiTokenServiceTest {
         assertEquals("main", saved.captured.accountId)
         assertEquals("大号", response.accountName)
         assertEquals(response.tokenId, saved.captured.id)
+        assertEquals(null, saved.captured.kind)
         verify { redisCache.setCache("open-api-token:${response.token}", any<TokenCacheData>(), 0) }
+    }
+
+    @Test
+    fun `generation allows mixed inventory and operator scopes on one token`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
+        val saved = slot<OpenApiToken>()
+        every { tokenRepository.save(capture(saved)) } answers { saved.captured }
+
+        val response = service.generate(
+            "u1",
+            "main",
+            listOf("inventory:read", "inventory:write", "operator:read", "operator:export"),
+            "mixed",
+        )
+
+        assertEquals(
+            listOf("inventory:read", "inventory:write", "operator:read", "operator:export"),
+            response.scopes,
+        )
+        assertEquals(listOf(10001, 10002, 20001, 20003), saved.captured.scope)
+        assertEquals("main", saved.captured.accountId)
     }
 
     @Test
     fun `unknown public scope is rejected`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
-            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
         every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
         val error = assertThrows(ApiResultException::class.java) {
             service.generate("u1", "main", listOf("inventory:admin"), null)
@@ -73,14 +97,35 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `duplicate scopes are rejected`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 0
+        val error = assertThrows(ApiResultException::class.java) {
+            service.generate("u1", "main", listOf("inventory:read", "inventory:read"), null)
+        }
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
     fun `token limit is enforced`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
-            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
         every { tokenRepository.countByUserIdAndAccountId("u1", "main") } returns 5
         val error = assertThrows(ApiResultException::class.java) {
             service.generate("u1", "main", listOf("inventory:read"), null)
         }
         assertEquals(429, error.statusCode)
+    }
+
+    @Test
+    fun `generation rejects a missing account`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "nope") } returns null
+        every { tokenRepository.countByUserIdAndAccountId("u1", "nope") } returns 0
+        val error = assertThrows(ApiResultException::class.java) {
+            service.generate("u1", "nope", listOf("inventory:read"), null)
+        }
+        assertEquals(404, error.statusCode)
     }
 
     @Test
@@ -139,9 +184,12 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
-    fun `account revocation clears every bound token`() {
+    fun `account revocation clears every bound token regardless of legacy kind`() {
         every { tokenRepository.findAllByUserIdAndAccountId("u1", "main") } returns
-            listOf(entity(id = "one", token = "tok1"), entity(id = "two", token = "tok2"))
+            listOf(
+                entity(id = "one", token = "tok1").copy(kind = "OPERATOR"),
+                entity(id = "two", token = "tok2").copy(kind = "INVENTORY"),
+            )
         every { tokenRepository.delete(any()) } just runs
 
         service.revokeByAccount("u1", "main")
@@ -157,7 +205,7 @@ class OpenApiTokenServiceTest {
             entity(scope = listOf(10001, 10002, 10003)),
         )
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
-            InventoryAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
 
         val item = service.list("u1").single()
 
