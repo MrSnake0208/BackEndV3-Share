@@ -168,6 +168,15 @@ DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 （`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
 设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
 
+**密探头像**：头像以 webp 文件存放在 `share.avatar.dir`（默认 `./data/avatar`，可用环境变量
+`SHARE_AVATAR_DIR` 覆盖，Docker 部署请挂持久卷），文件名为 `{operatorId}.webp`，对外以
+`/avatar/{operatorId}.webp` 公开读（图鉴本就无需登录）。管理员可经
+`PUT /v1/admin/operator-catalog/{operatorId}/avatar` 上传（webp、≤500KB）、
+`DELETE /v1/admin/operator-catalog/{operatorId}/avatar` 删除。也支持把成品
+`{operatorId}.webp` 直接放进头像目录——后端初始化时会按目录回填 `avatar` 字段（只补空值、
+不覆盖已上传头像），重启后端即可批量生效。详见
+[docs/operator-catalog-avatar-design.md](docs/operator-catalog-avatar-design.md)。
+
 **把账号设为管理员**：管理员判定为 `maa_user.status >= 2`（`UserService.ADMIN_STATUS`），
 在 MaaBackend 数据库直接更新即可（建议先按 email 确认再改）：
 

@@ -153,10 +153,24 @@ share:
 - `application-local.yml` 同字段指向本机目录即可；
 - Docker：该目录挂 named volume，重建容器不丢。
 
-### 5.5 缓存一致性
+### 5.5 一致性
 
-`GET /v1/operator/catalog` 现有 Caffeine 缓存（`share.cache` 5 分钟）。上传/删除头像后必须
-`evict` 该缓存，保持「改动即时反映到公共图鉴」的既有承诺（与目录增删改同一步骤处理）。
+`GET /v1/operator/catalog` 直接查库（本模块未使用 `@Cacheable` 缓存层），因此上传/删除头像后
+不存在需要逐出（evict）的目录缓存，改动即时反映到公共图鉴；静态资源侧由 Spring 的
+`Last-Modified` 协商缓存兜底一致性。
+
+### 5.6 存量头像回填（把已放入目录的文件关联到字段）
+
+`avatar` 字段默认只由上传/删除接口维护，但允许运维**直接把 `{operatorId}.webp` 放进
+`share.avatar.dir` 目录**。为让这类"现货文件"无需逐条上传即可发布，`OperatorCatalogService`
+在播种初始化（`ensureSeeded`，进程内首次访问一次）时执行回填：
+
+- 扫描目录中的 `*.webp`，按 `{operatorId}.webp` 提取 id；
+- 仅回填字典中 `avatar == null` 的行（`/avatar/{id}.webp`）；
+- 不覆盖已上传头像、不重插被删除的行；临时文件/非法命名忽略。
+
+幂等：重启后端即完成一次关联；后续再放新文件，重启后自动补。设计文档第 3 节"文件即
+真相"的头像数据源由此闭合。
 
 ## 6. 前端设计（YuanHub）
 
