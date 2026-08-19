@@ -9,9 +9,7 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
-import com.lhs.share.hub.controller.inventory.request.InventoryAccountRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
-import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
@@ -21,7 +19,6 @@ import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.service.inventory.EntityCatalogService
-import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -32,7 +29,6 @@ import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -56,42 +52,10 @@ import java.time.OffsetDateTime
 @RestController
 class InventoryController(
     private val inventoryService: InventoryService,
-    private val accountService: InventoryAccountService,
     private val favoriteService: InventoryAgentFavoriteService,
     private val catalogService: EntityCatalogService,
     private val helper: AuthenticationHelper,
 ) {
-    @Operation(summary = "创建库存子账号")
-    @InventoryWriteResponses
-    @RequireJwt
-    @PostMapping("/accounts", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun createAccount(@Valid @RequestBody request: InventoryAccountRequest): ApiResult<InventoryAccountResponse> =
-        success(accountService.create(helper.requireUserId(), request.name))
-
-    @Operation(summary = "库存子账号列表")
-    @InventoryReadResponses
-    @RequireJwt
-    @GetMapping("/accounts")
-    fun accounts(): ApiResult<List<InventoryAccountResponse>> = success(accountService.list(helper.requireUserId()))
-
-    @Operation(summary = "修改库存子账号名称")
-    @InventoryWriteResponses
-    @RequireJwt
-    @PatchMapping("/accounts/{accountId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun renameAccount(
-        @PathVariable accountId: String,
-        @Valid @RequestBody request: InventoryAccountRequest,
-    ): ApiResult<InventoryAccountResponse> = success(accountService.rename(helper.requireUserId(), accountId, request.name))
-
-    @Operation(summary = "删除库存子账号及其库存和流水")
-    @InventoryDeleteResponses
-    @RequireJwt
-    @DeleteMapping("/accounts/{accountId}")
-    fun deleteAccount(@PathVariable accountId: String): ApiResult<Boolean> {
-        accountService.delete(helper.requireUserId(), accountId)
-        return success(true)
-    }
-
     @Operation(summary = "密探特别关注列表")
     @InventoryReadResponses
     @RequireJwt

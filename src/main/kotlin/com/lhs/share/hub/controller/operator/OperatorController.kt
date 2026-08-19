@@ -3,22 +3,18 @@ package com.lhs.share.hub.controller.operator
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
-import com.lhs.share.hub.controller.operator.request.OperatorAccountRequest
 import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
-import com.lhs.share.hub.controller.operator.response.OperatorAccountResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorExportResponse
 import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
-import com.lhs.share.hub.service.operator.OperatorAccountService
 import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.hub.service.operator.OperatorService
 import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -31,27 +27,9 @@ import java.time.OffsetDateTime
 @RequestMapping("/v1/operator", produces = [MediaType.APPLICATION_JSON_VALUE])
 class OperatorController(
     private val service: OperatorService,
-    private val accountService: OperatorAccountService,
     private val catalogService: OperatorCatalogService,
     private val helper: AuthenticationHelper,
 ) {
-    @PostMapping("/accounts")
-    fun create(@Valid @RequestBody request: OperatorAccountRequest): ApiResult<OperatorAccountResponse> =
-        success(accountService.create(helper.requireUserId(), request.name))
-
-    @GetMapping("/accounts")
-    fun accounts(): ApiResult<List<OperatorAccountResponse>> = success(accountService.list(helper.requireUserId()))
-
-    @PatchMapping("/accounts/{accountId}")
-    fun rename(@PathVariable accountId: String, @Valid @RequestBody request: OperatorAccountRequest): ApiResult<OperatorAccountResponse> =
-        success(accountService.rename(helper.requireUserId(), accountId, request.name))
-
-    @DeleteMapping("/accounts/{accountId}")
-    fun deleteAccount(@PathVariable accountId: String): ApiResult<Boolean> {
-        accountService.delete(helper.requireUserId(), accountId)
-        return success(true)
-    }
-
     @PostMapping("/import")
     fun import(@Valid @RequestBody request: OperatorImportRequest): ApiResult<OperatorImportResult> =
         success(service.import(helper.requireUserId(), request))

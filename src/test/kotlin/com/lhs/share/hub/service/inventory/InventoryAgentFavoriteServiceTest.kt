@@ -1,8 +1,9 @@
 package com.lhs.share.hub.service.inventory
 
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
-import com.lhs.share.hub.repository.entity.InventoryAccount
 import com.lhs.share.hub.repository.entity.InventoryAgentFavorite
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.SubAccountService
 import com.mongodb.MongoException
 import io.mockk.every
 import io.mockk.mockk
@@ -25,7 +26,7 @@ import java.util.concurrent.Executors
 
 class InventoryAgentFavoriteServiceTest {
     private val repository = mockk<InventoryAgentFavoriteRepository>()
-    private val accountService = mockk<InventoryAccountService>()
+    private val accountService = mockk<SubAccountService>()
     private val catalogService = mockk<EntityCatalogService>()
     private val rows = ConcurrentHashMap<Pair<String, String>, InventoryAgentFavorite>()
     private val transactionTemplate = TransactionTemplate(
@@ -43,7 +44,7 @@ class InventoryAgentFavoriteServiceTest {
     fun setUp() {
         rows.clear()
         every { accountService.requireAccount(any(), any()) } answers {
-            InventoryAccount(userId = firstArg(), accountId = secondArg(), name = "账号")
+            SubAccount(userId = firstArg(), accountId = secondArg(), name = "账号")
         }
         every { catalogService.exists("agent", any()) } returns true
         every { repository.save(any()) } answers {

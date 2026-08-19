@@ -1,7 +1,6 @@
 package com.lhs.share.hub.controller.operator.response
 
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
-import com.lhs.share.hub.repository.entity.OperatorAccount
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorDisc
@@ -9,17 +8,6 @@ import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
 import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
 import java.time.Instant
-
-data class OperatorAccountResponse(
-    val id: String,
-    val name: String,
-    val createdAt: Instant,
-    val updatedAt: Instant,
-) {
-    companion object {
-        fun of(a: OperatorAccount) = OperatorAccountResponse(a.accountId, a.name, a.createdAt, a.updatedAt)
-    }
-}
 
 data class OperatorCurrentResponse(
     val userId: String,

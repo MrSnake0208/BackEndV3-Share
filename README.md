@@ -87,10 +87,12 @@ export JWT_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/login"
   | jq -er '.data.token')"
 ```
 
-先创建库存子账号，再使用 JWT 为该账号生成同时包含读、写、导出 scope 的本地 API Token：
+先创建**统一子账号**（库存 × 密探共用一张 `sub_accounts` 表），再使用 JWT 为该账号
+生成只含库存权限的本地 API Token。同一子账号也可在密探侧直接使用（如把 scopes 换成
+`operator:read`，或同时包含 `inventory:*` 与 `operator:*`）：
 
 ```bash
-export INVENTORY_ACCOUNT_ID="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/v1/inventory/accounts" \
+export INVENTORY_ACCOUNT_ID="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/v1/accounts" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"本地烟测账号"}' \
@@ -110,6 +112,12 @@ curl --fail-with-body "$API_BASE_URL/user/open-api/tokens" \
   -H "Authorization: Bearer $JWT_TOKEN" | jq '.data[] | {token_id, account_id, account_name, scopes, remark}'
 ```
 
+> **统一子账号说明（2026-08）**：`/v1/inventory/accounts` 与 `/v1/operator/accounts` 已合并为
+> **`/v1/accounts`**（POST 创建 / GET 列表 / PATCH 改名 / DELETE 删除）。子账号对库存、密探、
+> 特别关注全局可用；token 绑定的账号为共享账号，**可访问的域由 scopes 声明**（`inventory:*` 走
+> `/open-api/inventory/**`，`operator:*` 走 `/open-api/operator/**`，可混合）。删除子账号 =
+> 整账号级联删除该子账号的库存、密探、特别关注数据及全部绑定 token。
+
 ### 库存联调 Smoke Test
 
 另开一个已进入 `nix develop path:.` 的终端，将刚生成的完整 API Token 放入环境变量后运行：
@@ -120,7 +128,7 @@ export INVENTORY_API_TOKEN='replace-with-local-api-token'
 ```
 
 脚本默认访问 `http://127.0.0.1:8080`，也可通过 `API_BASE_URL` 覆盖。它从 Token 自动查询绑定的
-库存子账号，不要求另外配置 `account_id`。脚本从真实目录选择 item，使用唯一
+子账号（`GET /open-api/inventory/account`），不要求另外配置 `account_id`。脚本从真实目录选择 item，使用唯一
 `record_id` 验证首次导入、幂等重传、409 冲突、当前库存、原始交换文档导出和直接回传导入；脚本不会打印 Token。
 
 ### 密探心纸库存与特别关注

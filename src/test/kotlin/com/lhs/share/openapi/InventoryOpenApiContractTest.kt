@@ -5,8 +5,8 @@ import com.lhs.share.config.doc.SpringDocConfig
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.hub.controller.inventory.InventoryController
+import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
-import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryService
 import com.lhs.share.service.DataTransferService
@@ -53,7 +53,7 @@ class InventoryOpenApiContractTest {
     lateinit var inventoryService: InventoryService
 
     @MockitoBean
-    lateinit var inventoryAccountService: InventoryAccountService
+    lateinit var subAccountService: SubAccountService
 
     @MockitoBean
     lateinit var inventoryAgentFavoriteService: InventoryAgentFavoriteService
@@ -111,8 +111,6 @@ class InventoryOpenApiContractTest {
         assertTrue(jwtImport["responses"].has("409"))
         assertTrue(jwtImport["responses"].has("422"))
         listOf(
-            "/v1/inventory/accounts",
-            "/v1/inventory/accounts/{accountId}",
             "/v1/inventory/agent-favorites",
             "/v1/inventory/agent-favorites/{agentId}",
         ).forEach { assertTrue(root["paths"].has(it)) }

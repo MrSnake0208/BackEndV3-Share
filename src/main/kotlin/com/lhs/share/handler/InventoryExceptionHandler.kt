@@ -1,6 +1,7 @@
 package com.lhs.share.handler
 
 import com.fasterxml.jackson.core.JsonParseException
+import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryError
 import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
@@ -23,7 +24,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 private val inventoryLog = KotlinLogging.logger { }
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = [InventoryController::class, OpenApiInventoryController::class])
+@RestControllerAdvice(
+    assignableTypes = [AccountController::class, InventoryController::class, OpenApiInventoryController::class],
+)
 class InventoryExceptionHandler {
     @ExceptionHandler(InventoryApiException::class)
     fun inventoryException(e: InventoryApiException): ResponseEntity<InventoryErrorResponse> = response(

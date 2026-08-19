@@ -6,14 +6,14 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.InventoryExceptionHandler
+import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.inventory.InventoryController
-import com.lhs.share.hub.controller.inventory.response.InventoryAccountResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
-import com.lhs.share.hub.repository.entity.InventoryAccount
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
-import com.lhs.share.hub.service.inventory.InventoryAccountService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.hub.service.inventory.InventoryService
@@ -28,18 +28,16 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
-import java.time.Instant
 
 class InventoryControllerContractTest {
     private val inventoryService = mockk<InventoryService>()
-    private val accountService = mockk<InventoryAccountService>()
+    private val subAccountService = mockk<SubAccountService>()
     private val favoriteService = mockk<InventoryAgentFavoriteService>()
     private val tokenService = mockk<OpenApiTokenService>()
     private val catalogService = mockk<EntityCatalogService>()
@@ -55,8 +53,9 @@ class InventoryControllerContractTest {
         val validator = LocalValidatorFactoryBean().apply { afterPropertiesSet() }
         mockMvc = MockMvcBuilders
             .standaloneSetup(
-                InventoryController(inventoryService, accountService, favoriteService, catalogService, helper),
-                OpenApiInventoryController(tokenService, inventoryService, accountService),
+                InventoryController(inventoryService, favoriteService, catalogService, helper),
+                OpenApiInventoryController(tokenService, inventoryService, subAccountService),
+                AccountController(subAccountService, helper),
             )
             .setControllerAdvice(InventoryExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
@@ -91,8 +90,8 @@ class InventoryControllerContractTest {
     @Test
     fun `API token exposes its bound account without an account selector`() {
         every { tokenService.authenticateAuthorization("Bearer account-token") } returns OpenApiPrincipal("token-user", "main")
-        every { accountService.requireAccount("token-user", "main") } returns
-            InventoryAccount(id = "a1", userId = "token-user", accountId = "main", name = "大号")
+        every { subAccountService.requireAccount("token-user", "main") } returns
+            SubAccount(id = "a1", userId = "token-user", accountId = "main", name = "大号")
 
         mockMvc.perform(
             get("/open-api/inventory/account")
@@ -143,35 +142,6 @@ class InventoryControllerContractTest {
             .andExpect(jsonPath("$.data.accepted").value(1))
 
         verify { inventoryService.import("jwt-user", any()) }
-    }
-
-    @Test
-    fun `JWT account CRUD uses the authenticated owner`() {
-        val account = InventoryAccountResponse("main", "大号", Instant.EPOCH, Instant.EPOCH)
-        every { helper.requireUserId() } returns "jwt-user"
-        every { accountService.create("jwt-user", "大号") } returns account
-        every { accountService.list("jwt-user") } returns listOf(account)
-        every { accountService.rename("jwt-user", "main", "改名") } returns account.copy(name = "改名")
-        every { accountService.delete("jwt-user", "main") } returns Unit
-
-        mockMvc.perform(post("/v1/inventory/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"大号\"}"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.id").value("main"))
-        mockMvc.perform(get("/v1/inventory/accounts"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data[0].name").value("大号"))
-        mockMvc.perform(
-            patch("/v1/inventory/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"改名\"}"),
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.name").value("改名"))
-        mockMvc.perform(delete("/v1/inventory/accounts/main"))
-            .andExpect(status().isOk)
-
-        verify { accountService.create("jwt-user", "大号") }
-        verify { accountService.list("jwt-user") }
-        verify { accountService.rename("jwt-user", "main", "改名") }
-        verify { accountService.delete("jwt-user", "main") }
     }
 
     @Test

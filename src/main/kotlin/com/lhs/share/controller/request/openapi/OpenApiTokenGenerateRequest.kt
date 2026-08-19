@@ -9,6 +9,9 @@ import jakarta.validation.constraints.Size
 
 /**
  * 生成第三方 API Token 请求
+ *
+ * account_id 为统一子账号(库存 × 密探共用);可访问域由 scopes 声明,
+ * 允许同时包含 inventory:* 与 operator:*。
  */
 data class OpenApiTokenGenerateRequest(
     @field:NotBlank(message = "account_id 不能为空")

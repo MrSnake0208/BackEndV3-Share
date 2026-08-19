@@ -12,9 +12,9 @@ import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
-import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
 import com.lhs.share.hub.repository.entity.InventoryRecord
 import com.lhs.share.hub.repository.entity.ProducerInfo
@@ -49,7 +49,7 @@ private val log = KotlinLogging.logger { }
  */
 @Service
 class InventoryService(
-    private val accountRepository: InventoryAccountRepository,
+    private val accountRepository: SubAccountRepository,
     private val currentRepository: InventoryCurrentRepository,
     private val recordRepository: InventoryRecordRepository,
     private val catalogService: EntityCatalogService,

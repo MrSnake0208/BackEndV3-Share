@@ -23,11 +23,15 @@ data class OpenApiToken(
     @Indexed
     val userId: String,
     /**
-     * Token 绑定的库存子账号 id
+     * Token 绑定的统一子账号 id(库存 × 密探共用)
      */
     @Indexed
     val accountId: String,
-    /** Token domain; null is legacy INVENTORY. */
+    /**
+     * @deprecated 旧版按账号域(INVENTORY/OPERATOR)标记;自统一子账号起不再参与任何判定,
+     * 可访问域完全由 [scope] 决定。历史行保留该字段仅为兼容旧文档,读取一律忽略。
+     */
+    @Deprecated("Token 域由 scope 决定,kind 已退役")
     val kind: String? = null,
     /**
      * token 字符串(无连字符 UUID),唯一

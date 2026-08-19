@@ -1,10 +1,13 @@
-package com.lhs.share.hub.service.inventory
+package com.lhs.share.hub.service.account
 
-import com.lhs.share.hub.repository.InventoryAccountRepository
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
-import com.lhs.share.hub.repository.entity.InventoryAccount
+import com.lhs.share.hub.repository.OperatorCurrentRepository
+import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.openapi.OpenApiTokenService
 import io.mockk.every
 import io.mockk.just
@@ -22,11 +25,13 @@ import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 
-class InventoryAccountServiceTest {
-    private val accountRepository = mockk<InventoryAccountRepository>()
-    private val currentRepository = mockk<InventoryCurrentRepository>()
-    private val recordRepository = mockk<InventoryRecordRepository>()
+class SubAccountServiceTest {
+    private val accountRepository = mockk<SubAccountRepository>()
+    private val inventoryCurrentRepository = mockk<InventoryCurrentRepository>()
+    private val inventoryRecordRepository = mockk<InventoryRecordRepository>()
     private val favoriteRepository = mockk<InventoryAgentFavoriteRepository>()
+    private val operatorCurrentRepository = mockk<OperatorCurrentRepository>()
+    private val operatorRecordRepository = mockk<OperatorRecordRepository>()
     private val tokenService = mockk<OpenApiTokenService>()
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
@@ -35,11 +40,13 @@ class InventoryAccountServiceTest {
             override fun rollback(status: TransactionStatus) = Unit
         },
     )
-    private val service = InventoryAccountService(
+    private val service = SubAccountService(
         accountRepository,
-        currentRepository,
-        recordRepository,
+        inventoryCurrentRepository,
+        inventoryRecordRepository,
         favoriteRepository,
+        operatorCurrentRepository,
+        operatorRecordRepository,
         tokenService,
         transactionTemplate,
     )
@@ -48,14 +55,14 @@ class InventoryAccountServiceTest {
     fun `create list and rename preserve stable account id`() {
         every { accountRepository.countByUserId("u1") } returns 0
         every { accountRepository.save(any()) } answers {
-            val account = firstArg<InventoryAccount>()
+            val account = firstArg<SubAccount>()
             if (account.id == null) account.copy(id = "mongo-id") else account
         }
         every { accountRepository.findAllByUserIdOrderByCreatedAtAsc("u1") } answers {
-            listOf(InventoryAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号"))
+            listOf(SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号"))
         }
         every { accountRepository.findByUserIdAndAccountId("u1", any()) } answers {
-            InventoryAccount(id = "mongo-id", userId = "u1", accountId = secondArg(), name = "大号")
+            SubAccount(id = "mongo-id", userId = "u1", accountId = secondArg(), name = "大号")
         }
 
         val created = service.create("u1", "新账号")
@@ -66,9 +73,11 @@ class InventoryAccountServiceTest {
         assertEquals("main", listed.single().id)
         assertEquals(created.id, renamed.id)
         assertEquals("改名", renamed.name)
-        verify(exactly = 0) { currentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
-        verify(exactly = 0) { recordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { inventoryRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { favoriteRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { operatorRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 
     @Test
@@ -98,20 +107,24 @@ class InventoryAccountServiceTest {
     }
 
     @Test
-    fun `delete cascades only the owned account`() {
+    fun `delete cascades all domains data favorites and tokens`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
-            InventoryAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
-        every { currentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
-        every { recordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+            SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
+        every { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { tokenService.revokeByAccount("u1", "main") } just runs
         every { accountRepository.deleteById("mongo-id") } just runs
 
         service.delete("u1", "main")
 
-        verify(exactly = 1) { currentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
-        verify(exactly = 1) { recordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
     }

@@ -5,8 +5,8 @@ import com.lhs.share.hub.controller.operator.request.OperatorEntryRequest
 import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
 import com.lhs.share.hub.controller.operator.request.OperatorRecordRequest
 import com.lhs.share.hub.controller.operator.response.*
-import com.lhs.share.hub.repository.OperatorAccountRepository
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.entity.*
@@ -20,7 +20,7 @@ import java.util.UUID
 
 @Service
 class OperatorService(
-    private val accountRepository: OperatorAccountRepository,
+    private val accountRepository: SubAccountRepository,
     private val currentRepository: OperatorCurrentRepository,
     private val recordRepository: OperatorRecordRepository,
     private val catalogRepository: OperatorCatalogRepository,
