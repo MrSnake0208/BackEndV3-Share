@@ -106,6 +106,8 @@ data class OperatorCatalogEntryResponse(
     val discs: List<OperatorDiscCatalog>,
     // SP 形态指向其"本体"密探 id（如 史子眇·赴烛 -> 史子眇）；普通密探为 null。
     val spOf: String? = null,
+    // 密探头像相对路径（如 "/avatar/char_001_yangxiu.webp"），前端拼 baseURL；未上传为 null。
+    val avatar: String? = null,
 ) {
     companion object {
         fun of(e: OperatorCatalogEntity) = OperatorCatalogEntryResponse(
@@ -118,6 +120,7 @@ data class OperatorCatalogEntryResponse(
             e.games,
             e.discs,
             e.spOf,
+            e.avatar,
         )
     }
 }

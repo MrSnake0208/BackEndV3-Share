@@ -14,18 +14,21 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.web.multipart.MultipartFile
 import java.time.Instant
 
 /**
- * 密探公共图鉴管理（管理员）核心业务单测：目录的增删改查与校验。
+ * 密探公共图鉴管理（管理员）核心业务单测：目录的增删改查、校验与头像上传/清理。
  * 权限校验本身在控制器层（AdminOperatorCatalogController），由契约测试覆盖。
  */
 class OperatorCatalogServiceTest {
     private val repository = mockk<OperatorCatalogRepository>()
-    private val service = OperatorCatalogService(repository, ObjectMapper())
+    private val avatarStorage = mockk<AvatarStorage>(relaxed = true)
+    private val service = OperatorCatalogService(repository, ObjectMapper(), avatarStorage)
 
     private fun seed(existing: List<OperatorCatalogEntity> = emptyList()) {
         every { repository.count() } returns 1L // 跳过资源文件整体播种，走"老库回填"路径
@@ -213,7 +216,7 @@ class OperatorCatalogServiceTest {
 
         // 资源文件中 char_085_shizimiaosp 的 spOf = char_023_shizimiao
         assertEquals("char_023_shizimiao", saved.captured.spOf)
-        assertEquals(oldSp.id, saved.captured.id)          // 保留 mongo _id
+        assertEquals(oldSp.id, saved.captured.id) // 保留 mongo _id
         assertEquals(oldSp.createdAt, saved.captured.createdAt) // 保留创建时间
         assertEquals("2026-08-16", saved.captured.catalogVersion) // 版本不重置
     }
@@ -231,17 +234,105 @@ class OperatorCatalogServiceTest {
         verify(exactly = 0) { repository.save(any()) }
     }
 
-    private fun existing(id: String, createdAt: Instant = Instant.parse("2026-08-01T00:00:00Z")) = OperatorCatalogEntity(
-        id = "mongo_" + id,
-        operatorId = id,
-        name = id,
-        rarity = 5,
-        prof = listOf("阳"),
-        subProf = emptyList(),
-        games = listOf("如鸢"),
-        discs = listOf(OperatorDiscCatalog("初始能量+1")),
-        starStones = listOf(OperatorStarStoneCatalog("主星石", "main")),
-        catalogVersion = "2026-08-16",
-        createdAt = createdAt,
-    )
+    private fun existing(
+        id: String,
+        createdAt: Instant = Instant.parse("2026-08-01T00:00:00Z"),
+        avatar: String? = null,
+    ): OperatorCatalogEntity {
+        return OperatorCatalogEntity(
+            id = "mongo_" + id,
+            operatorId = id,
+            name = id,
+            rarity = 5,
+            prof = listOf("阳"),
+            subProf = emptyList(),
+            games = listOf("如鸢"),
+            discs = listOf(OperatorDiscCatalog("初始能量+1")),
+            starStones = listOf(OperatorStarStoneCatalog("主星石", "main")),
+            avatar = avatar,
+            catalogVersion = "2026-08-16",
+            createdAt = createdAt,
+        )
+    }
+
+    // —— 头像上传 / 清理 ——
+
+    @Test
+    fun `update preserves the existing avatar across full overwrite`() {
+        seed()
+        val row = existing("char_090_new", avatar = "/avatar/char_090_new.webp")
+        every { repository.findByOperatorId("char_090_new") } returns row
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        service.update("char_090_new", writeRequest().copy(name = "改名"))
+
+        assertEquals("/avatar/char_090_new.webp", saved.captured.avatar)
+        assertEquals("改名", saved.captured.name)
+    }
+
+    @Test
+    fun `setAvatar stores the storage path onto the operator`() {
+        seed()
+        val row = existing("char_090_new")
+        every { repository.findByOperatorId("char_090_new") } returns row
+        every { avatarStorage.save(any(), any()) } returns "/avatar/char_090_new.webp"
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        val file = mockk<MultipartFile>()
+        service.setAvatar("char_090_new", file)
+
+        verify { avatarStorage.save("char_090_new", file) }
+        assertEquals("/avatar/char_090_new.webp", saved.captured.avatar)
+    }
+
+    @Test
+    fun `setAvatar does not bump the catalog version`() {
+        seed()
+        val row = existing("char_090_new", avatar = "/avatar/char_090_new.webp")
+        every { repository.findByOperatorId("char_090_new") } returns row
+        every { avatarStorage.save(any(), any()) } returns "/avatar/char_090_new.webp"
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        service.setAvatar("char_090_new", mockk())
+
+        assertEquals(row.catalogVersion, saved.captured.catalogVersion)
+    }
+
+    @Test
+    fun `setAvatar throws not found when operator is absent`() {
+        seed()
+        every { repository.findByOperatorId("char_090_new") } returns null
+        val e = assertThrows(OperatorApiException::class.java) { service.setAvatar("char_090_new", mockk()) }
+        assertEquals(HttpStatus.NOT_FOUND, e.status)
+    }
+
+    @Test
+    fun `clearAvatar removes the file and nulls the avatar field`() {
+        seed()
+        val row = existing("char_090_new", avatar = "/avatar/char_090_new.webp")
+        every { repository.findByOperatorId("char_090_new") } returns row
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        service.clearAvatar("char_090_new")
+
+        verify { avatarStorage.delete("char_090_new") }
+        assertNull(saved.captured.avatar)
+    }
+
+    @Test
+    fun `delete cascades cleaning the avatar file`() {
+        seed(listOf(existing("char_001"), existing("char_002")))
+        every { repository.findByOperatorId("char_001") } returns existing("char_001")
+        every { repository.delete(any()) } returns Unit
+        every { repository.findAllByOrderByOperatorIdAsc() } returns listOf(existing("char_002"))
+        every { repository.save(any()) } answers { firstArg() }
+
+        service.delete("char_001")
+
+        verify { avatarStorage.delete("char_001") }
+    }
 }

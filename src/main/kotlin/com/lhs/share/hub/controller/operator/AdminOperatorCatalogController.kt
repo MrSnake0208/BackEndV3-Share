@@ -22,7 +22,9 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.multipart.MultipartFile
 
 /**
  * 密探公共 API（公共图鉴）的管理员管理端点。
@@ -93,6 +95,30 @@ class AdminOperatorCatalogController(
         requireAdmin()
         catalogService.delete(operatorId)
         return success(true)
+    }
+
+    /**
+     * 管理员上传/替换密探头像（webp，≤500KB）。
+     * 落盘为 {avatarDir}/{operatorId}.webp 并把相对路径写入字典，即时反映到公共图鉴；
+     * 同 id 重传即幂等覆盖。
+     */
+    @Operation(summary = "管理员上传密探头像")
+    @OperatorAdminResponses
+    @PutMapping("/{operatorId}/avatar", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    fun uploadAvatar(@PathVariable operatorId: String, @RequestPart file: MultipartFile): ApiResult<OperatorCatalogEntity> {
+        requireAdmin()
+        return success(catalogService.setAvatar(operatorId, file))
+    }
+
+    /**
+     * 管理员删除密探头像：移除磁盘文件并置空字典字段。
+     */
+    @Operation(summary = "管理员删除密探头像")
+    @OperatorAdminResponses
+    @DeleteMapping("/{operatorId}/avatar")
+    fun deleteAvatar(@PathVariable operatorId: String): ApiResult<OperatorCatalogEntity> {
+        requireAdmin()
+        return success(catalogService.clearAvatar(operatorId))
     }
 
     private fun requireAdmin() {

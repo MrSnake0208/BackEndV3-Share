@@ -63,6 +63,9 @@ share:
   ledger:
     # 广陵账房:每用户方案数上限
     max-plans-per-user: 50
+  avatar:
+    # 密探头像文件目录(存放 {operatorId}.webp;application-local.yml 同步保留默认值即可)
+    dir: ${SHARE_AVATAR_DIR:./data/avatar}
   mails:
     # 邮件服务器 SMTP 配置(可配置多个,发送时轮询)
     # - host: smtp.qq.com
