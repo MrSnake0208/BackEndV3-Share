@@ -106,6 +106,7 @@ class SecurityConfig(
                 "/swagger-ui/**",
                 "/v1/inventory/catalog",
                 "/v1/operator/catalog",
+                "/avatar/**",
                 "/user/open-api/permissions",
                 "/open-api/**",
             )
