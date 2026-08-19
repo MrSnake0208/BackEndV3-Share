@@ -7,7 +7,7 @@ import java.time.Instant
  * 导入记录列表项(记录排查与删除入口)
  *
  * Jackson SNAKE_CASE 序列化:record_id / record_type / entity_type /
- * acquisition_channel / effective_at / received_at / stock_effect。
+ * acquisition_channel / stamina_cost / effective_at / received_at / stock_effect。
  */
 data class InventoryRecordListItemDto(
     val accountId: String,
@@ -15,6 +15,7 @@ data class InventoryRecordListItemDto(
     val recordType: String,
     val entityType: String,
     val acquisitionChannel: String?,
+    val staminaCost: Long?,
     val effectiveAt: Instant,
     val receivedAt: Instant,
     val stockEffect: String,
@@ -27,6 +28,7 @@ data class InventoryRecordListItemDto(
             recordType = record.recordType,
             entityType = record.entityType,
             acquisitionChannel = record.acquisitionChannel,
+            staminaCost = record.staminaCost,
             effectiveAt = record.effectiveAt,
             receivedAt = record.receivedAt,
             stockEffect = record.stockEffect,

@@ -41,6 +41,7 @@ data class InventoryExportRecordDto(
     @field:Schema(allowableValues = ["item", "agent"])
     val entityType: String,
     val acquisitionChannel: String? = null,
+    val staminaCost: Long? = null,
     @field:Schema(format = "date-time")
     val effectiveAt: Instant,
     @field:Schema(allowableValues = ["full", "listed"])

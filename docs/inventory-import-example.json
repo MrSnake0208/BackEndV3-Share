@@ -17,6 +17,7 @@
       "record_type": "reward_delta",
       "entity_type": "agent",
       "acquisition_channel": "派遣",
+      "stamina_cost": 80,
       "effective_at": "2026-08-16T07:19:46.833+08:00",
       "entries": [
         {
@@ -32,6 +33,7 @@
       "record_type": "reward_delta",
       "entity_type": "agent",
       "acquisition_channel": "派遣",
+      "stamina_cost": 80,
       "effective_at": "2026-08-16T07:20:57.048+08:00",
       "entries": [
         {
@@ -47,6 +49,7 @@
       "record_type": "reward_delta",
       "entity_type": "agent",
       "acquisition_channel": "派遣",
+      "stamina_cost": 80,
       "effective_at": "2026-08-16T07:30:14.974+08:00",
       "entries": [
         {

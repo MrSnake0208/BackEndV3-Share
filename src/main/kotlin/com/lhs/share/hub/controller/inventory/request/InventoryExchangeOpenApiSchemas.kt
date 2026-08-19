@@ -21,6 +21,14 @@ class InventoryRewardRecordSchema(
     val entityType: String,
     @field:Schema(minLength = 1, maxLength = 64)
     val acquisitionChannel: String? = null,
+    @field:Schema(
+        type = "integer",
+        format = "int64",
+        minimum = "0",
+        maximum = "2147483647",
+        description = "派遣消耗体力数；acquisition_channel 包含‘派遣’时必填，其他渠道不得携带",
+    )
+    val staminaCost: Long? = null,
     @field:Schema(type = "string", format = "date-time")
     val effectiveAt: String,
     @field:ArraySchema(schema = Schema(implementation = InventoryRewardEntrySchema::class), minItems = 1)

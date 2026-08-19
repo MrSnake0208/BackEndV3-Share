@@ -158,6 +158,7 @@ class InventoryService(
             if (record.acquisitionChannel != null && record.acquisitionChannel.isEmpty()) {
                 throw schemaError("acquisition_channel must not be empty", record.recordId)
             }
+            validateStaminaCost(record)
             validateEnums(record)
             validateEntries(record)
         }
@@ -234,6 +235,19 @@ class InventoryService(
         }
     }
 
+    private fun validateStaminaCost(record: InventoryRecordRequest) {
+        val isDispatchReward = record.recordType == REWARD_DELTA && record.acquisitionChannel?.contains("派遣") == true
+        if (isDispatchReward && record.staminaCost == null) {
+            throw schemaError("stamina_cost is required for dispatch rewards", record.recordId)
+        }
+        if (!isDispatchReward && record.staminaCost != null) {
+            throw schemaError("stamina_cost is only allowed for dispatch rewards", record.recordId)
+        }
+        if (record.staminaCost != null && (record.staminaCost < 0 || record.staminaCost > MAX_COUNT)) {
+            throw schemaError("stamina_cost is outside the supported range", record.recordId)
+        }
+    }
+
     /**
      * entries 校验:同一 record 内 id 唯一;(entity_type, id) 存在于目录;
      * count 范围由记录类型决定(reward_delta 1..MAX, snapshot 0..MAX)。
@@ -282,6 +296,7 @@ class InventoryService(
             recordType = record.recordType,
             entityType = record.entityType,
             acquisitionChannel = record.acquisitionChannel,
+            staminaCost = record.staminaCost,
             snapshotScope = record.snapshotScope,
             effectiveAt = validated.effectiveAt,
             producer = ProducerInfo(platform = producer.platform, version = producer.version),
@@ -303,6 +318,7 @@ class InventoryService(
         if (existing.recordType != newReq.recordType ||
             existing.entityType != newReq.entityType ||
             existing.acquisitionChannel != newReq.acquisitionChannel ||
+            existing.staminaCost != newReq.staminaCost ||
             existing.snapshotScope != newReq.snapshotScope ||
             !existing.effectiveAt.equals(parseInstant(newReq.effectiveAt, "effective_at"))
         ) {
@@ -322,6 +338,7 @@ class InventoryService(
         if (a.recordType != b.recordType ||
             a.entityType != b.entityType ||
             a.acquisitionChannel != b.acquisitionChannel ||
+            a.staminaCost != b.staminaCost ||
             a.snapshotScope != b.snapshotScope ||
             !first.effectiveAt.equals(second.effectiveAt) ||
             a.entries.size != b.entries.size
@@ -697,6 +714,7 @@ class InventoryService(
                         recordType = STOCK_SNAPSHOT,
                         entityType = type,
                         acquisitionChannel = "背包",
+                        staminaCost = null,
                         effectiveAt = now,
                         snapshotScope = SNAPSHOT_FULL,
                         entries = entries,
@@ -720,6 +738,7 @@ class InventoryService(
                             recordType = r.recordType,
                             entityType = r.entityType,
                             acquisitionChannel = r.acquisitionChannel,
+                            staminaCost = r.staminaCost,
                             effectiveAt = r.effectiveAt,
                             snapshotScope = r.snapshotScope,
                             entries = r.entries.map { e -> InventoryExportEntryDto(id = e.id, name = e.name, count = e.count) },
