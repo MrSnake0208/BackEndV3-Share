@@ -60,6 +60,10 @@ data class InventoryRecord(
      */
     val acquisitionChannel: String? = null,
     /**
+     * 派遣消耗体力数；仅 acquisitionChannel 包含“派遣”的 reward_delta 记录有值。
+     */
+    val staminaCost: Long? = null,
+    /**
      * 快照范围: full | listed;仅 record_type = stock_snapshot 时携带,
      * reward_delta 记录恒为 null
      */

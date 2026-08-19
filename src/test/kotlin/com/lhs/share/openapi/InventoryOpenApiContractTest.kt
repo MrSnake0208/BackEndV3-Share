@@ -174,6 +174,8 @@ class InventoryOpenApiContractTest {
         assertEquals(listOf("reward_delta"), rewardRecord.at("/properties/record_type/enum").map { it.asText() })
         assertEquals(1, rewardRecord.at("/properties/entries/minItems").asInt())
         assertTrue(rewardRecord["not"]["\$ref"].asText().endsWith("/InventorySnapshotScopePresent"))
+        assertEquals(0, rewardRecord.at("/properties/stamina_cost/minimum").asInt())
+        assertFalse(root.at("/components/schemas/InventoryFullSnapshotRecord/properties").has("stamina_cost"))
         assertEquals(1, root.at("/components/schemas/InventoryRewardEntry/properties/count/minimum").asInt())
 
         val fullSnapshot = root.at("/components/schemas/InventoryFullSnapshotRecord")
