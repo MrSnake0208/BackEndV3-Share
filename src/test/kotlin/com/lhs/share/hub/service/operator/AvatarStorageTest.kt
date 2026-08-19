@@ -100,4 +100,25 @@ class AvatarStorageTest {
         // 文件不存在时静默成功，不抛异常
         s.delete("char_001_yangxiu")
     }
+
+    @Test
+    fun `existingOperatorIds lists valid webp files and ignores others`() {
+        val s = storage()
+        Files.write(tempDir.resolve("char_001_yangxiu.webp"), webpBytes())
+        Files.write(tempDir.resolve("char_002_jiaxu.webp"), webpBytes())
+        Files.write(tempDir.resolve("not_an_id.webp"), webpBytes())
+        Files.write(tempDir.resolve("readme.txt"), "x".toByteArray())
+        Files.write(tempDir.resolve("char_003_pending.webp.tmp"), webpBytes())
+
+        val ids = s.existingOperatorIds()
+
+        assertEquals(setOf("char_001_yangxiu", "char_002_jiaxu"), ids)
+    }
+
+    @Test
+    fun `existingOperatorIds is empty when the directory is missing`() {
+        val s = storage(tempDir.resolve("nope").toString())
+
+        assertEquals(emptySet<String>(), s.existingOperatorIds())
+    }
 }

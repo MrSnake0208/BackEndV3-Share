@@ -335,4 +335,27 @@ class OperatorCatalogServiceTest {
 
         verify { avatarStorage.delete("char_001") }
     }
+
+    // —— 存量头像回填（目录里已有的文件 → 关联 avatar 字段） ——
+
+    @Test
+    fun `existing avatars are backfilled from the directory without overwriting set ones`() {
+        val rowNull = existing("char_001_yangxiu")
+        val rowSet = existing("char_002_jiaxu", avatar = "/avatar/char_002_jiaxu.webp")
+        every { repository.count() } returns 1L
+        every { repository.findByOperatorId(any()) } returns null
+        every { repository.findByOperatorId("char_001_yangxiu") } returns rowNull
+        every { repository.findByOperatorId("char_002_jiaxu") } returns rowSet
+        every { repository.findAllByOrderByOperatorIdAsc() } returns listOf(rowNull, rowSet)
+        every { avatarStorage.existingOperatorIds() } returns setOf("char_001_yangxiu", "char_002_jiaxu", "char_999_ghost")
+        every { avatarStorage.relativePath(any()) } answers { "/avatar/${firstArg<String>()}.webp" }
+        val saved = slot<OperatorCatalogEntity>()
+        every { repository.save(capture(saved)) } answers { saved.captured }
+
+        service.catalog() // 触发 ensureSeeded → 回填
+
+        // 只回填了 avatar 为 null 的 char_001；char_002 已设置不覆盖；char_999 目录行不存在不重插
+        assertEquals("/avatar/char_001_yangxiu.webp", saved.captured.avatar)
+        verify(exactly = 1) { repository.save(any()) }
+    }
 }

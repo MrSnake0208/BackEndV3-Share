@@ -229,7 +229,25 @@ class OperatorCatalogService(
             catalogVersion = repository.findAllByOrderByOperatorIdAsc()
                 .maxOfOrNull { it.catalogVersion }
                 ?: version
+            // 存量头像关联：与 spOf 老库回填同理，只回填 avatar 为 null 的行，
+            // 不覆盖管理员上传的头像、不重插被删除的行；进程内仅首次访问执行一次。
+            backfillAvatars()
             seeded = true
+        }
+    }
+
+    /**
+     * 把 `share.avatar.dir` 目录里已有的 `{operatorId}.webp` 关联到字典行。
+     * 让"直接放进目录的头像文件"无需逐条上传也能被公共图鉴发布。
+     */
+    private fun backfillAvatars() {
+        val ids = avatarStorage.existingOperatorIds()
+        if (ids.isEmpty()) return
+        ids.forEach { id ->
+            val existing = repository.findByOperatorId(id) ?: return@forEach
+            if (existing.avatar == null) {
+                repository.save(existing.copy(avatar = avatarStorage.relativePath(id)))
+            }
         }
     }
 

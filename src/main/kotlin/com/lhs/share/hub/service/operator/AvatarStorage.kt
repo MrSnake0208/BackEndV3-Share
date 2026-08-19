@@ -61,6 +61,25 @@ class AvatarStorage(private val properties: ShareProperties) {
         }
     }
 
+    /**
+     * 列出头像目录中已有的密探 id（`{operatorId}.webp` 去扩展名）。
+     * 供存量头像回填使用：把直接放进目录的文件与字典字段关联；
+     * 临时文件（.webp.tmp 等）、非法命名一律忽略。
+     */
+    fun existingOperatorIds(): Set<String> {
+        val dir = directory()
+        if (!Files.isDirectory(dir)) return emptySet()
+        try {
+            Files.newDirectoryStream(dir, "*.webp").use { ds ->
+                return ds.map { it.fileName.toString().removeSuffix(".webp") }
+                    .filter { OPERATOR_ID_PATTERN.matches(it) }
+                    .toSet()
+            }
+        } catch (_: java.io.IOException) {
+            return emptySet()
+        }
+    }
+
     private fun directory(): Path = Path.of(properties.avatar.dir).toAbsolutePath()
 
     /** WebP 魔数：RIFF (4B) + 文件大小 (4B) + WEBP (4B)。Content-Type 头不可信，以文件头为准。 */
