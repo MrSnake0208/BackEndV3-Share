@@ -18,6 +18,7 @@ class OperatorCatalogEntityContractTest {
         operatorId = "char_001_yangxiu",
         name = "杨修",
         rarity = 5,
+        specialOddityName = "增伤值",
         prof = emptyList(),
         subProf = emptyList(),
         games = listOf("如鸢", "代号鸢"),
@@ -32,5 +33,8 @@ class OperatorCatalogEntityContractTest {
         assertTrue(json.contains("\"id\":\"char_001_yangxiu\""), json)
         assertFalse(json.contains("6a83e6760776fc2dc6dbe5bb"), json)
         assertFalse(json.contains("operatorId"), json)
+        assertTrue(json.contains("\"specialOddityName\":\"增伤值\""), json)
+        assertFalse(json.contains("odditySchema"), json)
+        assertFalse(json.contains("incompleteFields"), json)
     }
 }

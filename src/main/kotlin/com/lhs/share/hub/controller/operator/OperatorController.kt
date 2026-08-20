@@ -11,6 +11,7 @@ import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
 import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.hub.service.operator.OperatorService
+import io.swagger.v3.oas.annotations.Operation
 import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -66,7 +67,11 @@ class OperatorController(
     /**
      * 公共开放 API（图鉴）：无需登录，返回全局只读密探目录。
      * 管理端（新增/修改/删除）见 [AdminOperatorCatalogController]。
-     */
+    */
+    @Operation(
+        summary = "密探公共图鉴",
+        description = "返回 special_oddity_name、服务端按 rarity 派生的只读 oddity_schema，以及 incomplete_fields",
+    )
     @GetMapping("/catalog")
     fun catalog(): ApiResult<OperatorCatalogResponse> = success(catalogService.catalog())
 }

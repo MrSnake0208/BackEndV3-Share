@@ -15,10 +15,12 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.http.HttpStatus
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
@@ -52,27 +54,40 @@ class SubAccountServiceTest {
     )
 
     @Test
-    fun `create list and rename preserve stable account id`() {
+    fun `create list and partial updates preserve account identity and fields`() {
         every { accountRepository.countByUserId("u1") } returns 0
-        every { accountRepository.save(any()) } answers {
-            val account = firstArg<SubAccount>()
-            if (account.id == null) account.copy(id = "mongo-id") else account
-        }
         every { accountRepository.findAllByUserIdOrderByCreatedAtAsc("u1") } answers {
-            listOf(SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号"))
+            listOf(SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号", game = "如鸢"))
         }
+        val stored = mutableMapOf<String, SubAccount>()
         every { accountRepository.findByUserIdAndAccountId("u1", any()) } answers {
-            SubAccount(id = "mongo-id", userId = "u1", accountId = secondArg(), name = "大号")
+            stored[secondArg()] ?: SubAccount(id = "mongo-id", userId = "u1", accountId = secondArg(), name = "大号", game = "如鸢")
+        }
+        every { accountRepository.save(any()) } answers {
+            firstArg<SubAccount>().let { account ->
+                val saved = if (account.id == null) account.copy(id = "mongo-id") else account
+                stored[saved.accountId] = saved
+                saved
+            }
         }
 
-        val created = service.create("u1", "新账号")
+        val created = service.create("u1", "新账号", "如鸢")
         val listed = service.list("u1")
-        val renamed = service.rename("u1", created.id, "改名")
+        val gameOnly = service.update("u1", created.id, null, "代号鸢")
+        val nameOnly = service.update("u1", created.id, "改名", null)
 
         assertTrue(created.id.matches(Regex("^acc_[0-9a-f]{32}$")))
+        assertEquals("如鸢", created.game)
         assertEquals("main", listed.single().id)
-        assertEquals(created.id, renamed.id)
-        assertEquals("改名", renamed.name)
+        assertEquals("如鸢", listed.single().game)
+        assertEquals(created.id, gameOnly.id)
+        assertEquals("新账号", gameOnly.name)
+        assertEquals("代号鸢", gameOnly.game)
+        assertEquals(created.id, nameOnly.id)
+        assertEquals("改名", nameOnly.name)
+        assertEquals("代号鸢", nameOnly.game)
+        assertEquals(created.createdAt, gameOnly.createdAt)
+        assertNotEquals(created.updatedAt, nameOnly.updatedAt)
         verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { inventoryRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { favoriteRepository.deleteAllByUserIdAndAccountId(any(), any()) }
@@ -81,12 +96,38 @@ class SubAccountServiceTest {
     }
 
     @Test
+    fun `create defaults game to code yuan`() {
+        every { accountRepository.countByUserId("u1") } returns 0
+        every { accountRepository.save(any()) } answers { firstArg<SubAccount>().copy(id = "mongo-id") }
+
+        assertEquals("代号鸢", service.create("u1", "默认账号").game)
+    }
+
+    @Test
+    fun `invalid game and empty patch return stable 422 errors`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
+
+        val invalidCreate = assertThrows(InventoryApiException::class.java) { service.create("u1", "大号", "universal") }
+        val invalid = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "all") }
+        val empty = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, null) }
+
+        assertEquals("invalid_game", invalidCreate.code)
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, invalid.status)
+        assertEquals("invalid_game", invalid.code)
+        assertEquals("game 只允许 代号鸢 或 如鸢", invalid.message)
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, empty.status)
+        assertEquals("schema_validation_failed", empty.code)
+        verify(exactly = 0) { accountRepository.save(any()) }
+    }
+
+    @Test
     fun `foreign account is hidden and duplicate name returns conflict`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "foreign") } returns null
         every { accountRepository.countByUserId("u1") } returns 0
         every { accountRepository.save(any()) } throws DuplicateKeyException("duplicate")
 
-        val missing = assertThrows(InventoryApiException::class.java) { service.rename("u1", "foreign", "名称") }
+        val missing = assertThrows(InventoryApiException::class.java) { service.update("u1", "foreign", "名称", null) }
         val conflict = assertThrows(InventoryApiException::class.java) { service.create("u1", "重复") }
 
         assertEquals(404, missing.status.value())

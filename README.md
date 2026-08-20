@@ -95,7 +95,7 @@ export JWT_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/login"
 export INVENTORY_ACCOUNT_ID="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/v1/accounts" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"本地烟测账号"}' \
+  -d '{"name":"本地烟测账号","game":"代号鸢"}' \
   | jq -er '.data.id')"
 
 export INVENTORY_API_TOKEN="$(curl --fail-with-body -sS -X POST "$API_BASE_URL/user/open-api/token" \
@@ -113,10 +113,17 @@ curl --fail-with-body "$API_BASE_URL/user/open-api/tokens" \
 ```
 
 > **统一子账号说明（2026-08）**：`/v1/inventory/accounts` 与 `/v1/operator/accounts` 已合并为
-> **`/v1/accounts`**（POST 创建 / GET 列表 / PATCH 改名 / DELETE 删除）。子账号对库存、密探、
+> **`/v1/accounts`**（POST 创建 / GET 列表 / PATCH 修改 / DELETE 删除）。子账号对库存、密探、
 > 特别关注全局可用；token 绑定的账号为共享账号，**可访问的域由 scopes 声明**（`inventory:*` 走
 > `/open-api/inventory/**`，`operator:*` 走 `/open-api/operator/**`，可混合）。删除子账号 =
 > 整账号级联删除该子账号的库存、密探、特别关注数据及全部绑定 token。
+
+每个统一子账号都持久化非空 `game`，且只允许 `代号鸢` / `如鸢`。创建缺省为 `代号鸢`；
+`POST /v1/accounts`、`GET /v1/accounts`、`PATCH /v1/accounts/{accountId}` 都稳定返回该字段。
+PATCH 是真正的局部修改，可只传 `{"name":"新名称"}` 或 `{"game":"如鸢"}`；修改版本不会搬迁或
+删除既有库存、密探 current/record。密探新写入携带的 `game` 必须与账号一致，否则返回
+`422 account_game_mismatch`。部署前先 dry-run，再按说明 APPLY
+[`scripts/migrations/20260821-sub-account-game.js`](scripts/migrations/20260821-sub-account-game.js)。
 
 ### 库存联调 Smoke Test
 
@@ -167,6 +174,17 @@ DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 以上端点需要 JWT 登录且必须是管理员，否则 403；失败统一返回 `OperatorErrorResponse`
 （`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
 设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
+
+公共与管理员目录的每位密探都返回 `special_oddity_name`、`oddity_schema` 和 `incomplete_fields`。
+奇闻值的稳定键固定为 `attack / hp / special`；管理员只维护第三项显示名称，三个上限由服务端按
+rarity 派生：3 星 `300/1560/9`、4 星 `305/1820/11`、5 星 `500/2600/15`。新建目录条目必须提供
+`special_oddity_name`；更新缺失或传 null 时保留旧值。存量缺名时返回 null，
+`oddity_schema.special.name` 降级为“第三属性（图鉴待维护）”，且
+`incomplete_fields=["special_oddity_name"]`。目录改名只更新公共展示和 `catalog_version`，不会写入
+任何子账号、库存或个人密探养成数据。
+
+内置目录当前已按游戏直接采集结果维护 116 位密探的第三奇闻名称；`史子眇`、`陈登·黍王`、`简雍`、
+`孙静`、`张松` 尚无可按目录 ID 确认的采集值，继续按上述存量缺名规则返回，禁止按职业猜测。
 
 **密探头像**：头像以 webp 文件存放在 `share.avatar.dir`（默认 `./data/avatar`，可用环境变量
 `SHARE_AVATAR_DIR` 覆盖，Docker 部署请挂持久卷），文件名为 `{operatorId}.webp`，对外以

@@ -8,6 +8,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.OperatorExceptionHandler
 import com.lhs.share.hub.controller.operator.AdminOperatorCatalogController
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
+import com.lhs.share.hub.controller.operator.response.AdminOperatorCatalogResponse
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
 import com.lhs.share.hub.service.operator.OperatorApiException
@@ -69,6 +70,7 @@ class AdminOperatorCatalogControllerContractTest {
         operatorId = id,
         name = name,
         rarity = 5,
+        specialOddityName = "增伤值",
         prof = listOf("阳"),
         subProf = emptyList(),
         games = listOf("如鸢", "代号鸢"),
@@ -78,12 +80,15 @@ class AdminOperatorCatalogControllerContractTest {
         createdAt = Instant.parse("2026-08-01T00:00:00Z"),
     )
 
+    private fun response(id: String, name: String) = AdminOperatorCatalogResponse.of(entity(id, name))
+
     private fun catalogBody() = """
         {
           "id": "char_001_yangxiu",
           "name": "杨修",
           "alias": "杨修",
           "rarity": 5,
+          "special_oddity_name": "增伤值",
           "prof": ["阳"],
           "subProf": ["shenji"],
           "games": ["如鸢", "代号鸢"],
@@ -114,7 +119,7 @@ class AdminOperatorCatalogControllerContractTest {
     @Test
     fun `admin can list the full catalog including internal fields`() {
         asAdmin()
-        every { catalogService.listForAdmin() } returns listOf(entity("char_001_yangxiu", "杨修"))
+        every { catalogService.listForAdmin() } returns listOf(response("char_001_yangxiu", "杨修"))
 
         mockMvc.perform(get("/v1/admin/operator-catalog"))
             .andExpect(status().isOk)
@@ -122,12 +127,17 @@ class AdminOperatorCatalogControllerContractTest {
             .andExpect(jsonPath("$.data[0].star_stones[0].type").value("main"))
             .andExpect(jsonPath("$.data[0].catalog_version").value("2026-08-16"))
             .andExpect(jsonPath("$.data[0].created_at").exists())
+            .andExpect(jsonPath("$.data[0].special_oddity_name").value("增伤值"))
+            .andExpect(jsonPath("$.data[0].oddity_schema.attack.max").value(500))
+            .andExpect(jsonPath("$.data[0].oddity_schema.hp.max").value(2600))
+            .andExpect(jsonPath("$.data[0].oddity_schema.special.name").value("增伤值"))
+            .andExpect(jsonPath("$.data[0].incomplete_fields").isEmpty)
     }
 
     @Test
     fun `admin can create a catalog operator`() {
         asAdmin()
-        every { catalogService.create(any()) } returns entity("char_001_yangxiu", "杨修")
+        every { catalogService.create(any()) } returns response("char_001_yangxiu", "杨修")
 
         mockMvc.perform(
             post("/v1/admin/operator-catalog")
@@ -136,6 +146,7 @@ class AdminOperatorCatalogControllerContractTest {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.id").value("char_001_yangxiu"))
+            .andExpect(jsonPath("$.data.oddity_schema.special.max").value(15))
 
         verify { catalogService.create(match<OperatorCatalogWriteRequest> { it.id == "char_001_yangxiu" }) }
     }
@@ -143,7 +154,7 @@ class AdminOperatorCatalogControllerContractTest {
     @Test
     fun `admin can update a catalog operator`() {
         asAdmin()
-        every { catalogService.update("char_001_yangxiu", any()) } returns entity("char_001_yangxiu", "杨修")
+        every { catalogService.update("char_001_yangxiu", any()) } returns response("char_001_yangxiu", "杨修")
 
         mockMvc.perform(
             put("/v1/admin/operator-catalog/char_001_yangxiu")
@@ -154,6 +165,42 @@ class AdminOperatorCatalogControllerContractTest {
             .andExpect(jsonPath("$.data.id").value("char_001_yangxiu"))
 
         verify { catalogService.update("char_001_yangxiu", any()) }
+    }
+
+    @Test
+    fun `camelCase special name remains accepted by the administrator request`() {
+        asAdmin()
+        every { catalogService.update("char_001_yangxiu", any()) } returns response("char_001_yangxiu", "杨修")
+        val body = catalogBody().replace(
+            "\"special_oddity_name\": \"增伤值\"",
+            "\"specialOddityName\": \"免伤值\"",
+        )
+
+        mockMvc.perform(
+            put("/v1/admin/operator-catalog/char_001_yangxiu")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        ).andExpect(status().isOk)
+
+        verify { catalogService.update("char_001_yangxiu", match { it.specialOddityName == "免伤值" }) }
+    }
+
+    @Test
+    fun `client supplied derived oddity fields cannot override the response`() {
+        asAdmin()
+        every { catalogService.create(any()) } returns response("char_001_yangxiu", "杨修")
+        val body = catalogBody().dropLast(1) +
+            ", \"oddity_schema\": {\"attack\":{\"name\":\"伪造\",\"max\":999}}, \"incomplete_fields\":[\"fake\"] }"
+
+        mockMvc.perform(
+            post("/v1/admin/operator-catalog")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.oddity_schema.attack.name").value("攻击力"))
+            .andExpect(jsonPath("$.data.oddity_schema.attack.max").value(500))
+            .andExpect(jsonPath("$.data.incomplete_fields").isEmpty)
     }
 
     @Test
@@ -191,6 +238,27 @@ class AdminOperatorCatalogControllerContractTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{ "rarity": 5, "games": ["如鸢"] }"""),
         )
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+    }
+
+    @Test
+    fun `create missing or blank special name is rejected with 422`() {
+        asAdmin()
+        every { catalogService.create(match { it.specialOddityName == null }) } throws
+            OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "special_oddity_name is required")
+        every { catalogService.create(match { it.specialOddityName?.isBlank() == true }) } throws
+            OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "special_oddity_name length must be 1..32")
+
+        val missing = catalogBody().lineSequence()
+            .filterNot { it.contains("special_oddity_name") }
+            .joinToString("\n")
+        val blank = catalogBody().replace("\"special_oddity_name\": \"增伤值\"", "\"special_oddity_name\": \"   \"")
+
+        mockMvc.perform(post("/v1/admin/operator-catalog").contentType(MediaType.APPLICATION_JSON).content(missing))
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+        mockMvc.perform(post("/v1/admin/operator-catalog").contentType(MediaType.APPLICATION_JSON).content(blank))
             .andExpect(status().isUnprocessableEntity)
             .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
     }
