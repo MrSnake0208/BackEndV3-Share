@@ -4,6 +4,7 @@ import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
@@ -32,6 +33,7 @@ class SubAccountService(
     private val favoriteRepository: InventoryAgentFavoriteRepository,
     private val operatorCurrentRepository: OperatorCurrentRepository,
     private val operatorRecordRepository: OperatorRecordRepository,
+    private val operatorCorrectionRecordRepository: OperatorCorrectionRecordRepository,
     private val tokenService: OpenApiTokenService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
 ) {
@@ -110,6 +112,7 @@ class SubAccountService(
             favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }

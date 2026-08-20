@@ -200,23 +200,22 @@ class OperatorCatalogService(
         createdAt: Instant = Instant.now(),
         catalogVersion: String,
         specialOddityName: String?,
-    ) =
-        OperatorCatalogEntity(
-            id = id,
-            operatorId = this.id,
-            name = name,
-            alias = alias,
-            rarity = rarity,
-            specialOddityName = specialOddityName,
-            prof = prof,
-            subProf = subProf,
-            games = games,
-            discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
-            starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
-            spOf = spOf,
-            catalogVersion = catalogVersion,
-            createdAt = createdAt,
-        )
+    ) = OperatorCatalogEntity(
+        id = id,
+        operatorId = this.id,
+        name = name,
+        alias = alias,
+        rarity = rarity,
+        specialOddityName = specialOddityName,
+        prof = prof,
+        subProf = subProf,
+        games = games,
+        discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
+        starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
+        spOf = spOf,
+        catalogVersion = catalogVersion,
+        createdAt = createdAt,
+    )
 
     private fun nextCatalogVersion(): String {
         catalogVersion = Instant.now().toString()
@@ -283,7 +282,11 @@ class OperatorCatalogService(
         }
     }
 
-    internal fun mergeResourceFields(existing: OperatorCatalogEntity, node: JsonNode, specialBackfillVersion: String): OperatorCatalogEntity {
+    internal fun mergeResourceFields(
+        existing: OperatorCatalogEntity,
+        node: JsonNode,
+        specialBackfillVersion: String,
+    ): OperatorCatalogEntity {
         val resourceSpecialName = resourceText(node, "specialOddityName")
         val specialBackfilled = existing.specialOddityName == null && resourceSpecialName != null
         return existing.copy(
@@ -306,7 +309,12 @@ class OperatorCatalogService(
             subProf = node.path("subProf").map { it.asText() },
             games = node.path("games").map { it.asText() }.ifEmpty { SUPPORTED_GAMES },
             discs = node.path("discs").map {
-                OperatorDiscCatalog(it.path("ot_name").asText(), it.get("abbreviation")?.asText(), it.get("color")?.asText(), it.get("desp")?.asText())
+                OperatorDiscCatalog(
+                    it.path("ot_name").asText(),
+                    it.get("abbreviation")?.asText(),
+                    it.get("color")?.asText(),
+                    it.get("desp")?.asText(),
+                )
             },
             starStones = node.path("starStones").map {
                 OperatorStarStoneCatalog(it.path("name").asText(), it.path("type").asText())

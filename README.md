@@ -161,6 +161,55 @@ GET 返回按 ID 升序排列的 `agent_ids`。PUT 与 DELETE 均幂等，所有
 密探公共 API = 公共图鉴 `GET /v1/operator/catalog`（无需登录，全局只读密探目录：有哪些密探、长什么样），
 与个人密探数据严格分离——`/v1/operator/**`（除 catalog）与 `/open-api/operator/**` 只能访问自己的养成档案。
 
+### 密探当前养成资料底座
+
+`GET /v1/operator/current?account_id=acc_xxx&game=代号鸢` 的每个 entry 在既有 `level / elite /
+star_level / discs / star_stones` 上继续返回：
+
+- `disc_loadouts`：最多两套、每套最多三个命盘，不存在 active 或“当前盘”；`discs` 始终是第一套兼容镜像；
+- `combat_stats`：`attack / hp / special` 三项奇闻、扫描攻生、手动校正、观测输入与有效状态；
+- `revision / updated_at`：entry 级并发版本和更新时间。
+
+旧 Mongo 行只有 `discs` 时会读取为第一套“命盘一”；旧 `main / assist` 星石槽读取为
+`main1 / assist1`。`star_level` 仍是唯一化极标量，`star_stones` 仍是六槽当前装备，未增加同义字段。
+
+JWT 用户可用局部校正接口（不扣库存、不写库存流水）：
+
+```http
+PATCH /v1/operator/current/{operatorId}?account_id=acc_xxx&game=代号鸢
+Content-Type: application/json
+
+{
+  "level": 90,
+  "star_level": 27,
+  "disc_loadouts": [
+    {"id": "disc_1", "name": "命盘一", "discs": [{"ot_name": "技能增伤"}]},
+    {"id": "disc_2", "name": "命盘二", "discs": []}
+  ],
+  "combat_stats": {
+    "manual_attack": null,
+    "oddities": {
+      "attack": {"current": 500},
+      "hp": {"current": 2600},
+      "special": {"current": 15}
+    }
+  },
+  "expected_revision": 7,
+  "reason": "manual_correction"
+}
+```
+
+只合并出现的顶层和 `combat_stats` 内部字段；`disc_loadouts=[]` 清空两套，
+`combat_stats=null` 清除战斗资料，`manual_attack=null / manual_hp=null` 只清除对应手动校正。
+revision 冲突返回 `409 operator_revision_conflict`。普通密探 `star_level` 允许 `0..31`，SP 依据公共图鉴
+`sp_of` 只允许直接星级 `0..5`。奇闻上限按 rarity 固定为 3 星 `300/1560/9`、4 星
+`305/1820/11`、5 星 `500/2600/15`；第三项展示名不写入用户数据。
+
+v2 listed/full 导入继续只更新旧字段：`discs` 更新第一套并保留第二套，新增战斗资料不会因 DTO 缺字段被清空；
+删除 v2 record 时会把独立的 `operator_correction_records` 校正审计与剩余 v2 record 按接收顺序重放。
+v2 export 仍只输出第一套镜像 `discs`、既有 `starLevel` 和 `starStones`。OpenAPI Token 仍只有 current
+读取和既有 v2 import/export，本批次没有增加 PATCH 写权限。
+
 **管理员（用户 `status >= 2`）管理公共图鉴的数据面**，即在 `/v1/admin/operator-catalog/**` 上增删改查
 `operator_catalog` 字典，改动即时反映到公共图鉴与导入校验：
 
