@@ -71,13 +71,22 @@ class OperatorService(
         val referenced = request.records.map { it.accountId }.toSet()
         if (referenced.any { !ACCOUNT_ID.matches(it) }) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "record account_id is invalid")
         if (restricted != null && referenced != setOf(restricted)) throw apiError(HttpStatus.FORBIDDEN, "account_scope_mismatch", "Document contains records outside the API token account")
-        val owned = accountRepository.findAllByUserIdAndAccountIdIn(userId, referenced).map { it.accountId }.toSet()
+        val owned = accountRepository.findAllByUserIdAndAccountIdIn(userId, referenced).associateBy { it.accountId }
         referenced.firstOrNull { it !in owned }?.let { throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_account_id", "Unknown account_id: " + it) }
         val validated = request.records.map { record ->
             if (record.recordId.isBlank() || record.recordId.length > 128) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "record_id length must be 1..128", record.recordId)
             if (record.recordType != RECORD_TYPE || record.snapshotScope !in SCOPES) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Invalid operator record enum", record.recordId)
             if (record.snapshotScope == LISTED && record.entries.isEmpty()) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "listed snapshots require at least one entry", record.recordId)
             if (record.game != null && record.game !in GAMES) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_game", "Unsupported game", record.recordId)
+            val accountGame = checkNotNull(owned[record.accountId]).game
+            if (record.game != accountGame) {
+                throw apiError(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "account_game_mismatch",
+                    "Record game must match the account game",
+                    record.recordId,
+                )
+            }
             val effective = parseTime(record.effectiveAt, "effective_at")
             val entryIds = mutableSetOf<String>()
             record.entries.forEach { entry ->
@@ -85,7 +94,7 @@ class OperatorService(
                 val catalog = catalogService.getOperator(entry.id) ?: throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_operator_id", "Unknown operator id: " + entry.id, record.recordId, entry.id)
                 if (listOf(entry.elite, entry.starLevel, entry.level).any { it < 0 }) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Operator levels must be non-negative", record.recordId, entry.id)
                 if (entry.starLevel > MAX_STAR_LEVEL) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "starLevel must be 0.." + MAX_STAR_LEVEL + " (0 = 未拥有, " + MAX_STAR_LEVEL + " = 觉醒)", record.recordId, entry.id)
-                if (record.game != null && record.game !in catalog.games) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_game", "Operator is not available in game", record.recordId, entry.id)
+                if (record.game !in catalog.games) throw apiError(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_game", "Operator is not available in game", record.recordId, entry.id)
                 if (entry.rarity != null && entry.rarity != catalog.rarity) warnings.add(entry.id + ": rarity conflicts with catalog")
                 if (entry.prof != null && entry.prof != catalog.prof) warnings.add(entry.id + ": prof conflicts with catalog")
                 if (entry.subProf != null && entry.subProf != catalog.subProf) warnings.add(entry.id + ": subProf conflicts with catalog")
@@ -101,6 +110,8 @@ class OperatorService(
 
     private fun applyRecord(userId: String, item: Validated): String {
         val record = item.record
+        // 新导入已在 validateAndSort 强制匹配非空账号 game；这里保留 null -> generic，
+        // 仅供删除旧流水后的存量 game:null 记录重放兼容。
         val game = record.game ?: GENERIC_GAME
         val current = currentRepository.findByUserIdAndAccountIdAndGame(userId, record.accountId, game)
         if (record.snapshotScope == FULL && current?.fullBaselineAt?.isAfter(item.effectiveAt) == true) return SUPERSEDED

@@ -1,6 +1,8 @@
 package com.lhs.share.hub.controller.operator.request
 
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonProperty
+import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
@@ -21,6 +23,13 @@ data class OperatorCatalogWriteRequest(
     @field:Min(3)
     @field:Max(5)
     val rarity: Int,
+    @field:JsonAlias("specialOddityName")
+    @field:Schema(
+        description = "第三项奇闻展示名称；新建必填，更新缺失或 null 时保留旧值",
+        example = "免伤值",
+        maxLength = 32,
+    )
+    val specialOddityName: String? = null,
     @field:NotEmpty
     val prof: List<@NotBlank String>,
     @JsonProperty("subProf")

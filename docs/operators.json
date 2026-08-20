@@ -90,7 +90,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_002_jiaxu",
@@ -182,7 +183,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_003_sunshangxiang",
@@ -274,7 +276,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_004_guojia",
@@ -366,7 +369,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_005_lusu",
@@ -458,7 +462,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_006_eshi",
@@ -550,7 +555,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_007_lvmeng",
@@ -642,7 +648,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_008_huatuo",
@@ -734,7 +741,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_009_yanbaihu",
@@ -826,7 +834,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_010_xuyou",
@@ -918,7 +927,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_011_wenchou",
@@ -1010,7 +1020,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_012_yanliang",
@@ -1102,7 +1113,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_013_chendeng",
@@ -1194,7 +1206,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_014_achan",
@@ -1286,7 +1299,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_015_yanyan",
@@ -1378,7 +1392,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_016_guanjing",
@@ -1470,7 +1485,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_017_ganti",
@@ -1562,7 +1578,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_018_yuanshi",
@@ -1654,7 +1671,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_019_cuilie",
@@ -1746,7 +1764,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加8%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_020_wudan",
@@ -1838,7 +1857,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_021_gaolan",
@@ -1930,7 +1950,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_022_shanjiu",
@@ -2022,7 +2043,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_023_shizimiao",
@@ -2206,7 +2228,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_025_queshi",
@@ -2298,7 +2321,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_026_suigu",
@@ -2390,7 +2414,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_027_diwutian",
@@ -2482,7 +2507,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_028_zhouqun",
@@ -2574,7 +2600,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_029_xiuqiu",
@@ -2666,7 +2693,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_030_feiyun",
@@ -2758,7 +2786,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_031_maojie",
@@ -2850,7 +2879,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_032_lituo",
@@ -2942,7 +2972,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_033_louban",
@@ -3034,7 +3065,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_034_xuzhi",
@@ -3126,7 +3158,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加6%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_035_lizhen",
@@ -3218,7 +3251,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_036_yangfu",
@@ -3310,7 +3344,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_037_fengshi",
@@ -3402,7 +3437,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_038_luxun",
@@ -3494,7 +3530,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_039_guojie",
@@ -3586,7 +3623,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加8%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_040_sunquan",
@@ -3678,7 +3716,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_041_zhangxiu",
@@ -3770,7 +3809,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加2%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_042_wangcan",
@@ -3862,7 +3902,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_043_xiaoqiao",
@@ -3954,7 +3995,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_044_zhangliao",
@@ -4046,7 +4088,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_045_zhangzhongjing",
@@ -4138,7 +4181,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_046_zhouyu",
@@ -4230,7 +4274,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_047_gehong",
@@ -4322,7 +4367,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_048_xuman",
@@ -4414,7 +4460,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_049_luji",
@@ -4506,7 +4553,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加18%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_050_xunyu",
@@ -4598,7 +4646,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加6%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_051_pangtong",
@@ -4690,7 +4739,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_052_caiyan",
@@ -4782,7 +4832,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_053_zhangfei",
@@ -4874,7 +4925,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加14%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_054_wangyi",
@@ -4966,7 +5018,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_055_xiahoudun",
@@ -5058,7 +5111,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_056_zhangjiao",
@@ -5150,7 +5204,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_057_chengyu",
@@ -5242,7 +5297,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_058_machao",
@@ -5334,7 +5390,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_059_taishici",
@@ -5426,7 +5483,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_060_zhangkai",
@@ -5518,7 +5576,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_061_gongsunshan",
@@ -5610,7 +5669,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_062_zhanghe",
@@ -5702,7 +5762,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_063_xushu",
@@ -5794,7 +5855,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_064_ganning",
@@ -5886,7 +5948,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_065_zhenfu",
@@ -5978,7 +6041,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_066_zhanglu",
@@ -6070,7 +6134,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_067_kongrong",
@@ -6162,7 +6227,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_068_huangyueying",
@@ -6254,7 +6320,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_069_zhangmiao",
@@ -6346,7 +6413,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_070_dongfeng",
@@ -6438,7 +6506,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_071_caozhi",
@@ -6530,7 +6599,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_072_zhugejin",
@@ -6622,7 +6692,8 @@
           "color": "蓝",
           "desp": "技能的伤害系数增加18%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_073_zhugedan",
@@ -6714,7 +6785,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_074_xunyou",
@@ -6805,7 +6877,8 @@
           "abbreviation": "血低攻高",
           "color": "蓝"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_075_manchong",
@@ -6897,7 +6970,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_076_lingtong",
@@ -6989,7 +7063,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_077_anqi",
@@ -7081,7 +7156,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_078_xixue",
@@ -7173,7 +7249,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_079_liuyao",
@@ -7265,7 +7342,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_080_mateng",
@@ -7357,7 +7435,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_081_linghumao",
@@ -7449,7 +7528,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_082_huanggai",
@@ -7541,7 +7621,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_083_zhuran",
@@ -7633,7 +7714,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_084_chendengsp",
@@ -7819,7 +7901,8 @@
           "desp": "普攻的伤害系数增加5%"
         }
       ],
-      "spOf": "char_023_shizimiao"
+      "spOf": "char_023_shizimiao",
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_086_kuaiyue",
@@ -7911,7 +7994,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_087_miheng",
@@ -8003,7 +8087,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_088_liubao",
@@ -8095,7 +8180,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_089_zhangxiu",
@@ -8187,7 +8273,8 @@
           "color": "蓝",
           "desp": "普攻的伤害系数增加5%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_090_dongbai",
@@ -8279,7 +8366,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_091_zhangzhao",
@@ -8371,7 +8459,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_092_chengpu",
@@ -8463,7 +8552,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_093_shixie",
@@ -8555,7 +8645,8 @@
           "color": "蓝",
           "desp": "生命値高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_094_yufan",
@@ -8647,7 +8738,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_095_zhangyan",
@@ -8739,7 +8831,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_096_xiahouyuan",
@@ -8831,7 +8924,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_097_zhongyao",
@@ -8923,7 +9017,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_098_liuzhang",
@@ -9015,7 +9110,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_099_pangxi",
@@ -9107,7 +9203,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_100_zhouzhong",
@@ -9198,7 +9295,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_101_lvbu",
@@ -9290,7 +9388,8 @@
           "color": "蓝",
           "desp": "攻击力提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_102_jianyong",
@@ -9473,7 +9572,8 @@
           "color": "金",
           "desp": "<收割>改为：对当前目标造成300%攻击力的触发伤害并施加1层【流血】（可叠加5层）。【流血】：普攻和触发伤害免伤降低5"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_104_zhugeliang",
@@ -9565,7 +9665,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "免伤值"
     },
     {
       "id": "char_105_simahui",
@@ -9657,7 +9758,8 @@
           "color": "蓝",
           "desp": "防御时额外使自身防御系数提升10"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_106_kuailiang",
@@ -9748,7 +9850,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_107_guonvwang",
@@ -9839,7 +9942,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_108_fazheng",
@@ -9930,7 +10034,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_109_chenqun",
@@ -10021,7 +10126,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_110_fenggongzhu",
@@ -10112,7 +10218,8 @@
           "color": "蓝",
           "desp": "最大生命提升3%"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_111_fenggongjiu",
@@ -10203,7 +10310,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_112_pangde",
@@ -10294,7 +10402,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_113_luzhi",
@@ -10385,7 +10494,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_114_chenji",
@@ -10476,7 +10586,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_115_chenying",
@@ -10567,7 +10678,8 @@
           "color": "蓝",
           "desp": "生命值高于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_119_sunjing",
@@ -10749,7 +10861,8 @@
           "color": "蓝",
           "desp": "生命值低于50%时，自身攻击力提升10%"
         }
-      ]
+      ],
+      "specialOddityName": "治疗加成"
     },
     {
       "id": "char_122_zhangsong",
@@ -10931,7 +11044,8 @@
           "color": "紫",
           "desp": "普攻的伤害系数增加15%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_124_simafu",
@@ -11022,7 +11136,8 @@
           "color": "金",
           "desp": "技能效果变更为：对当前目标造成500%攻击力的普攻伤害，并使自身下次普攻伤害必定触发<强刃>"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     },
     {
       "id": "char_125_zhaoyun",
@@ -11114,7 +11229,8 @@
           "color": "金",
           "desp": "若我方仅有风、火属性密探。我方全体攻击力提升50%，最大生命提升50%"
         }
-      ]
+      ],
+      "specialOddityName": "增伤值"
     }
   ]
 }

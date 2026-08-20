@@ -49,30 +49,46 @@ class AccountControllerContractTest {
 
     @Test
     fun `JWT account CRUD uses the authenticated owner on the unified endpoint`() {
-        val account = SubAccountResponse("main", "大号", Instant.EPOCH, Instant.EPOCH)
+        val account = SubAccountResponse("main", "大号", "代号鸢", Instant.EPOCH, Instant.EPOCH)
+        val ruyuanAccount = account.copy(game = "如鸢")
         every { helper.requireUserId() } returns "jwt-user"
-        every { accountService.create("jwt-user", "大号") } returns account
-        every { accountService.list("jwt-user") } returns listOf(account)
-        every { accountService.rename("jwt-user", "main", "改名") } returns account.copy(name = "改名")
+        every { accountService.create("jwt-user", "大号", "如鸢") } returns ruyuanAccount
+        every { accountService.create("jwt-user", "默认账号", null) } returns account.copy(name = "默认账号")
+        every { accountService.list("jwt-user") } returns listOf(ruyuanAccount)
+        every { accountService.update("jwt-user", "main", "改名", null) } returns ruyuanAccount.copy(name = "改名")
+        every { accountService.update("jwt-user", "main", null, "代号鸢") } returns account
         every { accountService.delete("jwt-user", "main") } returns Unit
 
-        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"大号\"}"))
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"大号\",\"game\":\"如鸢\"}"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.id").value("main"))
+            .andExpect(jsonPath("$.data.game").value("如鸢"))
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"默认账号\"}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.game").value("代号鸢"))
         mockMvc.perform(get("/v1/accounts"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data[0].name").value("大号"))
+            .andExpect(jsonPath("$.data[0].game").value("如鸢"))
         mockMvc.perform(
             patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"改名\"}"),
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.name").value("改名"))
+            .andExpect(jsonPath("$.data.game").value("如鸢"))
+        mockMvc.perform(
+            patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{\"game\":\"代号鸢\"}"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.game").value("代号鸢"))
         mockMvc.perform(delete("/v1/accounts/main"))
             .andExpect(status().isOk)
 
-        verify { accountService.create("jwt-user", "大号") }
+        verify { accountService.create("jwt-user", "大号", "如鸢") }
+        verify { accountService.create("jwt-user", "默认账号", null) }
         verify { accountService.list("jwt-user") }
-        verify { accountService.rename("jwt-user", "main", "改名") }
+        verify { accountService.update("jwt-user", "main", "改名", null) }
+        verify { accountService.update("jwt-user", "main", null, "代号鸢") }
         verify { accountService.delete("jwt-user", "main") }
     }
 
@@ -100,11 +116,27 @@ class AccountControllerContractTest {
     @Test
     fun `account limit errors surface as conflict`() {
         every { helper.requireUserId() } returns "jwt-user"
-        every { accountService.create("jwt-user", "超额") } throws
+        every { accountService.create("jwt-user", "超额", null) } throws
             InventoryApiException(HttpStatus.CONFLICT, "account_limit_reached", "Account limit reached")
 
         mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"超额\"}"))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.error.code").value("account_limit_reached"))
+    }
+
+    @Test
+    fun `invalid game and empty patch return 422`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        every { accountService.update("jwt-user", "main", null, "all") } throws
+            InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_game", "game 只允许 代号鸢 或 如鸢")
+        every { accountService.update("jwt-user", "main", null, null) } throws
+            InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "name 或 game 至少提供一项")
+
+        mockMvc.perform(patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{\"game\":\"all\"}"))
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("invalid_game"))
+        mockMvc.perform(patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
     }
 }

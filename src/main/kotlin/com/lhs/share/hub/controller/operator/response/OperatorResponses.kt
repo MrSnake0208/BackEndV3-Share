@@ -7,6 +7,8 @@ import com.lhs.share.hub.repository.entity.OperatorDisc
 import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
 import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
+import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
 data class OperatorCurrentResponse(
@@ -88,6 +90,12 @@ data class OperatorCatalogEntryResponse(
     val name: String,
     val alias: String?,
     val rarity: Int,
+    @field:Schema(nullable = true, description = "第三项奇闻展示名称；图鉴待维护时为 null")
+    val specialOddityName: String?,
+    @field:Schema(description = "attack / hp / special 三个稳定键及服务端按 rarity 派生的上限")
+    val odditySchema: OperatorOdditySchemaResponse,
+    @field:Schema(description = "当前缺失的目录字段；缺第三项名称时仅含 special_oddity_name")
+    val incompleteFields: List<String>,
     val prof: List<String>,
     val subProf: List<String>,
     val games: List<String>,
@@ -103,6 +111,9 @@ data class OperatorCatalogEntryResponse(
             e.name,
             e.alias,
             e.rarity,
+            OperatorOddityRules.normalizedSpecialName(e.specialOddityName),
+            OperatorOddityRules.schema(e.rarity, e.specialOddityName),
+            OperatorOddityRules.incompleteFields(e.specialOddityName),
             e.prof,
             e.subProf,
             e.games,
@@ -111,6 +122,81 @@ data class OperatorCatalogEntryResponse(
             e.avatar,
         )
     }
+}
+
+data class OperatorOdditySchemaResponse(
+    val attack: OperatorOddityDefinitionResponse,
+    val hp: OperatorOddityDefinitionResponse,
+    val special: OperatorOddityDefinitionResponse,
+)
+
+data class OperatorOddityDefinitionResponse(
+    val name: String,
+    val max: Int,
+)
+
+/** 管理端目录响应：保留旧管理字段，同时只读附加服务端派生的奇闻定义。 */
+data class AdminOperatorCatalogResponse(
+    val id: String,
+    val name: String,
+    val alias: String?,
+    val rarity: Int,
+    val specialOddityName: String?,
+    val odditySchema: OperatorOdditySchemaResponse,
+    val incompleteFields: List<String>,
+    val prof: List<String>,
+    val subProf: List<String>,
+    val games: List<String>,
+    val discs: List<OperatorDiscCatalog>,
+    val starStones: List<OperatorStarStoneCatalog>,
+    val spOf: String?,
+    val avatar: String?,
+    val catalogVersion: String,
+    val createdAt: Instant,
+) {
+    companion object {
+        fun of(e: OperatorCatalogEntity) = AdminOperatorCatalogResponse(
+            id = e.operatorId,
+            name = e.name,
+            alias = e.alias,
+            rarity = e.rarity,
+            specialOddityName = OperatorOddityRules.normalizedSpecialName(e.specialOddityName),
+            odditySchema = OperatorOddityRules.schema(e.rarity, e.specialOddityName),
+            incompleteFields = OperatorOddityRules.incompleteFields(e.specialOddityName),
+            prof = e.prof,
+            subProf = e.subProf,
+            games = e.games,
+            discs = e.discs,
+            starStones = e.starStones,
+            spOf = e.spOf,
+            avatar = e.avatar,
+            catalogVersion = e.catalogVersion,
+            createdAt = e.createdAt,
+        )
+    }
+}
+
+object OperatorOddityRules {
+    const val MISSING_SPECIAL_NAME = "第三属性（图鉴待维护）"
+
+    fun normalizedSpecialName(value: String?): String? = value?.trim()?.takeIf(String::isNotEmpty)
+
+    fun schema(rarity: Int, specialOddityName: String?): OperatorOdditySchemaResponse {
+        val limits = when (rarity) {
+            3 -> Triple(300, 1560, 9)
+            4 -> Triple(305, 1820, 11)
+            5 -> Triple(500, 2600, 15)
+            else -> throw IllegalArgumentException("Unsupported operator rarity: $rarity")
+        }
+        return OperatorOdditySchemaResponse(
+            attack = OperatorOddityDefinitionResponse("攻击力", limits.first),
+            hp = OperatorOddityDefinitionResponse("生命值", limits.second),
+            special = OperatorOddityDefinitionResponse(normalizedSpecialName(specialOddityName) ?: MISSING_SPECIAL_NAME, limits.third),
+        )
+    }
+
+    fun incompleteFields(specialOddityName: String?): List<String> =
+        if (normalizedSpecialName(specialOddityName) == null) listOf("special_oddity_name") else emptyList()
 }
 
 data class OperatorCatalogResponse(

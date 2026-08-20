@@ -3,7 +3,8 @@ package com.lhs.share.hub.controller.account
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
-import com.lhs.share.hub.controller.account.request.AccountRequest
+import com.lhs.share.hub.controller.account.request.AccountCreateRequest
+import com.lhs.share.hub.controller.account.request.AccountPatchRequest
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.service.account.SubAccountService
 import io.swagger.v3.oas.annotations.Operation
@@ -34,17 +35,17 @@ class AccountController(
 ) {
     @Operation(summary = "创建子账号")
     @PostMapping(consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun create(@Valid @RequestBody request: AccountRequest): ApiResult<SubAccountResponse> =
-        success(accountService.create(helper.requireUserId(), request.name))
+    fun create(@Valid @RequestBody request: AccountCreateRequest): ApiResult<SubAccountResponse> =
+        success(accountService.create(helper.requireUserId(), request.name, request.game))
 
     @Operation(summary = "子账号列表")
     @GetMapping
     fun list(): ApiResult<List<SubAccountResponse>> = success(accountService.list(helper.requireUserId()))
 
-    @Operation(summary = "修改子账号名称")
+    @Operation(summary = "修改子账号")
     @PatchMapping("/{accountId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun rename(@PathVariable accountId: String, @Valid @RequestBody request: AccountRequest): ApiResult<SubAccountResponse> =
-        success(accountService.rename(helper.requireUserId(), accountId, request.name))
+    fun update(@PathVariable accountId: String, @Valid @RequestBody request: AccountPatchRequest): ApiResult<SubAccountResponse> =
+        success(accountService.update(helper.requireUserId(), accountId, request.name, request.game))
 
     @Operation(summary = "删除子账号及其全部数据")
     @DeleteMapping("/{accountId}")

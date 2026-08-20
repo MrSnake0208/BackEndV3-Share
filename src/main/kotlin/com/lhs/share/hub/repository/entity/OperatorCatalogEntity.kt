@@ -17,6 +17,8 @@ data class OperatorCatalogEntity(
     val name: String,
     val alias: String? = null,
     val rarity: Int,
+    // 第三项奇闻的管理员维护展示名称；上限和 oddity schema 均由服务端按 rarity 派生。
+    val specialOddityName: String? = null,
     val prof: List<String>,
     val subProf: List<String>,
     val games: List<String>,
