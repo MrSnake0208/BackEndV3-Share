@@ -2,12 +2,15 @@ package com.lhs.share.hub.controller.operator.response
 
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorDisc
 import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
+import com.lhs.share.hub.repository.entity.OperatorDiscLoadout
 import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
+import com.lhs.share.hub.repository.entity.normalized
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
@@ -26,7 +29,7 @@ data class OperatorCurrentResponse(
             c.game,
             c.fullBaselineAt,
             c.entries.mapValues { (_, e) ->
-                OperatorCurrentEntryDto(e.elite, e.starLevel, e.level, e.discs, e.starStones, e.listedBaselineAt)
+                OperatorCurrentEntryDto.of(e)
             },
             c.updatedAt,
         )
@@ -39,8 +42,31 @@ data class OperatorCurrentEntryDto(
     val level: Int,
     val discs: List<OperatorDisc>,
     val starStones: List<OperatorStarStone>,
+    @field:Schema(description = "最多两套命盘；没有 active/当前盘语义")
+    val discLoadouts: List<OperatorDiscLoadout>,
+    val combatStats: OperatorCombatStats?,
+    val revision: Long,
     val listedBaselineAt: Instant?,
-)
+    val updatedAt: Instant?,
+) {
+    companion object {
+        fun of(entry: com.lhs.share.hub.repository.entity.OperatorEntry): OperatorCurrentEntryDto {
+            val normalized = entry.normalized()
+            return OperatorCurrentEntryDto(
+                normalized.elite,
+                normalized.starLevel,
+                normalized.level,
+                normalized.discs,
+                normalized.starStones,
+                normalized.discLoadouts,
+                normalized.combatStats,
+                normalized.revision,
+                normalized.listedBaselineAt,
+                normalized.updatedAt,
+            )
+        }
+    }
+}
 
 data class OperatorImportResult(val accepted: Int, val duplicates: Int, val superseded: Int, val warnings: List<String> = emptyList())
 
@@ -208,4 +234,11 @@ data class OperatorCatalogResponse(
 
 data class OperatorErrorResponse(val error: OperatorError)
 
-data class OperatorError(val code: String, val message: String, val recordId: String? = null, val entryId: String? = null)
+data class OperatorError(
+    val code: String,
+    val message: String,
+    val recordId: String? = null,
+    val entryId: String? = null,
+    val operatorId: String? = null,
+    val fieldPath: String? = null,
+)

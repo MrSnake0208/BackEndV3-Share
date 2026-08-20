@@ -21,8 +21,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 )
 class OperatorExceptionHandler {
     @ExceptionHandler(OperatorApiException::class)
-    fun api(e: OperatorApiException) =
-        ResponseEntity.status(e.status).body(OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId)))
+    fun api(e: OperatorApiException) = ResponseEntity
+        .status(e.status).body(
+            OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId, e.operatorId, e.fieldPath)),
+        )
 
     @ExceptionHandler(MethodArgumentNotValidException::class, HttpMessageNotReadableException::class)
     fun invalid(e: Exception) = ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(

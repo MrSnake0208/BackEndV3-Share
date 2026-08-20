@@ -1,10 +1,13 @@
 package com.lhs.share.hub.controller.operator
 
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.controller.operator.request.OperatorCurrentPatchRequest
 import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
+import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorExportResponse
 import com.lhs.share.hub.controller.operator.response.OperatorImportResult
@@ -12,10 +15,13 @@ import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
 import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.hub.service.operator.OperatorService
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -23,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.time.OffsetDateTime
+import io.swagger.v3.oas.annotations.parameters.RequestBody as SwaggerRequestBody
 
 @RestController
 @RequestMapping("/v1/operator", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -40,6 +47,24 @@ class OperatorController(
         @RequestParam(name = "account_id") accountId: String,
         @RequestParam(required = false) game: String?,
     ): ApiResult<List<OperatorCurrentResponse>> = success(service.current(helper.requireUserId(), accountId, game))
+
+    @Operation(
+        summary = "局部校正密探当前养成",
+        description = "只合并请求中出现的字段；不扣库存。expected_revision 冲突返回 operator_revision_conflict。",
+    )
+    @PatchMapping("/current/{operatorId}")
+    fun patchCurrent(
+        @PathVariable operatorId: String,
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestParam game: String,
+        @SwaggerRequestBody(
+            required = true,
+            content = [Content(schema = Schema(implementation = OperatorCurrentPatchRequest::class))],
+        )
+        @RequestBody request: ObjectNode,
+    ): ApiResult<OperatorCurrentEntryDto> = success(
+        service.patchCurrent(helper.requireUserId(), accountId, game, operatorId, request),
+    )
 
     @GetMapping("/records")
     fun records(
@@ -67,7 +92,7 @@ class OperatorController(
     /**
      * 公共开放 API（图鉴）：无需登录，返回全局只读密探目录。
      * 管理端（新增/修改/删除）见 [AdminOperatorCatalogController]。
-    */
+     */
     @Operation(
         summary = "密探公共图鉴",
         description = "返回 special_oddity_name、服务端按 rarity 派生的只读 oddity_schema，以及 incomplete_fields",

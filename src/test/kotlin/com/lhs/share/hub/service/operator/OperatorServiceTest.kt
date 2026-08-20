@@ -7,6 +7,7 @@ import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
 import com.lhs.share.hub.controller.operator.request.OperatorRecordRequest
 import com.lhs.share.hub.controller.operator.request.OperatorStarStoneRequest
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
@@ -38,6 +39,7 @@ class OperatorServiceTest {
     private val recordRepository = mockk<OperatorRecordRepository>()
     private val catalogRepository = mockk<OperatorCatalogRepository>()
     private val catalogService = mockk<OperatorCatalogService>()
+    private val correctionRepository = mockk<OperatorCorrectionRecordRepository>()
     private val transactionTemplate = TransactionTemplate(object : PlatformTransactionManager {
         override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
         override fun commit(status: TransactionStatus) = Unit
@@ -50,6 +52,7 @@ class OperatorServiceTest {
         catalogRepository,
         catalogService,
         transactionTemplate,
+        correctionRepository,
     )
 
     private fun catalog(spOf: String? = null) = OperatorCatalogEntity(
@@ -229,7 +232,7 @@ class OperatorServiceTest {
         val e = assertThrows(OperatorApiException::class.java) {
             service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 10, elite = 0, starLevel = 32))))))
         }
-        assertEquals("schema_validation_failed", e.code)
+        assertEquals("invalid_star_level", e.code)
         assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, e.status)
     }
 
@@ -287,7 +290,7 @@ class OperatorServiceTest {
         // 只编辑 SP：level 20 / elite 2 —— 本体也跟随（双向同步）；星级各自独立
         val result = service.import(
             "u1",
-            importRequestWithRecords(listOf(record(listOf(entry("op1", 20, 2, starLevel = 9)), scope = "listed"))),
+            importRequestWithRecords(listOf(record(listOf(entry("op1", 20, 2, starLevel = 4)), scope = "listed"))),
         )
         assertEquals(1, result.accepted)
         val base = saved!!.entries.getValue("op2")
@@ -295,7 +298,7 @@ class OperatorServiceTest {
         assertEquals(2, base.elite)
         assertEquals(5, base.starLevel) // 本体星级独立
         val sp = saved!!.entries.getValue("op1")
-        assertEquals(9, sp.starLevel) // SP 星级保留独立编辑
+        assertEquals(4, sp.starLevel) // SP 星级保留独立编辑
     }
 
     @Test
@@ -397,6 +400,7 @@ class OperatorServiceTest {
         every { recordRepository.delete(target) } just runs
         every { currentRepository.deleteByUserIdAndAccountIdAndGame("u1", "acc1", "*") } just runs
         every { recordRepository.findByUserIdAndAccountIdAndGameOrderByEffectiveAtAsc("u1", "acc1", null) } returns listOf(remaining)
+        every { correctionRepository.findByUserIdAndAccountIdAndGameOrderByCreatedAtAsc("u1", "acc1", "*") } returns emptyList()
         every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "*") } returns null
         every { catalogService.getOperator("op1") } returns catalog()
         every { catalogService.spFormsOf("op1") } returns emptyList()
