@@ -6,7 +6,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
-import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.controller.operator.response.AdminOperatorCatalogResponse
 import com.lhs.share.hub.service.operator.OperatorApiException
 import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.service.UserService
@@ -55,7 +55,7 @@ class AdminOperatorCatalogController(
     @Operation(summary = "管理员查看密探公共图鉴全量（含内部字段）")
     @OperatorAdminResponses
     @GetMapping
-    fun list(): ApiResult<List<OperatorCatalogEntity>> {
+    fun list(): ApiResult<List<AdminOperatorCatalogResponse>> {
         requireAdmin()
         return success(catalogService.listForAdmin())
     }
@@ -66,7 +66,7 @@ class AdminOperatorCatalogController(
     @Operation(summary = "管理员新增密探目录条目")
     @OperatorAdminResponses
     @PostMapping
-    fun create(@Valid @RequestBody request: OperatorCatalogWriteRequest): ApiResult<OperatorCatalogEntity> {
+    fun create(@Valid @RequestBody request: OperatorCatalogWriteRequest): ApiResult<AdminOperatorCatalogResponse> {
         requireAdmin()
         return success(catalogService.create(request))
     }
@@ -80,7 +80,7 @@ class AdminOperatorCatalogController(
     fun update(
         @PathVariable operatorId: String,
         @Valid @RequestBody request: OperatorCatalogWriteRequest,
-    ): ApiResult<OperatorCatalogEntity> {
+    ): ApiResult<AdminOperatorCatalogResponse> {
         requireAdmin()
         return success(catalogService.update(operatorId, request))
     }
@@ -105,7 +105,7 @@ class AdminOperatorCatalogController(
     @Operation(summary = "管理员上传密探头像")
     @OperatorAdminResponses
     @PutMapping("/{operatorId}/avatar", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-    fun uploadAvatar(@PathVariable operatorId: String, @RequestPart file: MultipartFile): ApiResult<OperatorCatalogEntity> {
+    fun uploadAvatar(@PathVariable operatorId: String, @RequestPart file: MultipartFile): ApiResult<AdminOperatorCatalogResponse> {
         requireAdmin()
         return success(catalogService.setAvatar(operatorId, file))
     }
@@ -116,7 +116,7 @@ class AdminOperatorCatalogController(
     @Operation(summary = "管理员删除密探头像")
     @OperatorAdminResponses
     @DeleteMapping("/{operatorId}/avatar")
-    fun deleteAvatar(@PathVariable operatorId: String): ApiResult<OperatorCatalogEntity> {
+    fun deleteAvatar(@PathVariable operatorId: String): ApiResult<AdminOperatorCatalogResponse> {
         requireAdmin()
         return success(catalogService.clearAvatar(operatorId))
     }

@@ -3,6 +3,7 @@ package com.lhs.share.hub.service.operator
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
+import com.lhs.share.hub.controller.operator.response.AdminOperatorCatalogResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
 import com.lhs.share.hub.repository.OperatorCatalogRepository
@@ -50,9 +51,9 @@ class OperatorCatalogService(
      * 管理端全量列表：返回原始实体（含 starStones / catalogVersion / createdAt 等内部字段），
      * 供管理员编辑公共图鉴使用。与只读公共图鉴 [catalog] 不同，不做任何裁剪。
      */
-    fun listForAdmin(): List<OperatorCatalogEntity> {
+    fun listForAdmin(): List<AdminOperatorCatalogResponse> {
         ensureSeeded()
-        return repository.findAllByOrderByOperatorIdAsc()
+        return repository.findAllByOrderByOperatorIdAsc().map(AdminOperatorCatalogResponse::of)
     }
 
     /**
@@ -79,17 +80,20 @@ class OperatorCatalogService(
         }
     }
 
-    fun create(request: OperatorCatalogWriteRequest): OperatorCatalogEntity {
+    fun create(request: OperatorCatalogWriteRequest): AdminOperatorCatalogResponse {
         ensureSeeded()
         if (repository.findByOperatorId(request.id) != null) {
             throw OperatorApiException(HttpStatus.CONFLICT, "operator_conflict", "Operator already exists")
         }
         validate(request)
+        val specialOddityName = requireSpecialOddityName(request.specialOddityName)
         val version = nextCatalogVersion()
-        return repository.save(request.toEntity(catalogVersion = version)).also { spIndexCache = null }
+        return repository.save(request.toEntity(catalogVersion = version, specialOddityName = specialOddityName))
+            .also { spIndexCache = null }
+            .let(AdminOperatorCatalogResponse::of)
     }
 
-    fun update(operatorId: String, request: OperatorCatalogWriteRequest): OperatorCatalogEntity {
+    fun update(operatorId: String, request: OperatorCatalogWriteRequest): AdminOperatorCatalogResponse {
         ensureSeeded()
         if (operatorId != request.id) {
             throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Path id and body id must match")
@@ -97,32 +101,40 @@ class OperatorCatalogService(
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         validate(request)
+        val specialOddityName = request.specialOddityName
+            ?.let(::requireSpecialOddityName)
+            ?: existing.specialOddityName
         val version = nextCatalogVersion()
         // avatar 不在写请求内，普通编辑整条覆盖时必须显式保留既有头像，否则会把已上传头像冲掉。
         return repository.save(
-            request.toEntity(id = existing.id, createdAt = existing.createdAt, catalogVersion = version).copy(avatar = existing.avatar),
-        ).also { spIndexCache = null }
+            request.toEntity(
+                id = existing.id,
+                createdAt = existing.createdAt,
+                catalogVersion = version,
+                specialOddityName = specialOddityName,
+            ).copy(avatar = existing.avatar),
+        ).also { spIndexCache = null }.let(AdminOperatorCatalogResponse::of)
     }
 
     /**
      * 上传/替换密探头像：文件落盘后把相对路径写入字典，即时反映到公共图鉴。
      * 同 id 重传即幂等覆盖；不 bump catalogVersion（头像不算目录内容变更）。
      */
-    fun setAvatar(operatorId: String, file: MultipartFile): OperatorCatalogEntity {
+    fun setAvatar(operatorId: String, file: MultipartFile): AdminOperatorCatalogResponse {
         ensureSeeded()
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         val path = avatarStorage.save(operatorId, file)
-        return repository.save(existing.copy(avatar = path))
+        return AdminOperatorCatalogResponse.of(repository.save(existing.copy(avatar = path)))
     }
 
     /** 清除密探头像：删除磁盘文件并置空字段。 */
-    fun clearAvatar(operatorId: String): OperatorCatalogEntity {
+    fun clearAvatar(operatorId: String): AdminOperatorCatalogResponse {
         ensureSeeded()
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
         avatarStorage.delete(operatorId)
-        return repository.save(existing.copy(avatar = null))
+        return AdminOperatorCatalogResponse.of(repository.save(existing.copy(avatar = null)))
     }
 
     fun delete(operatorId: String) {
@@ -171,22 +183,39 @@ class OperatorCatalogService(
         }
     }
 
-    private fun OperatorCatalogWriteRequest.toEntity(id: String? = null, createdAt: Instant = Instant.now(), catalogVersion: String) =
-        OperatorCatalogEntity(
-            id = id,
-            operatorId = this.id,
-            name = name,
-            alias = alias,
-            rarity = rarity,
-            prof = prof,
-            subProf = subProf,
-            games = games,
-            discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
-            starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
-            spOf = spOf,
-            catalogVersion = catalogVersion,
-            createdAt = createdAt,
-        )
+    private fun requireSpecialOddityName(value: String?): String {
+        val normalized = value?.trim()
+        if (normalized == null || normalized.length !in 1..32) {
+            throw OperatorApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "schema_validation_failed",
+                if (value == null) "special_oddity_name is required" else "special_oddity_name length must be 1..32 after trimming",
+            )
+        }
+        return normalized
+    }
+
+    private fun OperatorCatalogWriteRequest.toEntity(
+        id: String? = null,
+        createdAt: Instant = Instant.now(),
+        catalogVersion: String,
+        specialOddityName: String?,
+    ) = OperatorCatalogEntity(
+        id = id,
+        operatorId = this.id,
+        name = name,
+        alias = alias,
+        rarity = rarity,
+        specialOddityName = specialOddityName,
+        prof = prof,
+        subProf = subProf,
+        games = games,
+        discs = discs.map { OperatorDiscCatalog(it.otName, it.abbreviation, it.color, it.desp) },
+        starStones = starStones.map { OperatorStarStoneCatalog(it.name, it.type) },
+        spOf = spOf,
+        catalogVersion = catalogVersion,
+        createdAt = createdAt,
+    )
 
     private fun nextCatalogVersion(): String {
         catalogVersion = Instant.now().toString()
@@ -206,22 +235,24 @@ class OperatorCatalogService(
                         fromResource(node, version)?.let { repository.save(it) }
                     }
                 } else {
-                    // 已播种过的老库：只回填后来新增的字段（spOf），
+                    // 已播种过的老库：只回填后来新增的字段（spOf / specialOddityName），
                     // 不覆盖管理员改动、不重插被删除的行。约 121 行，仅首次访问执行一次。
+                    var specialBackfillVersion: String? = null
                     objectMapper.readTree(resource.inputStream).forEach { node ->
                         val id = node.path("id").asText()
-                        val spOf = node.get("spOf")?.asText()
-                        if (id.isNotBlank() && spOf != null) {
-                            val existing = repository.findByOperatorId(id) ?: return@forEach
-                            if (existing.spOf == null) {
-                                repository.save(
-                                    existing.copy(
-                                        spOf = spOf,
-                                        createdAt = existing.createdAt,
-                                        catalogVersion = existing.catalogVersion,
-                                    ),
-                                )
-                            }
+                        if (id.isBlank()) return@forEach
+                        val existing = repository.findByOperatorId(id) ?: return@forEach
+                        val resourceSpecialName = resourceText(node, "specialOddityName")
+                        if (existing.specialOddityName == null && resourceSpecialName != null && specialBackfillVersion == null) {
+                            specialBackfillVersion = nextCatalogVersion()
+                        }
+                        val merged = mergeResourceFields(
+                            existing,
+                            node,
+                            specialBackfillVersion ?: existing.catalogVersion,
+                        )
+                        if (merged != existing) {
+                            repository.save(merged)
                         }
                     }
                 }
@@ -251,7 +282,21 @@ class OperatorCatalogService(
         }
     }
 
-    private fun fromResource(node: JsonNode, version: String): OperatorCatalogEntity? {
+    internal fun mergeResourceFields(
+        existing: OperatorCatalogEntity,
+        node: JsonNode,
+        specialBackfillVersion: String,
+    ): OperatorCatalogEntity {
+        val resourceSpecialName = resourceText(node, "specialOddityName")
+        val specialBackfilled = existing.specialOddityName == null && resourceSpecialName != null
+        return existing.copy(
+            spOf = existing.spOf ?: resourceText(node, "spOf"),
+            specialOddityName = existing.specialOddityName ?: resourceSpecialName,
+            catalogVersion = if (specialBackfilled) specialBackfillVersion else existing.catalogVersion,
+        )
+    }
+
+    internal fun fromResource(node: JsonNode, version: String): OperatorCatalogEntity? {
         val id = node.path("id").asText()
         if (id.isBlank()) return null
         return OperatorCatalogEntity(
@@ -259,11 +304,17 @@ class OperatorCatalogService(
             name = node.path("name").asText(id),
             alias = node.get("alias")?.asText(),
             rarity = node.path("rarity").asInt(5),
+            specialOddityName = resourceText(node, "specialOddityName"),
             prof = node.path("prof").map { it.asText() },
             subProf = node.path("subProf").map { it.asText() },
             games = node.path("games").map { it.asText() }.ifEmpty { SUPPORTED_GAMES },
             discs = node.path("discs").map {
-                OperatorDiscCatalog(it.path("ot_name").asText(), it.get("abbreviation")?.asText(), it.get("color")?.asText(), it.get("desp")?.asText())
+                OperatorDiscCatalog(
+                    it.path("ot_name").asText(),
+                    it.get("abbreviation")?.asText(),
+                    it.get("color")?.asText(),
+                    it.get("desp")?.asText(),
+                )
             },
             starStones = node.path("starStones").map {
                 OperatorStarStoneCatalog(it.path("name").asText(), it.path("type").asText())
@@ -272,6 +323,9 @@ class OperatorCatalogService(
             catalogVersion = version,
         )
     }
+
+    private fun resourceText(node: JsonNode, field: String): String? =
+        node.get(field)?.takeUnless(JsonNode::isNull)?.asText()?.trim()?.takeIf(String::isNotEmpty)
 
     companion object {
         val SUPPORTED_GAMES = listOf("如鸢", "代号鸢")

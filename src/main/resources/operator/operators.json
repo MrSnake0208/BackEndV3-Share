@@ -97,7 +97,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_002_jiaxu",
@@ -197,7 +198,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_003_sunshangxiang",
@@ -297,7 +299,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_004_guojia",
@@ -397,7 +400,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_005_lusu",
@@ -497,7 +501,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_006_eshi",
@@ -597,7 +602,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_007_lvmeng",
@@ -697,7 +703,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_008_huatuo",
@@ -797,7 +804,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_009_yanbaihu",
@@ -897,7 +905,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_010_xuyou",
@@ -997,7 +1006,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_011_wenchou",
@@ -1097,7 +1107,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_012_yanliang",
@@ -1197,7 +1208,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_013_chendeng",
@@ -1297,7 +1309,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_014_achan",
@@ -1397,7 +1410,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_015_yanyan",
@@ -1497,7 +1511,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_016_guanjing",
@@ -1597,7 +1612,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_017_ganti",
@@ -1697,7 +1713,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_018_yuanshi",
@@ -1797,7 +1814,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_019_cuilie",
@@ -1897,7 +1915,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_020_wudan",
@@ -1997,7 +2016,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_021_gaolan",
@@ -2097,7 +2117,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_022_shanjiu",
@@ -2197,7 +2218,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_023_shizimiao",
@@ -2397,7 +2419,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_025_queshi",
@@ -2497,7 +2520,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_026_suigu",
@@ -2597,7 +2621,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_027_diwutian",
@@ -2697,7 +2722,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_028_zhouqun",
@@ -2797,7 +2823,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_029_xiuqiu",
@@ -2897,7 +2924,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_030_feiyun",
@@ -2997,7 +3025,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_031_maojie",
@@ -3097,7 +3126,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_032_lituo",
@@ -3197,7 +3227,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_033_louban",
@@ -3297,7 +3328,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_034_xuzhi",
@@ -3397,7 +3429,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_035_lizhen",
@@ -3497,7 +3530,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_036_yangfu",
@@ -3597,7 +3631,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_037_fengshi",
@@ -3697,7 +3732,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_038_luxun",
@@ -3797,7 +3833,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_039_guojie",
@@ -3897,7 +3934,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_040_sunquan",
@@ -3997,7 +4035,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_041_zhangxiu",
@@ -4097,7 +4136,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_042_wangcan",
@@ -4197,7 +4237,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_043_xiaoqiao",
@@ -4297,7 +4338,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_044_zhangliao",
@@ -4397,7 +4439,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_045_zhangzhongjing",
@@ -4497,7 +4540,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_046_zhouyu",
@@ -4597,7 +4641,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_047_gehong",
@@ -4697,7 +4742,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_048_xuman",
@@ -4797,7 +4843,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_049_luji",
@@ -4897,7 +4944,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_050_xunyu",
@@ -4997,7 +5045,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_051_pangtong",
@@ -5097,7 +5146,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_052_caiyan",
@@ -5197,7 +5247,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_053_zhangfei",
@@ -5297,7 +5348,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_054_wangyi",
@@ -5397,7 +5449,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_055_xiahoudun",
@@ -5497,7 +5550,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_056_zhangjiao",
@@ -5597,7 +5651,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_057_chengyu",
@@ -5697,7 +5752,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_058_machao",
@@ -5797,7 +5853,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_059_taishici",
@@ -5897,7 +5954,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_060_zhangkai",
@@ -5997,7 +6055,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_061_gongsunshan",
@@ -6097,7 +6156,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_062_zhanghe",
@@ -6197,7 +6257,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_063_xushu",
@@ -6297,7 +6358,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_064_ganning",
@@ -6397,7 +6459,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_065_zhenfu",
@@ -6497,7 +6560,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_066_zhanglu",
@@ -6597,7 +6661,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_067_kongrong",
@@ -6697,7 +6762,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_068_huangyueying",
@@ -6797,7 +6863,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_069_zhangmiao",
@@ -6897,7 +6964,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_070_dongfeng",
@@ -6997,7 +7065,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_071_caozhi",
@@ -7097,7 +7166,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_072_zhugejin",
@@ -7197,7 +7267,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_073_zhugedan",
@@ -7297,7 +7368,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_074_xunyou",
@@ -7396,7 +7468,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_075_manchong",
@@ -7496,7 +7569,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_076_lingtong",
@@ -7596,7 +7670,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_077_anqi",
@@ -7696,7 +7771,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_078_xixue",
@@ -7796,7 +7872,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_079_liuyao",
@@ -7896,7 +7973,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_080_mateng",
@@ -7996,7 +8074,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_081_linghumao",
@@ -8096,7 +8175,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_082_huanggai",
@@ -8196,7 +8276,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_083_zhuran",
@@ -8296,7 +8377,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_084_chendengsp",
@@ -8498,7 +8580,8 @@
         "type": "assist"
       }
     ],
-    "spOf": "char_023_shizimiao"
+    "spOf": "char_023_shizimiao",
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_086_kuaiyue",
@@ -8598,7 +8681,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_087_miheng",
@@ -8698,7 +8782,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_088_liubao",
@@ -8798,7 +8883,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_089_zhangxiu",
@@ -8898,7 +8984,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_090_dongbai",
@@ -8998,7 +9085,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_091_zhangzhao",
@@ -9098,7 +9186,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_092_chengpu",
@@ -9198,7 +9287,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_093_shixie",
@@ -9298,7 +9388,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_094_yufan",
@@ -9398,7 +9489,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_095_zhangyan",
@@ -9498,7 +9590,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_096_xiahouyuan",
@@ -9598,7 +9691,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_097_zhongyao",
@@ -9698,7 +9792,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_098_liuzhang",
@@ -9798,7 +9893,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_099_pangxi",
@@ -9898,7 +9994,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_100_zhouzhong",
@@ -9997,7 +10094,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_101_lvbu",
@@ -10097,7 +10195,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_102_jianyong",
@@ -10296,7 +10395,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_104_zhugeliang",
@@ -10396,7 +10496,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "免伤值"
   },
   {
     "id": "char_105_simahui",
@@ -10496,7 +10597,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_106_kuailiang",
@@ -10595,7 +10697,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_107_guonvwang",
@@ -10694,7 +10797,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_108_fazheng",
@@ -10793,7 +10897,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_109_chenqun",
@@ -10892,7 +10997,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_110_fenggongzhu",
@@ -10991,7 +11097,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_111_fenggongjiu",
@@ -11090,7 +11197,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_112_pangde",
@@ -11189,7 +11297,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_113_luzhi",
@@ -11288,7 +11397,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_114_chenji",
@@ -11387,7 +11497,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_115_chenying",
@@ -11486,7 +11597,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_119_sunjing",
@@ -11684,7 +11796,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "治疗加成"
   },
   {
     "id": "char_122_zhangsong",
@@ -11882,7 +11995,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_124_simafu",
@@ -11981,7 +12095,8 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   },
   {
     "id": "char_125_zhaoyun",
@@ -12081,6 +12196,7 @@
         "name": "辅星石",
         "type": "assist"
       }
-    ]
+    ],
+    "specialOddityName": "增伤值"
   }
 ]

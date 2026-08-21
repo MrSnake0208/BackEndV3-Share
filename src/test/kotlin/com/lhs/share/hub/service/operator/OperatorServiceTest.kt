@@ -7,6 +7,7 @@ import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
 import com.lhs.share.hub.controller.operator.request.OperatorRecordRequest
 import com.lhs.share.hub.controller.operator.request.OperatorStarStoneRequest
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
@@ -14,9 +15,13 @@ import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.OperatorRecord
+import com.lhs.share.hub.repository.entity.OperatorRecordEntry
+import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.SubAccount
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -26,6 +31,7 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Instant
 
 class OperatorServiceTest {
     private val accountRepository = mockk<SubAccountRepository>()
@@ -33,6 +39,7 @@ class OperatorServiceTest {
     private val recordRepository = mockk<OperatorRecordRepository>()
     private val catalogRepository = mockk<OperatorCatalogRepository>()
     private val catalogService = mockk<OperatorCatalogService>()
+    private val correctionRepository = mockk<OperatorCorrectionRecordRepository>()
     private val transactionTemplate = TransactionTemplate(object : PlatformTransactionManager {
         override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
         override fun commit(status: TransactionStatus) = Unit
@@ -45,6 +52,7 @@ class OperatorServiceTest {
         catalogRepository,
         catalogService,
         transactionTemplate,
+        correctionRepository,
     )
 
     private fun catalog(spOf: String? = null) = OperatorCatalogEntity(
@@ -71,7 +79,7 @@ class OperatorServiceTest {
                 accountId = "acc1",
                 recordId = "rec1",
                 recordType = "operator_snapshot",
-                game = null,
+                game = "代号鸢",
                 effectiveAt = "2026-08-16T10:00:00+08:00",
                 snapshotScope = "full",
                 entries = listOf(
@@ -142,7 +150,7 @@ class OperatorServiceTest {
     private fun entry(id: String, level: Int, elite: Int = 0, starLevel: Int = 0) =
         OperatorEntryRequest(id = id, elite = elite, starLevel = starLevel, level = level)
 
-    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = null, scope: String = "full") =
+    private fun record(entries: List<OperatorEntryRequest>, recordId: String = "rec1", game: String? = "代号鸢", scope: String = "full") =
         OperatorRecordRequest(
             accountId = "acc1",
             recordId = recordId,
@@ -224,7 +232,7 @@ class OperatorServiceTest {
         val e = assertThrows(OperatorApiException::class.java) {
             service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 10, elite = 0, starLevel = 32))))))
         }
-        assertEquals("schema_validation_failed", e.code)
+        assertEquals("invalid_star_level", e.code)
         assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, e.status)
     }
 
@@ -282,7 +290,7 @@ class OperatorServiceTest {
         // 只编辑 SP：level 20 / elite 2 —— 本体也跟随（双向同步）；星级各自独立
         val result = service.import(
             "u1",
-            importRequestWithRecords(listOf(record(listOf(entry("op1", 20, 2, starLevel = 9)), scope = "listed"))),
+            importRequestWithRecords(listOf(record(listOf(entry("op1", 20, 2, starLevel = 4)), scope = "listed"))),
         )
         assertEquals(1, result.accepted)
         val base = saved!!.entries.getValue("op2")
@@ -290,7 +298,7 @@ class OperatorServiceTest {
         assertEquals(2, base.elite)
         assertEquals(5, base.starLevel) // 本体星级独立
         val sp = saved!!.entries.getValue("op1")
-        assertEquals(9, sp.starLevel) // SP 星级保留独立编辑
+        assertEquals(4, sp.starLevel) // SP 星级保留独立编辑
     }
 
     @Test
@@ -356,24 +364,73 @@ class OperatorServiceTest {
     }
 
     @Test
-    fun `base and SP submitted in different games each materialize within their own game`() {
+    fun `account game mismatch is rejected before operator data is written`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
-        val result = service.import(
-            "u1",
-            importRequestWithRecords(
-                listOf(
-                    record(listOf(entry("op2", 10, 2)), game = "如鸢", recordId = "rec1"),
-                    record(listOf(entry("op1", 10, 2)), game = "代号鸢", recordId = "rec2"),
-                ),
-            ),
-        )
-        // 每个 (account, game) 单元独立：如鸢 里有 op2(+其 SP)，代号鸢 里有 op1(+其本体)
-        assertEquals(2, result.accepted)
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.import(
+                "u1",
+                importRequestWithRecords(listOf(record(listOf(entry("op1", 10, 2)), game = "如鸢"))),
+            )
+        }
+
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        assertEquals("account_game_mismatch", error.code)
+        io.mockk.verify(exactly = 0) { currentRepository.save(any()) }
+        io.mockk.verify(exactly = 0) { recordRepository.save(any()) }
     }
+
+    @Test
+    fun `new operator writes cannot fall back to generic null game`() {
+        setUpHappyPath()
+
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 10)), game = null))))
+        }
+
+        assertEquals("account_game_mismatch", error.code)
+        io.mockk.verify(exactly = 0) { currentRepository.save(any()) }
+        io.mockk.verify(exactly = 0) { recordRepository.save(any()) }
+    }
+
+    @Test
+    fun `deleting legacy history can still replay remaining null game records into generic current`() {
+        val target = legacyRecord("legacy-1", "2026-08-16T01:00:00Z")
+        val remaining = legacyRecord("legacy-2", "2026-08-16T02:00:00Z")
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "legacy-1") } returns target
+        every { recordRepository.delete(target) } just runs
+        every { currentRepository.deleteByUserIdAndAccountIdAndGame("u1", "acc1", "*") } just runs
+        every { recordRepository.findByUserIdAndAccountIdAndGameOrderByEffectiveAtAsc("u1", "acc1", null) } returns listOf(remaining)
+        every { correctionRepository.findByUserIdAndAccountIdAndGameOrderByCreatedAtAsc("u1", "acc1", "*") } returns emptyList()
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "*") } returns null
+        every { catalogService.getOperator("op1") } returns catalog()
+        every { catalogService.spFormsOf("op1") } returns emptyList()
+        var saved: OperatorCurrent? = null
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
+        every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
+
+        service.deleteRecord("u1", "acc1", "legacy-1")
+
+        assertEquals("*", saved?.game)
+        assertEquals(10, saved?.entries?.get("op1")?.level)
+    }
+
+    private fun legacyRecord(recordId: String, effectiveAt: String) = OperatorRecord(
+        recordId = recordId,
+        userId = "u1",
+        accountId = "acc1",
+        recordType = "operator_snapshot",
+        game = null,
+        snapshotScope = "full",
+        effectiveAt = Instant.parse(effectiveAt),
+        producer = ProducerInfo("legacy", "1"),
+        entries = listOf(OperatorRecordEntry(id = "op1", elite = 1, starLevel = 1, level = 10)),
+    )
 
     @Test
     fun `SP submitted under a specific game materializes its base in that same game`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
+        every { accountRepository.findAllByUserIdAndAccountIdIn(any(), any()) } returns
+            listOf(SubAccount(userId = "u1", accountId = "acc1", name = "账号", game = "如鸢"))
         var saved: OperatorCurrent? = null
         every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { saved = it } }
         service.import("u1", importRequestWithRecords(listOf(record(listOf(entry("op1", 5, 6)), game = "如鸢", scope = "listed"))))

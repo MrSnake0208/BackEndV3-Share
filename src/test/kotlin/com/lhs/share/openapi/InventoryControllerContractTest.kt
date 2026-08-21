@@ -10,15 +10,19 @@ import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryImportEvent
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -42,6 +46,7 @@ class InventoryControllerContractTest {
     private val tokenService = mockk<OpenApiTokenService>()
     private val catalogService = mockk<EntityCatalogService>()
     private val helper = mockk<AuthenticationHelper>()
+    private val eventService = mockk<AccountEventService>()
     private lateinit var mockMvc: MockMvc
 
     @BeforeEach
@@ -54,13 +59,14 @@ class InventoryControllerContractTest {
         mockMvc = MockMvcBuilders
             .standaloneSetup(
                 InventoryController(inventoryService, favoriteService, catalogService, helper),
-                OpenApiInventoryController(tokenService, inventoryService, subAccountService),
-                AccountController(subAccountService, helper),
+                OpenApiInventoryController(tokenService, inventoryService, subAccountService, eventService),
+                AccountController(subAccountService, helper, eventService),
             )
             .setControllerAdvice(InventoryExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
             .build()
+        every { eventService.publish(any(), any(), any(), any(), any()) } just runs
     }
 
     @Test
@@ -83,6 +89,19 @@ class InventoryControllerContractTest {
                 "token-user",
                 "main",
                 match { it.records.single().let { record -> record.recordId == "test:1" && record.staminaCost == 80L } },
+            )
+        }
+        verify {
+            eventService.publish(
+                "token-user",
+                "main",
+                OpenApiInventoryController.INVENTORY_EVENT_NAME,
+                any(),
+                match<InventoryImportEvent> {
+                    it.accountId == "main" &&
+                        it.accepted == 1 &&
+                        it.records.single().entries.single().id == "baijinbi"
+                },
             )
         }
     }

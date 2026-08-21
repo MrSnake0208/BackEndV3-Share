@@ -4,8 +4,10 @@ import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -32,10 +34,13 @@ class SubAccountService(
     private val favoriteRepository: InventoryAgentFavoriteRepository,
     private val operatorCurrentRepository: OperatorCurrentRepository,
     private val operatorRecordRepository: OperatorRecordRepository,
+    private val operatorCorrectionRecordRepository: OperatorCorrectionRecordRepository,
+    private val operatorV3ImportRecordRepository: OperatorV3ImportRecordRepository,
     private val tokenService: OpenApiTokenService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
 ) {
-    fun create(userId: String, name: String): SubAccountResponse {
+    fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
+        val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
         if (accountRepository.countByUserId(userId) >= MAX_ACCOUNTS_PER_USER) {
             throw InventoryApiException(
                 HttpStatus.CONFLICT,
@@ -51,6 +56,7 @@ class SubAccountService(
                         userId = userId,
                         accountId = "acc_${UUID.randomUUID().toString().replace("-", "")}",
                         name = name,
+                        game = normalizedGame,
                         createdAt = now,
                         updatedAt = now,
                     ),
@@ -64,13 +70,40 @@ class SubAccountService(
     fun list(userId: String): List<SubAccountResponse> =
         accountRepository.findAllByUserIdOrderByCreatedAtAsc(userId).map(SubAccountResponse::of)
 
-    fun rename(userId: String, accountId: String, name: String): SubAccountResponse {
+    fun update(userId: String, accountId: String, name: String?, game: String?): SubAccountResponse {
+        if (name == null && game == null) {
+            throw InventoryApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "schema_validation_failed",
+                "name 或 game 至少提供一项",
+            )
+        }
         val account = requireAccount(userId, accountId)
+        val nextGame = game?.let(::normalizeGame) ?: account.game
         return try {
-            SubAccountResponse.of(accountRepository.save(account.copy(name = name, updatedAt = Instant.now())))
+            SubAccountResponse.of(
+                accountRepository.save(
+                    account.copy(
+                        name = name ?: account.name,
+                        game = nextGame,
+                        updatedAt = Instant.now(),
+                    ),
+                ),
+            )
         } catch (e: DuplicateKeyException) {
             throw nameConflict()
         }
+    }
+
+    private fun normalizeGame(game: String): String {
+        if (game !in SUPPORTED_GAMES) {
+            throw InventoryApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "invalid_game",
+                "game 只允许 代号鸢 或 如鸢",
+            )
+        }
+        return game
     }
 
     fun delete(userId: String, accountId: String) {
@@ -81,6 +114,8 @@ class SubAccountService(
             favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }
@@ -97,5 +132,7 @@ class SubAccountService(
 
     companion object {
         const val MAX_ACCOUNTS_PER_USER = 10
+        const val DEFAULT_GAME = "代号鸢"
+        val SUPPORTED_GAMES = setOf(DEFAULT_GAME, "如鸢")
     }
 }
