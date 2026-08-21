@@ -27,6 +27,7 @@ data class OperatorCorrectionRecord(
     val elite: Int? = null,
     val starLevel: Int? = null,
     val discLoadouts: List<OperatorDiscLoadout>? = null,
+    val starStones: List<OperatorStarStone>? = null,
     val combatStats: OperatorCombatStats? = null,
     val createdAt: Instant = Instant.now(),
 )

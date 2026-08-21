@@ -46,7 +46,6 @@ class OperatorCurrentRepositoryImpl(
             Criteria.where("userId").`is`(userId),
             Criteria.where("accountId").`is`(accountId),
             Criteria.where("game").`is`(game),
-            Criteria.where("entries.$operatorId").exists(true),
             revisionCriteria(operatorId, expectedRevision),
         )
         entries.filterKeys { it != operatorId }.forEach { (id, entry) ->

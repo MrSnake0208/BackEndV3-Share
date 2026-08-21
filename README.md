@@ -168,10 +168,13 @@ star_level / discs / star_stones` 上继续返回：
 
 - `disc_loadouts`：最多两套、每套最多三个命盘，不存在 active 或“当前盘”；`discs` 始终是第一套兼容镜像；
 - `combat_stats`：`attack / hp / special` 三项奇闻、扫描攻生、手动校正、观测输入与有效状态；
+- `combat_stats.display_mode`：攻击力和生命力分别记忆 `auto` / `manual` 显示偏好；
 - `revision / updated_at`：entry 级并发版本和更新时间。
 
 旧 Mongo 行只有 `discs` 时会读取为第一套“命盘一”；旧 `main / assist` 星石槽读取为
 `main1 / assist1`。`star_level` 仍是唯一化极标量，`star_stones` 仍是六槽当前装备，未增加同义字段。
+读取具体游戏时，通用 `game="universal"`（兼容历史 `game="*"`）entry 可作为回退；首次 PATCH 编辑若具体游戏文档没有该 entry，
+会以通用 entry 为基线写入请求的具体游戏文档，不回写通用文档。
 
 JWT 用户可用局部校正接口（不扣库存、不写库存流水）：
 
@@ -186,8 +189,13 @@ Content-Type: application/json
     {"id": "disc_1", "name": "命盘一", "discs": [{"ot_name": "技能增伤"}]},
     {"id": "disc_2", "name": "命盘二", "discs": []}
   ],
+  "star_stones": [
+    {"type": "main1", "name": "攻击力", "level": 60},
+    {"type": "assist1", "name": "生命值", "level": 50}
+  ],
   "combat_stats": {
     "manual_attack": null,
+    "display_mode": {"attack": "auto", "hp": "manual"},
     "oddities": {
       "attack": {"current": 500},
       "hp": {"current": 2600},
@@ -200,8 +208,13 @@ Content-Type: application/json
 ```
 
 只合并出现的顶层和 `combat_stats` 内部字段；`disc_loadouts=[]` 清空两套，
+`star_stones` 出现时完整替换六槽当前装备，`star_stones=[]` 清空全部星石，缺失则保留，
+槽位仅允许 `main1..main3`、`assist1..assist3` 且不可重复；
 `combat_stats=null` 清除战斗资料，`manual_attack=null / manual_hp=null` 只清除对应手动校正。
-revision 冲突返回 `409 operator_revision_conflict`。普通密探 `star_level` 允许 `0..31`，SP 依据公共图鉴
+`display_mode` 也按内部字段出现性合并，`attack: null` 或 `hp: null` 清除对应偏好，
+显示偏好变化不会使已有观测变为 stale。若账号尚无 current 文档或 entry，`expected_revision=0`
+的首次 PATCH 会创建指定游戏 entry；非零 revision 的缺失 entry 返回 `409 operator_revision_conflict`。
+普通密探 `star_level` 允许 `0..31`，SP 依据公共图鉴
 `sp_of` 只允许直接星级 `0..5`。奇闻上限按 rarity 固定为 3 星 `300/1560/9`、4 星
 `305/1820/11`、5 星 `500/2600/15`；第三项展示名不写入用户数据。
 
