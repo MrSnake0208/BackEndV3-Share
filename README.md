@@ -168,7 +168,7 @@ star_level / discs / star_stones` 上继续返回：
 
 - `disc_loadouts`：最多两套、每套最多三个命盘，不存在 active 或“当前盘”；`discs` 始终是第一套兼容镜像；
 - `combat_stats`：`attack / hp / special` 三项奇闻、扫描攻生、手动校正、观测输入与有效状态；
-- `combat_stats.display_mode`：攻击力和生命力分别记忆 `auto` / `manual` 显示偏好；
+- `combat_stats.display_mode`：攻击力和生命力分别记忆 `auto`（公式计算）/ `manual`（手填或采集值）显示偏好；
 - `revision / updated_at`：entry 级并发版本和更新时间。
 
 旧 Mongo 行只有 `discs` 时会读取为第一套“命盘一”；旧 `main / assist` 星石槽读取为
@@ -220,8 +220,76 @@ Content-Type: application/json
 
 v2 listed/full 导入继续只更新旧字段：`discs` 更新第一套并保留第二套，新增战斗资料不会因 DTO 缺字段被清空；
 删除 v2 record 时会把独立的 `operator_correction_records` 校正审计与剩余 v2 record 按接收顺序重放。
-v2 export 仍只输出第一套镜像 `discs`、既有 `starLevel` 和 `starStones`。OpenAPI Token 仍只有 current
-读取和既有 v2 import/export，本批次没有增加 PATCH 写权限。
+v2 export 仍只输出第一套镜像 `discs`、既有 `starLevel` 和 `starStones`。
+
+### 密探养成交换协议 v3
+
+浏览器 JWT 使用以下接口导入客观养成快照：
+
+```http
+POST /v1/operator/import/preview
+POST /v1/operator/import
+Authorization: Bearer <JWT>
+Content-Type: application/json
+```
+
+来源账号不是后端账号 ID 时，请求使用包装体；`account_mapping` 的 value 必须是当前 JWT 用户拥有的子账号：
+
+```json
+{
+  "document": {"format": "myshare-operator-exchange", "version": 3},
+  "account_mapping": {"local_default": "acc_xxx"},
+  "confirm_review": false
+}
+```
+
+来源 ID 已经是本人真实 `account_id` 时也可直接提交 v3 文档。preview 只返回逐 entry 的
+`accepted / partial / review / rejected / unchanged`、字段差异、warning、blocking error、stale 和目标 revision，
+不写 current 或库存。commit 复用同一 Schema validator 和 current 局部合并规则，写入
+`operator_v3_import_records` 审计/幂等记录；相同 `record_id` 和内容重复提交返回 unchanged，内容不同返回
+`idempotency_conflict`。`listed` 不删除报告外密探；`full` 删除文档外客观 entry，但文档内 entry 未出现的
+第二套命盘、combat_stats 和 display_mode 保持不变。
+
+自动采集使用账号绑定 token 和专用最小权限：
+
+```http
+POST /open-api/operator/scan-import/preview
+POST /open-api/operator/scan-import/commit
+Authorization: Bearer <account-bound-token>
+Content-Type: application/json
+```
+
+token 必须包含 `operator:scan:write`。OpenAPI 只接受一个来源账号和
+`operator_snapshot + source_kind=scan + snapshot_scope=listed`，并始终把来源账号映射到 token 绑定账号；
+请求中的 `account_id` 不能选择其他目标账号。自动采集不能提交 annotation、manual 攻生校正或
+`display_mode`，服务端将写入的 `combat_stats.source` 固定为 `scan`。v3 的
+`equipped_star_stones` 写入现有 current `star_stones`，不会创建库存实例、扣库存或写库存流水。
+服务端会把本次非空的 `observed_attack / observed_hp` 同步为对应的 `manual_attack / manual_hp`，
+并把对应 `display_mode` 设为 `manual`；前端因此可继续使用既有 `auto / manual` 开关在公式值和采集值之间切换。
+
+浏览器需要即时提示最近一次自动上报或库存更新时，可在页面打开期间订阅账号级 SSE：
+
+```http
+GET /v1/accounts/acc_xxx/events
+Authorization: Bearer <JWT>
+Accept: text/event-stream
+```
+
+OpenAPI scan 处理 entry 后发送 `operator_scan_import` 事件，数据包含
+`account_id / operator_id / record_id / status / revision / stale / observed_status / warnings / blocking_errors / occurred_at`。
+每个 OpenAPI 库存导入事务成功后发送一个 `inventory_import` 事件，数据包含导入结果和本次
+`record_id / record_type / entity_type / entries[{id,count}]`。前端可以只根据事件名和时间显示“最近流水已更新”或“库存已更新”，忽略条目明细；采集端可以批量提交，不要求一个 entry 一个请求。
+它不维护扫描总量或开始/结束状态，也不补发断线期间的历史动画事件；`operator_current` 和
+`inventory_current` 仍是持久事实源。
+服务端每 15 秒发送 SSE comment 心跳并关闭 Nginx 响应缓冲。由于原生 `EventSource` 不能设置 Bearer header，
+当前 JWT 前端应使用带 `Authorization` 的流式 `fetch` 或支持自定义 header 的 SSE 客户端。
+
+生产校验使用内置 `schema/operator-growth-exchange-v3.schema.json`，并再次以公共图鉴校验 operator/game、
+普通与 SP `star_level`、命盘、六个星石槽位和按 rarity 派生的奇闻上限。稳定错误码包括
+`schema_validation_failed`、`account_mapping_required`、`account_scope_mismatch`、`account_game_mismatch`、
+`unknown_operator`、`invalid_star_level`、`invalid_combat_stats`、`invalid_disc_loadout`、
+`invalid_equipped_star_stones`、`scan_scope_not_allowed`、`idempotency_conflict` 和
+`operator_revision_conflict`。
 
 **管理员（用户 `status >= 2`）管理公共图鉴的数据面**，即在 `/v1/admin/operator-catalog/**` 上增删改查
 `operator_catalog` 字典，改动即时反映到公共图鉴与导入校验：

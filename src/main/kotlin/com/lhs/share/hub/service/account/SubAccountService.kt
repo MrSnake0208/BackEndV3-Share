@@ -7,6 +7,7 @@ import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -34,6 +35,7 @@ class SubAccountService(
     private val operatorCurrentRepository: OperatorCurrentRepository,
     private val operatorRecordRepository: OperatorRecordRepository,
     private val operatorCorrectionRecordRepository: OperatorCorrectionRecordRepository,
+    private val operatorV3ImportRecordRepository: OperatorV3ImportRecordRepository,
     private val tokenService: OpenApiTokenService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
 ) {
@@ -113,6 +115,7 @@ class SubAccountService(
             operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }

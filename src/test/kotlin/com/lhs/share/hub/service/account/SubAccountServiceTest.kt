@@ -6,6 +6,7 @@ import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -36,6 +37,7 @@ class SubAccountServiceTest {
     private val operatorCurrentRepository = mockk<OperatorCurrentRepository>()
     private val operatorRecordRepository = mockk<OperatorRecordRepository>()
     private val operatorCorrectionRecordRepository = mockk<OperatorCorrectionRecordRepository>()
+    private val operatorV3ImportRecordRepository = mockk<OperatorV3ImportRecordRepository>()
     private val tokenService = mockk<OpenApiTokenService>()
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
@@ -52,6 +54,7 @@ class SubAccountServiceTest {
         operatorCurrentRepository,
         operatorRecordRepository,
         operatorCorrectionRecordRepository,
+        operatorV3ImportRecordRepository,
         tokenService,
         transactionTemplate,
     )
@@ -97,6 +100,7 @@ class SubAccountServiceTest {
         verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 
     @Test
@@ -161,6 +165,7 @@ class SubAccountServiceTest {
         every { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { tokenService.revokeByAccount("u1", "main") } just runs
         every { accountRepository.deleteById("mongo-id") } just runs
 
@@ -172,6 +177,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
     }

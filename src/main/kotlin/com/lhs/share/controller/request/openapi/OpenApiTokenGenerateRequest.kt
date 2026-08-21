@@ -37,6 +37,7 @@ data class OpenApiTokenGenerateRequest(
                 "operator:read",
                 "operator:write",
                 "operator:export",
+                "operator:scan:write",
             ],
         ),
     )

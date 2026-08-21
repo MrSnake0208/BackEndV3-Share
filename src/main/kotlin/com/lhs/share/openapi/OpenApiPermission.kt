@@ -27,6 +27,7 @@ enum class OpenApiPermission(
     OPERATOR_READ(code = 20001, key = "operator:read", desc = "密探数据读取"),
     OPERATOR_WRITE(code = 20002, key = "operator:write", desc = "密探数据写入"),
     OPERATOR_EXPORT(code = 20003, key = "operator:export", desc = "密探数据导出"),
+    OPERATOR_SCAN_WRITE(code = 20004, key = "operator:scan:write", desc = "密探自动采集写入"),
     ;
 
     companion object {
