@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.operator
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.operator.request.OperatorDiscRequest
@@ -40,9 +41,12 @@ import com.lhs.share.hub.repository.entity.normalized
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Base64
+import java.util.HexFormat
 import java.util.UUID
 
 @Service
@@ -382,7 +386,81 @@ class OperatorService(
         return listOf(OperatorCurrentResponse.of(specific.copy(entries = genericEntries + specific.entries)))
     }
 
+    fun previewCurrentPatch(
+        userId: String,
+        accountId: String,
+        game: String,
+        operatorId: String,
+        request: ObjectNode,
+    ): OperatorCurrentPatchPreview {
+        val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
+        return OperatorCurrentPatchPreview(
+            before = prepared.existing.takeIf { prepared.entryExisted }?.let(OperatorCurrentEntryDto::of),
+            after = OperatorCurrentEntryDto.of(prepared.merged),
+            stale = prepared.stale,
+        )
+    }
+
     fun patchCurrent(userId: String, accountId: String, game: String, operatorId: String, request: ObjectNode): OperatorCurrentEntryDto {
+        val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
+        var saved: OperatorCurrent? = null
+        transactionTemplate.executeWithoutResult {
+            if (prepared.materializingEntry) {
+                currentRepository.save(
+                    prepared.sourceCurrent.copy(
+                        entries = prepared.sourceCurrent.entries + (operatorId to prepared.existing),
+                        updatedAt = prepared.now,
+                    ),
+                )
+            }
+            saved = currentRepository.compareAndSetEntries(
+                userId,
+                accountId,
+                prepared.sourceCurrent.game,
+                operatorId,
+                prepared.expectedRevision,
+                prepared.updates,
+                prepared.now,
+            ) ?: revisionConflict(operatorId)
+            correctionRepository.save(
+                OperatorCorrectionRecord(
+                    userId = userId,
+                    accountId = accountId,
+                    game = prepared.sourceCurrent.game,
+                    operatorId = operatorId,
+                    reason = prepared.reason,
+                    fields = prepared.fields,
+                    level = prepared.merged.level.takeIf { "level" in prepared.fields },
+                    elite = prepared.merged.elite.takeIf { "elite" in prepared.fields },
+                    starLevel = prepared.merged.starLevel.takeIf { "star_level" in prepared.fields },
+                    discLoadouts = prepared.merged.discLoadouts.takeIf { "disc_loadouts" in prepared.fields },
+                    starStones = prepared.merged.starStones.takeIf { "star_stones" in prepared.fields },
+                    combatStats = prepared.merged.combatStats.takeIf { "combat_stats" in prepared.fields },
+                    createdAt = prepared.now,
+                ),
+            )
+        }
+        return OperatorCurrentEntryDto.of(checkNotNull(saved).entries.getValue(operatorId))
+    }
+
+    fun completeFullImport(userId: String, accountId: String, game: String, operatorIds: Set<String>, effectiveAt: Instant) {
+        val current = currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, game) ?: return
+        currentRepository.save(
+            current.copy(
+                entries = current.entries.filterKeys { it in operatorIds },
+                fullBaselineAt = effectiveAt,
+                updatedAt = Instant.now(),
+            ),
+        )
+    }
+
+    private fun prepareCurrentPatch(
+        userId: String,
+        accountId: String,
+        game: String,
+        operatorId: String,
+        request: ObjectNode,
+    ): PreparedCurrentPatch {
         rejectUnknown(
             request,
             setOf("level", "elite", "star_level", "disc_loadouts", "star_stones", "combat_stats", "expected_revision", "reason"),
@@ -425,16 +503,18 @@ class OperatorService(
         }
         val specificEntry = specificCurrent?.entries?.get(operatorId)?.normalized()
         val genericEntry = genericCurrent?.entries?.get(operatorId)?.normalized()
+        val entryExisted = specificEntry != null || genericEntry != null
         val materializingEntry = specificEntry == null && (specificCurrent == null || genericEntry != null)
         val sourceCurrent = when {
             specificEntry != null -> checkNotNull(specificCurrent)
-            genericEntry != null -> specificCurrent
-                ?: OperatorCurrent(
-                    id = key(userId, accountId, game),
-                    userId = userId,
-                    accountId = accountId,
-                    game = game,
-                )
+            genericEntry != null ->
+                specificCurrent
+                    ?: OperatorCurrent(
+                        id = key(userId, accountId, game),
+                        userId = userId,
+                        accountId = accountId,
+                        game = game,
+                    )
             else -> {
                 if (expectedRevision != 0L) revisionConflict(operatorId)
                 specificCurrent ?: OperatorCurrent(
@@ -494,20 +574,13 @@ class OperatorService(
             }
         }
         if (fields.isEmpty()) invalid("At least one patch field is required", operatorId, "")
-        if (combatInputsChanged(existing, merged) && !hasFreshObservation(request.get("combat_stats"))) {
-            merged = merged.markObservationStale()
-        }
-        if (hasFreshObservation(request.get("combat_stats")) && merged.combatStats != null) {
-            val observed = merged.combatStats.observedInputs
-            merged = merged.copy(
-                combatStats = merged.combatStats.copy(
-                    observedInputs = (observed ?: OperatorObservedInputs()).copy(
-                        level = observed?.level ?: merged.level,
-                        elite = observed?.elite ?: merged.elite,
-                        starLevel = observed?.starLevel ?: merged.starLevel,
-                    ),
-                ),
-            )
+        merged = merged.normalized()
+        val freshObservation = hasFreshObservation(request.get("combat_stats"), merged)
+        val stale = !freshObservation && combatInputsChanged(existing, merged)
+        merged = when {
+            freshObservation -> merged.withFreshObservationMetadata(request.path("combat_stats"))
+            stale -> merged.markObservationStale()
+            else -> merged
         }
         merged = merged.copy(revision = expectedRevision + 1, updatedAt = now).normalized()
 
@@ -522,44 +595,19 @@ class OperatorService(
             }
         }
 
-        var saved: OperatorCurrent? = null
-        transactionTemplate.executeWithoutResult {
-            if (materializingEntry) {
-                currentRepository.save(
-                    sourceCurrent.copy(
-                        entries = sourceCurrent.entries + (operatorId to existing),
-                        updatedAt = now,
-                    ),
-                )
-            }
-            saved = currentRepository.compareAndSetEntries(
-                userId,
-                accountId,
-                sourceCurrent.game,
-                operatorId,
-                expectedRevision,
-                updates,
-                now,
-            ) ?: revisionConflict(operatorId)
-            correctionRepository.save(
-                OperatorCorrectionRecord(
-                    userId = userId,
-                    accountId = accountId,
-                    game = sourceCurrent.game,
-                    operatorId = operatorId,
-                    reason = reason,
-                    fields = fields,
-                    level = merged.level.takeIf { "level" in fields },
-                    elite = merged.elite.takeIf { "elite" in fields },
-                    starLevel = merged.starLevel.takeIf { "star_level" in fields },
-                    discLoadouts = merged.discLoadouts.takeIf { "disc_loadouts" in fields },
-                    starStones = merged.starStones.takeIf { "star_stones" in fields },
-                    combatStats = merged.combatStats.takeIf { "combat_stats" in fields },
-                    createdAt = now,
-                ),
-            )
-        }
-        return OperatorCurrentEntryDto.of(checkNotNull(saved).entries.getValue(operatorId))
+        return PreparedCurrentPatch(
+            sourceCurrent = sourceCurrent,
+            entryExisted = entryExisted,
+            materializingEntry = materializingEntry,
+            existing = existing,
+            merged = merged,
+            expectedRevision = expectedRevision,
+            updates = updates,
+            fields = fields,
+            reason = reason,
+            stale = stale,
+            now = now,
+        )
     }
 
     private fun parsePatchStarStones(node: JsonNode?, catalog: OperatorCatalogEntity): List<OperatorStarStone> {
@@ -837,11 +885,7 @@ class OperatorService(
         return result
     }
 
-    private fun mergeDisplayMode(
-        existing: OperatorCombatDisplayMode?,
-        raw: JsonNode,
-        operatorId: String,
-    ): OperatorCombatDisplayMode? {
+    private fun mergeDisplayMode(existing: OperatorCombatDisplayMode?, raw: JsonNode, operatorId: String): OperatorCombatDisplayMode? {
         if (!raw.isObject) {
             invalid("display_mode must be an object or null", operatorId, "combat_stats.display_mode", "invalid_combat_stats")
         }
@@ -966,9 +1010,9 @@ class OperatorService(
         )
     }
 
-    private fun hasFreshObservation(raw: JsonNode?): Boolean = raw?.isObject == true &&
-        raw.hasNonNull("combat_input_signature") &&
-        (raw.hasNonNull("observed_attack") || raw.hasNonNull("observed_hp"))
+    private fun hasFreshObservation(raw: JsonNode?, merged: OperatorEntry): Boolean = raw?.isObject == true &&
+        (raw.hasNonNull("observed_attack") || raw.hasNonNull("observed_hp")) &&
+        merged.combatStats?.source?.let { it in OBSERVATION_SOURCES } == true
 
     fun listRecords(
         userId: String,
@@ -1127,8 +1171,83 @@ class OperatorService(
             before.combatStats?.oddities.orEmpty() != after.combatStats?.oddities.orEmpty()
     }
 
-    private fun normalizedStarStones(entry: OperatorEntry): List<OperatorStarStone> =
-        entry.normalized().starStones.sortedBy { it.type }
+    private fun normalizedStarStones(entry: OperatorEntry): List<OperatorStarStone> = entry.normalized().starStones.sortedBy { it.type }
+
+    private fun OperatorEntry.withFreshObservationMetadata(raw: JsonNode): OperatorEntry {
+        val normalized = normalized()
+        val stats = normalized.combatStats ?: return normalized
+        val hasAttack = raw.hasNonNull("observed_attack")
+        val hasHp = raw.hasNonNull("observed_hp")
+        val displayMode = stats.displayMode ?: OperatorCombatDisplayMode()
+        return normalized.copy(
+            combatStats = stats.copy(
+                manualAttack = if (hasAttack) stats.observedAttack else stats.manualAttack,
+                manualHp = if (hasHp) stats.observedHp else stats.manualHp,
+                observedStatus = "valid",
+                combatInputSignature = stats.combatInputSignature.takeIf {
+                    raw.hasNonNull("combat_input_signature")
+                } ?: combatInputSignature(normalized),
+                observedInputs = OperatorObservedInputs(
+                    level = normalized.level,
+                    elite = normalized.elite,
+                    starLevel = normalized.starLevel,
+                    odditiesSignature = signature(canonicalOddities(normalized)),
+                    equippedStarStonesSignature = signature(canonicalStarStones(normalized)),
+                ),
+                displayMode = displayMode.copy(
+                    attack = if (hasAttack) "manual" else displayMode.attack,
+                    hp = if (hasHp) "manual" else displayMode.hp,
+                ),
+            ),
+        )
+    }
+
+    private fun combatInputSignature(entry: OperatorEntry): String {
+        val normalized = entry.normalized()
+        val canonical = ObjectNode(JSON_NODE_FACTORY).apply {
+            put("level", normalized.level)
+            put("elite", normalized.elite)
+            put("star_level", normalized.starLevel)
+            set<JsonNode>("oddities", canonicalOddities(normalized))
+            set<JsonNode>("equipped_star_stones", canonicalStarStones(normalized))
+        }
+        return signature(canonical)
+    }
+
+    private fun canonicalOddities(entry: OperatorEntry): ObjectNode = ObjectNode(JSON_NODE_FACTORY).apply {
+        ODDITY_KEYS_IN_ORDER.forEach { key ->
+            val current = entry.combatStats?.oddities?.get(key)?.current
+            set<JsonNode>(
+                key,
+                ObjectNode(JSON_NODE_FACTORY).apply {
+                    if (current == null) putNull("current") else put("current", current)
+                },
+            )
+        }
+    }
+
+    private fun canonicalStarStones(entry: OperatorEntry): ArrayNode = ArrayNode(JSON_NODE_FACTORY).apply {
+        entry.normalized().starStones
+            .sortedWith(
+                compareBy<OperatorStarStone> { STONE_SLOT_INDEX[it.type] ?: Int.MAX_VALUE }
+                    .thenBy { it.type }
+                    .thenBy { it.name ?: "" }
+                    .thenBy { it.level },
+            ).forEach { stone ->
+                add(
+                    ObjectNode(JSON_NODE_FACTORY).apply {
+                        put("type", stone.type)
+                        if (stone.name == null) putNull("name") else put("name", stone.name)
+                        put("level", stone.level)
+                    },
+                )
+            }
+    }
+
+    private fun signature(node: JsonNode): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(node.toString().toByteArray(StandardCharsets.UTF_8))
+        return "sha256:${HexFormat.of().formatHex(digest)}"
+    }
 
     private fun OperatorEntry.markObservationStale(): OperatorEntry {
         val stats = combatStats ?: return this
@@ -1349,6 +1468,20 @@ class OperatorService(
         val correction: OperatorCorrectionRecord?,
     )
 
+    private data class PreparedCurrentPatch(
+        val sourceCurrent: OperatorCurrent,
+        val entryExisted: Boolean,
+        val materializingEntry: Boolean,
+        val existing: OperatorEntry,
+        val merged: OperatorEntry,
+        val expectedRevision: Long,
+        val updates: Map<String, OperatorEntry>,
+        val fields: Set<String>,
+        val reason: String,
+        val stale: Boolean,
+        val now: Instant,
+    )
+
     companion object {
         const val FORMAT = "myshare-operator-exchange"
         const val VERSION = 2
@@ -1367,10 +1500,22 @@ class OperatorService(
         val GAMES = setOf("如鸢", "代号鸢")
         val STONE_TYPES = setOf("main", "assist", "main1", "main2", "main3", "assist1", "assist2", "assist3")
         val ACCOUNT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-        val CORRECTION_REASONS = setOf("manual_correction", "local_migration")
+        val CORRECTION_REASONS = setOf("manual_correction", "local_migration", "v3_import")
         val COMBAT_SOURCES = setOf("scan", "manual", "imported")
+        val OBSERVATION_SOURCES = setOf("scan", "imported")
         val OBSERVED_STATUSES = setOf("valid", "stale", "unverified", "unavailable")
         val DISPLAY_MODES = setOf("auto", "manual")
         val ODDITY_KEYS = setOf("attack", "hp", "special")
+        val ODDITY_KEYS_IN_ORDER = listOf("attack", "hp", "special")
+        val STONE_SLOT_INDEX = listOf("main1", "main2", "main3", "assist1", "assist2", "assist3")
+            .withIndex()
+            .associate { (index, type) -> type to index }
+        val JSON_NODE_FACTORY = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
     }
 }
+
+data class OperatorCurrentPatchPreview(
+    val before: OperatorCurrentEntryDto?,
+    val after: OperatorCurrentEntryDto,
+    val stale: Boolean,
+)

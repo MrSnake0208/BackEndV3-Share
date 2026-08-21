@@ -9,7 +9,9 @@ import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryImportEvent
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
@@ -39,6 +41,7 @@ class OpenApiInventoryController(
     private val tokenService: OpenApiTokenService,
     private val inventoryService: InventoryService,
     private val accountService: SubAccountService,
+    private val eventService: AccountEventService,
 ) {
     @Operation(summary = "Token 绑定的子账号")
     @InventoryReadResponses
@@ -78,7 +81,16 @@ class OpenApiInventoryController(
         @Valid @RequestBody request: InventoryImportRequest,
     ): ApiResult<InventoryImportResult> {
         val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_WRITE)
-        return success(inventoryService.import(principal.userId, principal.accountId, request))
+        val result = inventoryService.import(principal.userId, principal.accountId, request)
+        val event = InventoryImportEvent.of(principal.accountId, request, result)
+        eventService.publish(
+            principal.userId,
+            principal.accountId,
+            INVENTORY_EVENT_NAME,
+            event.eventId,
+            event,
+        )
+        return success(result)
     }
 
     @Operation(summary = "导出库存交换文档")
@@ -108,5 +120,9 @@ class OpenApiInventoryController(
             from?.toInstant(),
             to?.toInstant(),
         )
+    }
+
+    companion object {
+        const val INVENTORY_EVENT_NAME = "inventory_import"
     }
 }

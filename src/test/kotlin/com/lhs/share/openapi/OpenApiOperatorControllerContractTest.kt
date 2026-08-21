@@ -1,10 +1,13 @@
 package com.lhs.share.openapi
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
+import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.operator.OperatorService
+import com.lhs.share.hub.service.operator.OperatorV3ImportService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -51,5 +54,22 @@ class OpenApiOperatorControllerContractTest {
         assertEquals(0, response.data?.single()?.entries?.getValue("op1")?.revision)
         verify { tokenService.validateAuthorization("Bearer read", OpenApiPermission.OPERATOR_READ) }
         verify { service.current("u1", "acc1", "代号鸢") }
+    }
+
+    @Test
+    fun `scan preview requires dedicated scope and forwards token bound account`() {
+        val v3 = mockk<OperatorV3ImportService>()
+        val scanController = OpenApiOperatorController(tokenService, service, accountService, v3)
+        val document = jacksonObjectMapper().readTree("""{"version":3}""")
+        every { tokenService.validateAuthorization("Bearer scan", OpenApiPermission.OPERATOR_SCAN_WRITE) } returns
+            OpenApiPrincipal("u1", "acc1")
+        every { v3.previewScan("u1", "acc1", document) } returns
+            OperatorV3ImportPreviewResponse(accepted = 0, partial = 0, review = 0, rejected = 0, unchanged = 0, items = emptyList())
+
+        val response = scanController.previewScanImport("Bearer scan", document)
+
+        assertEquals(0, response.data?.accepted)
+        verify { tokenService.validateAuthorization("Bearer scan", OpenApiPermission.OPERATOR_SCAN_WRITE) }
+        verify { v3.previewScan("u1", "acc1", document) }
     }
 }

@@ -5,6 +5,7 @@ import com.lhs.share.config.doc.SpringDocConfig
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.hub.controller.inventory.InventoryController
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
@@ -54,6 +55,9 @@ class InventoryOpenApiContractTest {
 
     @MockitoBean
     lateinit var subAccountService: SubAccountService
+
+    @MockitoBean
+    lateinit var accountEventService: AccountEventService
 
     @MockitoBean
     lateinit var inventoryAgentFavoriteService: InventoryAgentFavoriteService
@@ -202,6 +206,7 @@ class InventoryOpenApiContractTest {
                 "operator:read",
                 "operator:write",
                 "operator:export",
+                "operator:scan:write",
             ),
             scopeItems["enum"].map { it.asText() }.toSet(),
         )

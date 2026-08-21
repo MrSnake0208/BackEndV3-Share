@@ -33,6 +33,8 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
@@ -72,6 +74,7 @@ class OperatorCurrentFoundationServiceTest {
     private lateinit var stored: OperatorCurrent
     private var rarity = 5
     private var spOf: String? = null
+    private var specialOddityName: String? = "增伤值"
     private var lastCorrection: OperatorCorrectionRecord? = null
     private var lastCasGame: String? = null
 
@@ -79,6 +82,7 @@ class OperatorCurrentFoundationServiceTest {
     fun setUp() {
         lastCorrection = null
         lastCasGame = null
+        specialOddityName = "增伤值"
         stored = OperatorCurrent(
             id = "current-1",
             userId = "u1",
@@ -261,8 +265,199 @@ class OperatorCurrentFoundationServiceTest {
     }
 
     @Test
+    fun `new scan observation without signature is valid for final growth inputs`() {
+        stored = stored.copy(entries = emptyMap())
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """
+                "level":93,
+                "elite":14,
+                "star_level":3,
+                "star_stones":[],
+                "combat_stats":{
+                  "observed_attack":4001,
+                  "observed_hp":20245,
+                  "source":"scan",
+                  "observed_status":"valid",
+                  "oddities":{
+                    "attack":{"current":0},
+                    "hp":{"current":0},
+                    "special":{"current":15}
+                  }
+                }
+                """.trimIndent(),
+                revision = 0,
+            ),
+        )
+
+        assertEquals("valid", result.combatStats?.observedStatus)
+        assertEquals(4001, result.combatStats?.observedAttack)
+        assertEquals(20245, result.combatStats?.observedHp)
+        assertEquals(4001, result.combatStats?.manualAttack)
+        assertEquals(20245, result.combatStats?.manualHp)
+        assertEquals("manual", result.combatStats?.displayMode?.attack)
+        assertEquals("manual", result.combatStats?.displayMode?.hp)
+        assertNotNull(result.combatStats?.combatInputSignature)
+        assertEquals(93, result.combatStats?.observedInputs?.level)
+        assertEquals(14, result.combatStats?.observedInputs?.elite)
+        assertEquals(3, result.combatStats?.observedInputs?.starLevel)
+        assertNotNull(result.combatStats?.observedInputs?.odditiesSignature)
+        assertNotNull(result.combatStats?.observedInputs?.equippedStarStonesSignature)
+    }
+
+    @Test
+    fun `scan can change growth inputs and observations in the same patch`() {
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """
+                "level":93,
+                "elite":14,
+                "star_level":4,
+                "star_stones":[{"type":"assist1","name":"生命值","level":60}],
+                "combat_stats":{
+                  "observed_attack":4001,
+                  "observed_hp":20245,
+                  "source":"scan",
+                  "oddities":{"attack":{"current":0},"hp":{"current":0},"special":{"current":15}}
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals("valid", result.combatStats?.observedStatus)
+        assertEquals(4001, result.combatStats?.manualAttack)
+        assertEquals(20245, result.combatStats?.manualHp)
+        assertEquals("manual", result.combatStats?.displayMode?.attack)
+        assertEquals("manual", result.combatStats?.displayMode?.hp)
+        assertNotEquals("scan-input-v1", result.combatStats?.combatInputSignature)
+        assertEquals(93, result.combatStats?.observedInputs?.level)
+        assertEquals(14, result.combatStats?.observedInputs?.elite)
+        assertEquals(4, result.combatStats?.observedInputs?.starLevel)
+    }
+
+    @Test
+    fun `scan can refresh only observed values without a signature`() {
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"observed_attack":4001,"observed_hp":20245,"source":"scan"}"""),
+        )
+
+        assertEquals("valid", result.combatStats?.observedStatus)
+        assertEquals(4001, result.combatStats?.observedAttack)
+        assertEquals(20245, result.combatStats?.observedHp)
+        assertEquals(4001, result.combatStats?.manualAttack)
+        assertEquals(20245, result.combatStats?.manualHp)
+        assertEquals("manual", result.combatStats?.displayMode?.attack)
+        assertEquals("manual", result.combatStats?.displayMode?.hp)
+        assertNotEquals("scan-input-v1", result.combatStats?.combatInputSignature)
+    }
+
+    @Test
+    fun `scan keeps an explicitly submitted combat signature`() {
+        stored = stored.copy(
+            entries = mapOf(
+                "op1" to baseEntry().copy(
+                    combatStats = checkNotNull(baseEntry().combatStats).copy(
+                        manualHp = 7777,
+                        displayMode = OperatorCombatDisplayMode("auto", "auto"),
+                    ),
+                ),
+            ),
+        )
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"combat_stats":{"observed_attack":4001,"source":"scan","combat_input_signature":"collector-v2"}""",
+            ),
+        )
+
+        assertEquals("valid", result.combatStats?.observedStatus)
+        assertEquals("collector-v2", result.combatStats?.combatInputSignature)
+        assertEquals(4001, result.combatStats?.manualAttack)
+        assertEquals("manual", result.combatStats?.displayMode?.attack)
+        assertEquals(7777, result.combatStats?.manualHp)
+        assertEquals("auto", result.combatStats?.displayMode?.hp)
+    }
+
+    @Test
+    fun `existing observation becomes stale when only a growth input changes`() {
+        val result = service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch(""""level":93"""))
+
+        assertEquals("stale", result.combatStats?.observedStatus)
+    }
+
+    @Test
+    fun `canonical combat signature is stable and covers every combat input`() {
+        fun signature(
+            level: Int = 10,
+            elite: Int = 1,
+            starLevel: Int = 3,
+            attackOddity: Int = 100,
+            firstType: String = "main1",
+            firstName: String = "攻击力",
+            firstLevel: Int = 10,
+            reverseStones: Boolean = false,
+            includeOddityMax: Boolean = false,
+        ): String {
+            val stones = listOf(
+                "{\"type\":\"$firstType\",\"name\":\"$firstName\",\"level\":$firstLevel}",
+                "{\"type\":\"assist1\",\"name\":\"生命值\",\"level\":20}",
+            ).let { if (reverseStones) it.reversed() else it }
+            val max = if (includeOddityMax) ",\"max\":500" else ""
+            val request = patch(
+                """
+                "level":$level,
+                "elite":$elite,
+                "star_level":$starLevel,
+                "star_stones":[${stones.joinToString()}],
+                "combat_stats":{
+                  "observed_attack":4001,
+                  "source":"scan",
+                  "oddities":{
+                    "attack":{"current":$attackOddity$max},
+                    "hp":{"current":0},
+                    "special":{"current":15}
+                  }
+                }
+                """.trimIndent(),
+            )
+            return checkNotNull(
+                service.previewCurrentPatch("u1", "acc1", "代号鸢", "op1", request)
+                    .after.combatStats?.combatInputSignature,
+            )
+        }
+
+        val baseline = signature()
+        assertEquals(baseline, signature(reverseStones = true, includeOddityMax = true))
+        specialOddityName = "增伤值（新展示名）"
+        assertEquals(baseline, signature())
+        assertNotEquals(baseline, signature(level = 11))
+        assertNotEquals(baseline, signature(elite = 2))
+        assertNotEquals(baseline, signature(starLevel = 4))
+        assertNotEquals(baseline, signature(attackOddity = 101))
+        assertNotEquals(baseline, signature(firstType = "main2"))
+        assertNotEquals(baseline, signature(firstName = "攻击力 II"))
+        assertNotEquals(baseline, signature(firstLevel = 11))
+    }
+
+    @Test
     fun `patch rejects invalid star stone slots names and levels`() {
-        val duplicate = patch(""""star_stones":[{"type":"main1","name":"攻击力","level":1},{"type":"main1","name":"生命值","level":1}]"""
+        val duplicate = patch(
+            """"star_stones":[{"type":"main1","name":"攻击力","level":1},{"type":"main1","name":"生命值","level":1}]""",
         )
         val invalidSlot = patch(""""star_stones":[{"type":"main","name":"攻击力","level":1}]""")
         val invalidName = patch(""""star_stones":[{"type":"main1","name":" ","level":1}]""")
@@ -279,7 +474,8 @@ class OperatorCurrentFoundationServiceTest {
 
     @Test
     fun `patch star stones uses revision and correction replay`() {
-        val request = patch(""""star_stones":[{"type":"main1","name":"攻击力","level":60}]"""
+        val request = patch(
+            """"star_stones":[{"type":"main1","name":"攻击力","level":60}]""",
         )
         val result = service.patchCurrent("u1", "acc1", "代号鸢", "op1", request)
 
@@ -392,6 +588,25 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals("auto", result.combatStats?.displayMode?.attack)
         assertEquals("manual", result.combatStats?.displayMode?.hp)
         assertEquals(0, result.combatStats?.oddities?.get("special")?.current)
+    }
+
+    @Test
+    fun `full v3 completion removes outside entries and preserves retained supplemental fields`() {
+        val retained = baseEntry()
+        stored = stored.copy(
+            entries = mapOf(
+                "op1" to retained,
+                "outside" to OperatorEntry(elite = 1, starLevel = 2, level = 30),
+            ),
+        )
+        val effectiveAt = Instant.parse("2026-08-21T02:30:00Z")
+
+        service.completeFullImport("u1", "acc1", "代号鸢", setOf("op1"), effectiveAt)
+
+        assertEquals(setOf("op1"), stored.entries.keys)
+        assertEquals(retained.discLoadouts, stored.entries.getValue("op1").discLoadouts)
+        assertEquals(retained.combatStats, stored.entries.getValue("op1").combatStats)
+        assertEquals(effectiveAt, stored.fullBaselineAt)
     }
 
     @Test
@@ -600,6 +815,7 @@ class OperatorCurrentFoundationServiceTest {
         operatorId = id,
         name = id,
         rarity = rarity,
+        specialOddityName = specialOddityName,
         prof = emptyList(),
         subProf = emptyList(),
         games = listOf("代号鸢"),

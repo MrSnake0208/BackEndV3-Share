@@ -4,6 +4,7 @@ import com.lhs.share.hub.controller.operator.AdminOperatorCatalogController
 import com.lhs.share.hub.controller.operator.OperatorController
 import com.lhs.share.hub.controller.operator.response.OperatorError
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
+import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.hub.service.operator.OperatorApiException
 import com.lhs.share.openapi.OpenApiOperatorController
 import org.springframework.core.Ordered
@@ -25,6 +26,10 @@ class OperatorExceptionHandler {
         .status(e.status).body(
             OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId, e.operatorId, e.fieldPath)),
         )
+
+    @ExceptionHandler(InventoryApiException::class)
+    fun token(e: InventoryApiException) = ResponseEntity
+        .status(e.status).body(OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId)))
 
     @ExceptionHandler(MethodArgumentNotValidException::class, HttpMessageNotReadableException::class)
     fun invalid(e: Exception) = ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(

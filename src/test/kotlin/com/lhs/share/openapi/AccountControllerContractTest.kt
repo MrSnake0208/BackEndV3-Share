@@ -7,11 +7,15 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.InventoryExceptionHandler
 import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -26,11 +30,13 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 
 class AccountControllerContractTest {
     private val accountService = mockk<SubAccountService>()
     private val helper = mockk<AuthenticationHelper>()
+    private val eventService = mockk<AccountEventService>()
     private lateinit var mockMvc: MockMvc
 
     @BeforeEach
@@ -40,7 +46,7 @@ class AccountControllerContractTest {
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         val validator = LocalValidatorFactoryBean().apply { afterPropertiesSet() }
         mockMvc = MockMvcBuilders
-            .standaloneSetup(AccountController(accountService, helper))
+            .standaloneSetup(AccountController(accountService, helper, eventService))
             .setControllerAdvice(InventoryExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
@@ -138,5 +144,21 @@ class AccountControllerContractTest {
         mockMvc.perform(patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isUnprocessableEntity)
             .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+    }
+
+    @Test
+    fun `account event stream checks ownership and disables proxy buffering`() {
+        val emitter = SseEmitter()
+        every { helper.requireUserId() } returns "jwt-user"
+        every { accountService.requireAccount("jwt-user", "main") } returns
+            SubAccount(userId = "jwt-user", accountId = "main", name = "大号")
+        every { eventService.subscribe("jwt-user", "main") } returns emitter
+
+        val response = AccountController(accountService, helper, eventService).events("main")
+
+        assertSame(emitter, response.body)
+        assertEquals("no", response.headers.getFirst("X-Accel-Buffering"))
+        verify { accountService.requireAccount("jwt-user", "main") }
+        verify { eventService.subscribe("jwt-user", "main") }
     }
 }

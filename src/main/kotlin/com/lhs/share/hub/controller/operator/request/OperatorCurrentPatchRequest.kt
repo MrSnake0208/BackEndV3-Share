@@ -58,9 +58,9 @@ data class OperatorCombatStatsPatchRequest(
 )
 
 data class OperatorCombatDisplayModePatchRequest(
-    @field:Schema(nullable = true, allowableValues = ["auto", "manual"])
+    @field:Schema(description = "auto=公式计算，manual=手动填写或自动采集值", nullable = true, allowableValues = ["auto", "manual"])
     val attack: String? = null,
-    @field:Schema(nullable = true, allowableValues = ["auto", "manual"])
+    @field:Schema(description = "auto=公式计算，manual=手动填写或自动采集值", nullable = true, allowableValues = ["auto", "manual"])
     val hp: String? = null,
 )
 
