@@ -50,7 +50,7 @@ class OperatorController(
 
     @Operation(
         summary = "局部校正密探当前养成",
-        description = "只合并请求中出现的字段；不扣库存。expected_revision 冲突返回 operator_revision_conflict。",
+        description = "只合并请求中出现的字段；star_stones 出现时完整替换六槽当前装备，空数组清空；display_mode 按 attack/hp 局部合并且不触发 stale；无 entry 且 expected_revision=0 时创建；不扣库存。expected_revision 冲突返回 operator_revision_conflict。",
     )
     @PatchMapping("/current/{operatorId}")
     fun patchCurrent(

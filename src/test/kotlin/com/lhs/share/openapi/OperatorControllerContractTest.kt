@@ -10,6 +10,7 @@ import com.lhs.share.handler.OperatorExceptionHandler
 import com.lhs.share.hub.controller.operator.OperatorController
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
+import com.lhs.share.hub.repository.entity.OperatorCombatDisplayMode
 import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorDisc
 import com.lhs.share.hub.repository.entity.OperatorDiscLoadout
@@ -78,6 +79,7 @@ class OperatorControllerContractTest {
             .andExpect(jsonPath("$.data[0].entries.op1.star_stones[0].type").value("main1"))
             .andExpect(jsonPath("$.data[0].entries.op1.disc_loadouts[0].name").value("命盘一"))
             .andExpect(jsonPath("$.data[0].entries.op1.combat_stats.oddities.special.current").value(15))
+            .andExpect(jsonPath("$.data[0].entries.op1.combat_stats.display_mode.attack").value("auto"))
             .andExpect(jsonPath("$.data[0].entries.op1.revision").value(8))
             .andExpect(jsonPath("$.data[0].entries.op1.updated_at").value("2026-08-21T11:59:00Z"))
     }
@@ -95,6 +97,9 @@ class OperatorControllerContractTest {
                     """
                     {
                       "disc_loadouts": [],
+                      "star_stones": [
+                        {"type":"main1","name":"攻击力","level":60}
+                      ],
                       "combat_stats": {"manual_attack": null},
                       "expected_revision": 7,
                       "reason": "manual_correction"
@@ -112,7 +117,11 @@ class OperatorControllerContractTest {
                 "acc1",
                 "代号鸢",
                 "op1",
-                match { it.has("disc_loadouts") && it["combat_stats"].has("manual_attack") },
+                match {
+                    it.has("disc_loadouts") &&
+                        it.has("star_stones") &&
+                        it["combat_stats"].has("manual_attack")
+                },
             )
         }
     }
@@ -153,6 +162,7 @@ class OperatorControllerContractTest {
             observedHp = 28704,
             source = "scan",
             observedStatus = "valid",
+            displayMode = OperatorCombatDisplayMode("auto", "manual"),
             combatInputSignature = "scan-input-v1",
             oddities = mapOf("special" to OperatorOddityValue(15)),
         ),

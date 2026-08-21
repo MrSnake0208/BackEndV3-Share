@@ -23,6 +23,7 @@ import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.OperatorCombatDisplayMode
 import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorCorrectionRecord
 import com.lhs.share.hub.repository.entity.OperatorCurrent
@@ -371,16 +372,20 @@ class OperatorService(
         val all = currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId)
         if (game == null) return all.map(OperatorCurrentResponse::of)
         val specific = all.firstOrNull { it.game == game }
-        val generic = all.firstOrNull { it.game == GENERIC_GAME }
+        val genericSources = all.filter { it.game in GENERIC_GAME_KEYS }
+        val legacyGeneric = genericSources.firstOrNull { it.game == GENERIC_GAME }
+        val universalGeneric = genericSources.firstOrNull { it.game == UNIVERSAL_GAME }
+        val genericEntries = (legacyGeneric?.entries.orEmpty() + universalGeneric?.entries.orEmpty())
+        val generic = (universalGeneric ?: legacyGeneric)?.copy(entries = genericEntries)
         if (specific == null) return listOfNotNull(generic).map(OperatorCurrentResponse::of)
-        if (generic == null) return listOf(OperatorCurrentResponse.of(specific))
-        return listOf(OperatorCurrentResponse.of(specific.copy(entries = generic.entries + specific.entries)))
+        if (genericEntries.isEmpty()) return listOf(OperatorCurrentResponse.of(specific))
+        return listOf(OperatorCurrentResponse.of(specific.copy(entries = genericEntries + specific.entries)))
     }
 
     fun patchCurrent(userId: String, accountId: String, game: String, operatorId: String, request: ObjectNode): OperatorCurrentEntryDto {
         rejectUnknown(
             request,
-            setOf("level", "elite", "star_level", "disc_loadouts", "combat_stats", "expected_revision", "reason"),
+            setOf("level", "elite", "star_level", "disc_loadouts", "star_stones", "combat_stats", "expected_revision", "reason"),
             "schema_validation_failed",
             operatorId,
             "",
@@ -411,11 +416,41 @@ class OperatorService(
                 operator = operatorId,
             )
         }
-        val sourceCurrent = currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, game)
-            ?: currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, GENERIC_GAME)
-            ?: throw apiError(HttpStatus.NOT_FOUND, "operator_not_found", "Operator current entry not found")
-        val existing = sourceCurrent.entries[operatorId]?.normalized()
-            ?: throw apiError(HttpStatus.NOT_FOUND, "operator_not_found", "Operator current entry not found")
+        val specificCurrent = currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, game)
+        val genericCurrent = if (game in GENERIC_GAME_KEYS) {
+            null
+        } else {
+            currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, UNIVERSAL_GAME)
+                ?: currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, GENERIC_GAME)
+        }
+        val specificEntry = specificCurrent?.entries?.get(operatorId)?.normalized()
+        val genericEntry = genericCurrent?.entries?.get(operatorId)?.normalized()
+        val materializingEntry = specificEntry == null && (specificCurrent == null || genericEntry != null)
+        val sourceCurrent = when {
+            specificEntry != null -> checkNotNull(specificCurrent)
+            genericEntry != null -> specificCurrent
+                ?: OperatorCurrent(
+                    id = key(userId, accountId, game),
+                    userId = userId,
+                    accountId = accountId,
+                    game = game,
+                )
+            else -> {
+                if (expectedRevision != 0L) revisionConflict(operatorId)
+                specificCurrent ?: OperatorCurrent(
+                    id = key(userId, accountId, game),
+                    userId = userId,
+                    accountId = accountId,
+                    game = game,
+                )
+            }
+        }
+        // A generic entry is only a read fallback. The first edit materializes it in the requested game document.
+        val existing = specificEntry ?: genericEntry ?: OperatorEntry(
+            elite = 0,
+            starLevel = 0,
+            level = 0,
+        )
         if (existing.revision != expectedRevision) revisionConflict(operatorId)
 
         val now = Instant.now()
@@ -443,6 +478,10 @@ class OperatorService(
             fields += "disc_loadouts"
             merged = merged.copy(discLoadouts = parseDiscLoadouts(request.get("disc_loadouts"), catalog), discs = emptyList())
             merged = merged.copy(discs = merged.discLoadouts.firstOrNull()?.discs.orEmpty())
+        }
+        if (request.has("star_stones")) {
+            fields += "star_stones"
+            merged = merged.copy(starStones = parsePatchStarStones(request.get("star_stones"), catalog))
         }
         val hasCombatPatch = request.has("combat_stats")
         if (hasCombatPatch) {
@@ -485,6 +524,14 @@ class OperatorService(
 
         var saved: OperatorCurrent? = null
         transactionTemplate.executeWithoutResult {
+            if (materializingEntry) {
+                currentRepository.save(
+                    sourceCurrent.copy(
+                        entries = sourceCurrent.entries + (operatorId to existing),
+                        updatedAt = now,
+                    ),
+                )
+            }
             saved = currentRepository.compareAndSetEntries(
                 userId,
                 accountId,
@@ -506,12 +553,92 @@ class OperatorService(
                     elite = merged.elite.takeIf { "elite" in fields },
                     starLevel = merged.starLevel.takeIf { "star_level" in fields },
                     discLoadouts = merged.discLoadouts.takeIf { "disc_loadouts" in fields },
+                    starStones = merged.starStones.takeIf { "star_stones" in fields },
                     combatStats = merged.combatStats.takeIf { "combat_stats" in fields },
                     createdAt = now,
                 ),
             )
         }
         return OperatorCurrentEntryDto.of(checkNotNull(saved).entries.getValue(operatorId))
+    }
+
+    private fun parsePatchStarStones(node: JsonNode?, catalog: OperatorCatalogEntity): List<OperatorStarStone> {
+        if (node == null || node.isNull || !node.isArray) {
+            invalid(
+                "star_stones must be an array",
+                catalog.operatorId,
+                "star_stones",
+                "invalid_equipped_star_stones",
+            )
+        }
+        val types = mutableSetOf<String>()
+        return node.mapIndexed { index, raw ->
+            if (!raw.isObject) {
+                invalid(
+                    "star stone must be an object",
+                    catalog.operatorId,
+                    "star_stones[$index]",
+                    "invalid_equipped_star_stones",
+                )
+            }
+            val item = raw as ObjectNode
+            rejectUnknown(
+                item,
+                setOf("name", "type", "level"),
+                "invalid_equipped_star_stones",
+                catalog.operatorId,
+                "star_stones[$index]",
+            )
+            val type = item.get("type")?.takeIf { it.isTextual }?.asText()?.trim()
+                ?: invalid(
+                    "star stone type is required",
+                    catalog.operatorId,
+                    "star_stones[$index].type",
+                    "invalid_equipped_star_stones",
+                )
+            if (type !in PATCH_STONE_TYPES || !types.add(type)) {
+                invalid(
+                    "star stone type must be unique and one of main1..main3 or assist1..assist3",
+                    catalog.operatorId,
+                    "star_stones[$index].type",
+                    "invalid_equipped_star_stones",
+                )
+            }
+            val nameNode = item.get("name")
+            val name = if (nameNode != null && nameNode.isTextual && nameNode.asText().trim().length in 1..128) {
+                nameNode.asText().trim()
+            } else {
+                invalid(
+                    "star stone name must be a non-empty string",
+                    catalog.operatorId,
+                    "star_stones[$index].name",
+                    "invalid_equipped_star_stones",
+                )
+            }
+            val level = item.get("level")
+            if (level == null || !level.isIntegralNumber || !level.canConvertToInt() || level.intValue() < 0) {
+                invalid(
+                    "star stone level must be a non-negative integer",
+                    catalog.operatorId,
+                    "star_stones[$index].level",
+                    "invalid_equipped_star_stones",
+                )
+            }
+            val catalogType = when {
+                type.startsWith("main") -> "main"
+                type.startsWith("assist") -> "assist"
+                else -> type
+            }
+            if (catalog.starStones.isNotEmpty() && catalog.starStones.none { it.type == catalogType || it.type == type }) {
+                invalid(
+                    "star stone type is not supported by the operator catalog",
+                    catalog.operatorId,
+                    "star_stones[$index].type",
+                    "invalid_equipped_star_stones",
+                )
+            }
+            OperatorStarStone(name, type, level.intValue())
+        }
     }
 
     private fun parseDiscLoadouts(node: JsonNode?, catalog: OperatorCatalogEntity): List<OperatorDiscLoadout> {
@@ -641,6 +768,7 @@ class OperatorService(
                 "observed_status",
                 "combat_input_signature",
                 "observed_inputs",
+                "display_mode",
                 "oddities",
             ),
             "invalid_combat_stats",
@@ -695,8 +823,48 @@ class OperatorService(
             val inputs = node.get("observed_inputs")
             result = result.copy(observedInputs = if (inputs.isNull) null else parseObservedInputs(inputs, operatorId))
         }
+        if (node.has("display_mode")) {
+            val displayMode = node.get("display_mode")
+            result = result.copy(
+                displayMode = if (displayMode.isNull) {
+                    null
+                } else {
+                    mergeDisplayMode(result.displayMode, displayMode, operatorId)
+                },
+            )
+        }
         if (node.has("oddities")) result = result.copy(oddities = mergeOddities(result.oddities, node.get("oddities"), catalog, operatorId))
         return result
+    }
+
+    private fun mergeDisplayMode(
+        existing: OperatorCombatDisplayMode?,
+        raw: JsonNode,
+        operatorId: String,
+    ): OperatorCombatDisplayMode? {
+        if (!raw.isObject) {
+            invalid("display_mode must be an object or null", operatorId, "combat_stats.display_mode", "invalid_combat_stats")
+        }
+        val node = raw as ObjectNode
+        rejectUnknown(node, setOf("attack", "hp"), "invalid_combat_stats", operatorId, "combat_stats.display_mode")
+        if (!node.has("attack") && !node.has("hp")) return existing
+        var result = existing ?: OperatorCombatDisplayMode()
+        if (node.has("attack")) result = result.copy(attack = parseDisplayModeValue(node.get("attack"), operatorId, "attack"))
+        if (node.has("hp")) result = result.copy(hp = parseDisplayModeValue(node.get("hp"), operatorId, "hp"))
+        return result
+    }
+
+    private fun parseDisplayModeValue(node: JsonNode, operatorId: String, field: String): String? {
+        if (node.isNull) return null
+        if (!node.isTextual || node.asText() !in DISPLAY_MODES) {
+            invalid(
+                "display mode must be auto, manual, or null",
+                operatorId,
+                "combat_stats.display_mode.$field",
+                "invalid_combat_stats",
+            )
+        }
+        return node.asText()
     }
 
     private fun mergeOddities(
@@ -896,6 +1064,7 @@ class OperatorService(
             merged = merged.copy(discLoadouts = correction.discLoadouts.orEmpty())
             merged = merged.copy(discs = merged.discLoadouts.firstOrNull()?.discs.orEmpty())
         }
+        if ("star_stones" in correction.fields) merged = merged.copy(starStones = correction.starStones.orEmpty())
         if ("combat_stats" in correction.fields) merged = merged.copy(combatStats = correction.combatStats)
         if (combatInputsChanged(existing, merged) && "combat_stats" !in correction.fields) merged = merged.markObservationStale()
         merged = merged.copy(revision = existing.revision + 1, updatedAt = correction.createdAt).normalized()
@@ -954,9 +1123,12 @@ class OperatorService(
         return before.level != after.level ||
             before.elite != after.elite ||
             before.starLevel != after.starLevel ||
-            before.starStones != after.starStones ||
+            normalizedStarStones(before) != normalizedStarStones(after) ||
             before.combatStats?.oddities.orEmpty() != after.combatStats?.oddities.orEmpty()
     }
+
+    private fun normalizedStarStones(entry: OperatorEntry): List<OperatorStarStone> =
+        entry.normalized().starStones.sortedBy { it.type }
 
     private fun OperatorEntry.markObservationStale(): OperatorEntry {
         val stats = combatStats ?: return this
@@ -1186,8 +1358,11 @@ class OperatorService(
         const val APPLIED = "applied"
         const val SUPERSEDED = "superseded"
         const val GENERIC_GAME = "*"
+        const val UNIVERSAL_GAME = "universal"
+        val GENERIC_GAME_KEYS = setOf(UNIVERSAL_GAME, GENERIC_GAME)
         const val MAX_STAR_LEVEL = 31
         const val MAX_SP_STAR_LEVEL = 5
+        val PATCH_STONE_TYPES = setOf("main1", "main2", "main3", "assist1", "assist2", "assist3")
         val SCOPES = setOf(FULL, LISTED)
         val GAMES = setOf("如鸢", "代号鸢")
         val STONE_TYPES = setOf("main", "assist", "main1", "main2", "main3", "assist1", "assist2", "assist3")
@@ -1195,6 +1370,7 @@ class OperatorService(
         val CORRECTION_REASONS = setOf("manual_correction", "local_migration")
         val COMBAT_SOURCES = setOf("scan", "manual", "imported")
         val OBSERVED_STATUSES = setOf("valid", "stale", "unverified", "unavailable")
+        val DISPLAY_MODES = setOf("auto", "manual")
         val ODDITY_KEYS = setOf("attack", "hp", "special")
     }
 }

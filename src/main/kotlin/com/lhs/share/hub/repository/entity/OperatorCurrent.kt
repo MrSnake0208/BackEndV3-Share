@@ -46,7 +46,13 @@ data class OperatorCombatStats(
     val observedStatus: String? = null,
     val combatInputSignature: String? = null,
     val observedInputs: OperatorObservedInputs? = null,
+    val displayMode: OperatorCombatDisplayMode? = null,
     val oddities: Map<String, OperatorOddityValue> = emptyMap(),
+)
+
+data class OperatorCombatDisplayMode(
+    val attack: String? = null,
+    val hp: String? = null,
 )
 
 data class OperatorObservedInputs(

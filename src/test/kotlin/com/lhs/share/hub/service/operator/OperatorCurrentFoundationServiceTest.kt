@@ -14,6 +14,7 @@ import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.OperatorCombatDisplayMode
 import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorCorrectionRecord
 import com.lhs.share.hub.repository.entity.OperatorCurrent
@@ -71,9 +72,13 @@ class OperatorCurrentFoundationServiceTest {
     private lateinit var stored: OperatorCurrent
     private var rarity = 5
     private var spOf: String? = null
+    private var lastCorrection: OperatorCorrectionRecord? = null
+    private var lastCasGame: String? = null
 
     @BeforeEach
     fun setUp() {
+        lastCorrection = null
+        lastCasGame = null
         stored = OperatorCurrent(
             id = "current-1",
             userId = "u1",
@@ -84,14 +89,18 @@ class OperatorCurrentFoundationServiceTest {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returns
             SubAccount(userId = "u1", accountId = "acc1", name = "账号", game = "代号鸢")
         every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } answers { stored }
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "universal") } returns null
         every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "*") } returns null
         every { currentRepository.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) } answers {
+            lastCasGame = arg(2)
             val updates = arg<Map<String, OperatorEntry>>(5)
             stored = stored.copy(entries = stored.entries + updates, updatedAt = arg(6))
             stored
         }
         every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { stored = it } }
-        every { correctionRepository.save(any()) } answers { firstArg<OperatorCorrectionRecord>() }
+        every { correctionRepository.save(any()) } answers {
+            firstArg<OperatorCorrectionRecord>().also { lastCorrection = it }
+        }
         every { catalogService.getOperator("op1") } answers { catalog("op1", rarity, spOf) }
         every { catalogService.spFormsOf(any()) } returns emptyList()
     }
@@ -219,6 +228,226 @@ class OperatorCurrentFoundationServiceTest {
     }
 
     @Test
+    fun `patch replaces star stones, preserves omission, clears explicitly, and marks observation stale`() {
+        val replace = patch(
+            """
+            "star_stones":[
+              {"type":"main1","name":"攻击力","level":60},
+              {"type":"main2","name":"攻击力2","level":60},
+              {"type":"main3","name":"攻击力3","level":60},
+              {"type":"assist1","name":"生命值","level":50},
+              {"type":"assist2","name":"生命值2","level":50},
+              {"type":"assist3","name":"生命值3","level":50}
+            ]
+            """.trimIndent(),
+        )
+        val replaced = service.patchCurrent("u1", "acc1", "代号鸢", "op1", replace)
+
+        assertEquals(8, replaced.revision)
+        assertEquals(
+            listOf("main1", "main2", "main3", "assist1", "assist2", "assist3"),
+            replaced.starStones.map { it.type },
+        )
+        assertEquals(listOf("攻击力", "攻击力2", "攻击力3", "生命值", "生命值2", "生命值3"), replaced.starStones.map { it.name })
+        assertEquals("stale", replaced.combatStats?.observedStatus)
+
+        val omission = patch(""""level":91,"expected_revision":8""", includeRevision = false)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", omission)
+        assertEquals(6, stored.entries.getValue("op1").starStones.size)
+
+        val clear = patch(""""star_stones":[],"expected_revision":9""", includeRevision = false)
+        val cleared = service.patchCurrent("u1", "acc1", "代号鸢", "op1", clear)
+        assertEquals(emptyList<OperatorStarStone>(), cleared.starStones)
+    }
+
+    @Test
+    fun `patch rejects invalid star stone slots names and levels`() {
+        val duplicate = patch(""""star_stones":[{"type":"main1","name":"攻击力","level":1},{"type":"main1","name":"生命值","level":1}]"""
+        )
+        val invalidSlot = patch(""""star_stones":[{"type":"main","name":"攻击力","level":1}]""")
+        val invalidName = patch(""""star_stones":[{"type":"main1","name":" ","level":1}]""")
+        val invalidLevel = patch(""""star_stones":[{"type":"main1","name":"攻击力","level":-1}]""")
+
+        listOf(duplicate, invalidSlot, invalidName, invalidLevel).forEach { request ->
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.patchCurrent("u1", "acc1", "代号鸢", "op1", request)
+            }
+            assertEquals("invalid_equipped_star_stones", error.code)
+            assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        }
+    }
+
+    @Test
+    fun `patch star stones uses revision and correction replay`() {
+        val request = patch(""""star_stones":[{"type":"main1","name":"攻击力","level":60}]"""
+        )
+        val result = service.patchCurrent("u1", "acc1", "代号鸢", "op1", request)
+
+        assertEquals(8, result.revision)
+        val correction = checkNotNull(lastCorrection)
+        assertEquals(setOf("star_stones"), correction.fields)
+        assertEquals("main1", correction.starStones?.single()?.type)
+
+        val stale = patch(""""star_stones":[],"expected_revision":7""", includeRevision = false)
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.patchCurrent("u1", "acc1", "代号鸢", "op1", stale)
+        }
+        assertEquals("operator_revision_conflict", error.code)
+    }
+
+    @Test
+    fun `patch materializes a generic entry into the requested game document`() {
+        val generic = OperatorCurrent(
+            userId = "u1",
+            accountId = "acc1",
+            game = "*",
+            entries = mapOf("op1" to baseEntry()),
+        )
+        stored = stored.copy(entries = emptyMap())
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "*") } returns generic
+
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""star_stones":[{"type":"main1","name":"攻击力","level":60}]"""),
+        )
+
+        assertEquals("代号鸢", lastCasGame)
+        assertEquals(8, result.revision)
+        assertEquals("main1", stored.entries.getValue("op1").starStones.single().type)
+        assertEquals("命盘二", result.discLoadouts[1].name)
+        assertEquals(1000, result.combatStats?.observedAttack)
+        assertEquals(7, generic.entries.getValue("op1").revision)
+    }
+
+    @Test
+    fun `patch creates the requested game document when only generic current exists`() {
+        val generic = OperatorCurrent(
+            userId = "u1",
+            accountId = "acc1",
+            game = "universal",
+            entries = mapOf("op1" to baseEntry()),
+        )
+        stored = stored.copy(entries = emptyMap())
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } returns null
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "universal") } returns generic
+
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""star_stones":[{"type":"main1","name":"攻击力","level":60}]"""),
+        )
+
+        assertEquals("代号鸢", stored.game)
+        assertEquals(8, result.revision)
+        assertEquals("main1", stored.entries.getValue("op1").starStones.single().type)
+        assertEquals("命盘二", result.discLoadouts[1].name)
+        assertEquals(1000, result.combatStats?.observedAttack)
+    }
+
+    @Test
+    fun `first patch creates a default entry when account has no current document`() {
+        stored = stored.copy(entries = emptyMap())
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } returns null
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "*") } returns null
+
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """
+                "level":0,
+                "elite":0,
+                "star_level":0,
+                "disc_loadouts":[],
+                "star_stones":[],
+                "combat_stats":{
+                  "manual_attack":null,
+                  "manual_hp":null,
+                  "display_mode":{"attack":"auto","hp":"manual"},
+                  "oddities":{
+                    "attack":{"current":0},
+                    "hp":{"current":0},
+                    "special":{"current":0}
+                  }
+                }
+                """.trimIndent(),
+                revision = 0,
+            ),
+        )
+
+        assertEquals("代号鸢", stored.game)
+        assertEquals(1, result.revision)
+        assertEquals(0, result.level)
+        assertEquals(0, result.elite)
+        assertEquals(0, result.starLevel)
+        assertEquals(emptyList<OperatorDiscLoadout>(), result.discLoadouts)
+        assertEquals(emptyList<OperatorStarStone>(), result.starStones)
+        assertEquals("auto", result.combatStats?.displayMode?.attack)
+        assertEquals("manual", result.combatStats?.displayMode?.hp)
+        assertEquals(0, result.combatStats?.oddities?.get("special")?.current)
+    }
+
+    @Test
+    fun `missing entry in existing game document is created only at revision zero`() {
+        stored = stored.copy(entries = mapOf("other" to baseEntry()))
+        every { catalogService.getOperator("op2") } returns catalog("op2", rarity, null)
+        every { catalogService.getOperator("op3") } returns catalog("op3", rarity, null)
+
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op2",
+            patch(""""star_stones":[]""", revision = 0),
+        )
+
+        assertEquals(1, result.revision)
+        assertEquals(2, stored.entries.size)
+        assertEquals(7, stored.entries.getValue("other").revision)
+
+        val conflict = assertThrows(OperatorApiException::class.java) {
+            service.patchCurrent("u1", "acc1", "代号鸢", "op3", patch(""""star_stones":[]""", revision = 7))
+        }
+        assertEquals(HttpStatus.CONFLICT, conflict.status)
+        assertEquals("operator_revision_conflict", conflict.code)
+        assertNull(stored.entries["op3"])
+    }
+
+    @Test
+    fun `display mode is locally merged, persisted, and does not stale observations`() {
+        val first = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"display_mode":{"attack":"auto","hp":"manual"}}"""),
+        )
+        assertEquals("auto", first.combatStats?.displayMode?.attack)
+        assertEquals("manual", first.combatStats?.displayMode?.hp)
+        assertEquals(900, first.combatStats?.manualAttack)
+        assertEquals("valid", first.combatStats?.observedStatus)
+
+        val second = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"display_mode":{"attack":null}},"expected_revision":8""", includeRevision = false),
+        )
+        assertNull(second.combatStats?.displayMode?.attack)
+        assertEquals("manual", second.combatStats?.displayMode?.hp)
+        assertEquals(900, second.combatStats?.manualAttack)
+        assertEquals("valid", second.combatStats?.observedStatus)
+    }
+
+    @Test
     fun `v2 listed updates first loadout preserves second and marks observation stale`() {
         every { accountRepository.findAllByUserIdAndAccountIdIn("u1", setOf("acc1")) } returns
             listOf(SubAccount(userId = "u1", accountId = "acc1", name = "账号", game = "代号鸢"))
@@ -291,6 +520,7 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals(emptyList<OperatorDisc>(), entry.discLoadouts[0].discs)
         assertEquals("命盘二", entry.discLoadouts[1].name)
         assertEquals(1000, entry.combatStats?.observedAttack)
+        assertEquals("auto", entry.combatStats?.displayMode?.attack)
         assertEquals("stale", entry.combatStats?.observedStatus)
     }
 
@@ -305,8 +535,9 @@ class OperatorCurrentFoundationServiceTest {
             game = "代号鸢",
             operatorId = "op1",
             reason = "manual_correction",
-            fields = setOf("disc_loadouts", "combat_stats"),
+            fields = setOf("disc_loadouts", "star_stones", "combat_stats"),
             discLoadouts = baseEntry().discLoadouts,
+            starStones = baseEntry().starStones,
             combatStats = baseEntry().combatStats,
             createdAt = Instant.parse("2026-08-21T00:02:00Z"),
         )
@@ -328,13 +559,18 @@ class OperatorCurrentFoundationServiceTest {
 
         val entry = replayed!!.entries.getValue("op1")
         assertEquals("命盘二", entry.discLoadouts[1].name)
+        assertEquals("main1", entry.starStones.single().type)
         assertEquals(1000, entry.combatStats?.observedAttack)
         assertEquals(1, entry.revision)
     }
 
-    private fun patch(fields: String, includeRevision: Boolean = true): com.fasterxml.jackson.databind.node.ObjectNode {
-        val revision = if (includeRevision) ",\"expected_revision\":7" else ""
-        return mapper.readTree("{$fields$revision,\"reason\":\"manual_correction\"}") as com.fasterxml.jackson.databind.node.ObjectNode
+    private fun patch(
+        fields: String,
+        includeRevision: Boolean = true,
+        revision: Long = 7,
+    ): com.fasterxml.jackson.databind.node.ObjectNode {
+        val revisionJson = if (includeRevision) ",\"expected_revision\":$revision" else ""
+        return mapper.readTree("{$fields$revisionJson,\"reason\":\"manual_correction\"}") as com.fasterxml.jackson.databind.node.ObjectNode
     }
 
     private fun baseEntry() = OperatorEntry(
@@ -353,6 +589,7 @@ class OperatorCurrentFoundationServiceTest {
             manualAttack = 900,
             source = "scan",
             observedStatus = "valid",
+            displayMode = OperatorCombatDisplayMode("auto", "manual"),
             combatInputSignature = "scan-input-v1",
             oddities = mapOf("attack" to OperatorOddityValue(100)),
         ),

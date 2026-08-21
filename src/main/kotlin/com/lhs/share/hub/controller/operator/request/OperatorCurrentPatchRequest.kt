@@ -14,6 +14,8 @@ data class OperatorCurrentPatchRequest(
     val elite: Int? = null,
     @JsonProperty("star_level") val starLevel: Int? = null,
     @JsonProperty("disc_loadouts") val discLoadouts: List<OperatorDiscLoadoutPatchRequest>? = null,
+    @field:Schema(description = "六槽当前装备的完整替换；缺失保留，空数组清空；槽位仅允许 main1..main3、assist1..assist3")
+    @JsonProperty("star_stones") val starStones: List<OperatorStarStonePatchRequest>? = null,
     @JsonProperty("combat_stats") val combatStats: OperatorCombatStatsPatchRequest? = null,
     @field:Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     @JsonProperty("expected_revision") val expectedRevision: Long,
@@ -32,6 +34,14 @@ data class OperatorDiscLoadoutPatchRequest(
 
 data class OperatorDiscPatchRequest(@JsonProperty("ot_name") val otName: String)
 
+data class OperatorStarStonePatchRequest(
+    val name: String,
+    @field:Schema(allowableValues = ["main1", "main2", "main3", "assist1", "assist2", "assist3"])
+    val type: String,
+    @field:Schema(minimum = "0")
+    val level: Int,
+)
+
 data class OperatorCombatStatsPatchRequest(
     val observedAttack: Long? = null,
     val observedHp: Long? = null,
@@ -42,7 +52,16 @@ data class OperatorCombatStatsPatchRequest(
     val observedStatus: String? = null,
     val combatInputSignature: String? = null,
     val observedInputs: OperatorObservedInputsPatchRequest? = null,
+    @field:Schema(description = "攻击力/生命力显示偏好；内部字段按出现性合并，不参与 stale", nullable = true)
+    @JsonProperty("display_mode") val displayMode: OperatorCombatDisplayModePatchRequest? = null,
     val oddities: Map<String, OperatorOddityPatchRequest>? = null,
+)
+
+data class OperatorCombatDisplayModePatchRequest(
+    @field:Schema(nullable = true, allowableValues = ["auto", "manual"])
+    val attack: String? = null,
+    @field:Schema(nullable = true, allowableValues = ["auto", "manual"])
+    val hp: String? = null,
 )
 
 data class OperatorObservedInputsPatchRequest(
