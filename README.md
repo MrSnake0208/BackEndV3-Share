@@ -387,6 +387,9 @@ src/main/kotlin/com/lhs/share/
 
 ## 账号模块
 
+当前养成的主观标注、云端目标、v3 完整备份与原子升级扣库存接口见
+[`docs/operator-growth-persistence-upgrades-api.md`](docs/operator-growth-persistence-upgrades-api.md)。
+
 与 MaaYuan-Share-Backend 共用同一个 MongoDB 数据库(`MaaBackend`,连接串 `mongodb://192.168.31.21:27017/MaaBackend`),
 注册/登录/改密/邮箱验证码/JWT 全部在本服务内实现,直接读写 `maa_user` 集合,
 业务语义与原项目保持一致(字段结构、密码 BCrypt、status 状态、权限 authority 均对齐)。

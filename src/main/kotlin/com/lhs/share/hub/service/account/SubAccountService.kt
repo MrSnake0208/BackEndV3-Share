@@ -4,9 +4,13 @@ import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.InventoryRevisionRepository
+import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
+import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -38,6 +42,10 @@ class SubAccountService(
     private val operatorV3ImportRecordRepository: OperatorV3ImportRecordRepository,
     private val tokenService: OpenApiTokenService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
+    private val operatorAnnotationRepository: OperatorAnnotationRepository? = null,
+    private val operatorGrowthTargetRepository: OperatorGrowthTargetRepository? = null,
+    private val operatorUpgradeTransactionRepository: OperatorUpgradeTransactionRepository? = null,
+    private val inventoryRevisionRepository: InventoryRevisionRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -116,6 +124,10 @@ class SubAccountService(
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }
