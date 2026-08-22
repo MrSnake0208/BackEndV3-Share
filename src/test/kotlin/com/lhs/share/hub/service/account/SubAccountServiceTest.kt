@@ -3,9 +3,13 @@ package com.lhs.share.hub.service.account
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.InventoryRevisionRepository
+import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
+import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -39,6 +43,10 @@ class SubAccountServiceTest {
     private val operatorCorrectionRecordRepository = mockk<OperatorCorrectionRecordRepository>()
     private val operatorV3ImportRecordRepository = mockk<OperatorV3ImportRecordRepository>()
     private val tokenService = mockk<OpenApiTokenService>()
+    private val annotationRepository = mockk<OperatorAnnotationRepository>()
+    private val targetRepository = mockk<OperatorGrowthTargetRepository>()
+    private val upgradeRepository = mockk<OperatorUpgradeTransactionRepository>()
+    private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
             override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
@@ -57,6 +65,10 @@ class SubAccountServiceTest {
         operatorV3ImportRecordRepository,
         tokenService,
         transactionTemplate,
+        annotationRepository,
+        targetRepository,
+        upgradeRepository,
+        revisionRepository,
     )
 
     @Test
@@ -101,6 +113,9 @@ class SubAccountServiceTest {
         verify(exactly = 0) { operatorRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { annotationRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { targetRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { upgradeRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 
     @Test
@@ -166,6 +181,10 @@ class SubAccountServiceTest {
         every { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { revisionRepository.deleteByUserIdAndAccountId("u1", "main") } returns 1
         every { tokenService.revokeByAccount("u1", "main") } just runs
         every { accountRepository.deleteById("mongo-id") } just runs
 
@@ -178,6 +197,10 @@ class SubAccountServiceTest {
         verify(exactly = 1) { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
     }

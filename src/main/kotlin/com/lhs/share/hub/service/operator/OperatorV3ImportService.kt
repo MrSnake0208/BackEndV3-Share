@@ -18,8 +18,10 @@ import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorV3ImportRecord
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.OffsetDateTime
 
 @Service
@@ -31,6 +33,8 @@ class OperatorV3ImportService(
     private val operatorService: OperatorService,
     private val importRecordRepository: OperatorV3ImportRecordRepository,
     private val accountEventService: AccountEventService,
+    private val subjectiveService: OperatorSubjectiveService? = null,
+    @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate? = null,
 ) {
     fun previewBrowser(userId: String, body: JsonNode): OperatorV3ImportPreviewResponse =
         prepare(userId, parseCommand(body, null)).map(PreparedItem::response).toPreviewResponse()
@@ -56,60 +60,91 @@ class OperatorV3ImportService(
             )
             val prepared = prepareRecord(userId, command, record)
             val written = mutableListOf<OperatorV3ImportItem>()
-            prepared.forEach { item ->
-                val result = if (item.patch == null || item.response.status == REJECTED || item.response.status == UNCHANGED) {
-                    item.response
+            inTransaction {
+                if (text(record, "record_type") == ANNOTATION_RECORD) {
+                    if (prepared.none { it.response.status == REJECTED } && priorAudit == null) {
+                        if (text(record, "snapshot_scope") == "full") requireNotNull(subjectiveService).resetFull(userId, targetAccountId)
+                        val sourceEntries = entries(record).associateBy { text(it, "operator_id") }
+                        prepared.forEach { item ->
+                            val original = sourceEntries[item.operatorId]
+                            if (original == null) {
+                                written += item.response.copy(revision = 0, targetRevision = 0)
+                            } else {
+                                val revision = requireNotNull(subjectiveService).applyAnnotationEntry(userId, targetAccountId, original)
+                                written += item.response.copy(revision = revision, targetRevision = revision)
+                            }
+                        }
+                    } else {
+                        val recordRejected = prepared.any { it.response.status == REJECTED }
+                        written += prepared.map { item ->
+                            if (recordRejected && item.response.status != REJECTED) {
+                                item.response.copy(
+                                    status = REJECTED,
+                                    blockingErrors = item.response.blockingErrors +
+                                        issue("invalid_annotation_snapshot", "Another entry rejected this atomic annotation record"),
+                                )
+                            } else {
+                                item.response
+                            }
+                        }
+                    }
                 } else {
-                    val current = operatorService.patchCurrent(
-                        userId,
-                        item.targetAccountId,
-                        item.targetGame,
-                        item.operatorId,
-                        item.patch,
-                    )
-                    item.response.copy(
-                        revision = current.revision,
-                        targetRevision = current.revision,
-                        observedStatus = current.combatStats?.observedStatus,
+                    prepared.forEach { item ->
+                        val result = if (item.patch == null || item.response.status == REJECTED || item.response.status == UNCHANGED) {
+                            item.response
+                        } else {
+                            val current = operatorService.patchCurrent(
+                                userId,
+                                item.targetAccountId,
+                                item.targetGame,
+                                item.operatorId,
+                                item.patch,
+                            )
+                            item.response.copy(
+                                revision = current.revision,
+                                targetRevision = current.revision,
+                                observedStatus = current.combatStats?.observedStatus,
+                            )
+                        }
+                        written += result
+                    }
+                    if (priorAudit == null &&
+                        text(record, "snapshot_scope") == "full" &&
+                        written.none { it.status == REJECTED || it.status == REVIEW }
+                    ) {
+                        operatorService.completeFullImport(
+                            userId,
+                            targetAccountId,
+                            game,
+                            entries(record).map { text(it, "operator_id") }.toSet(),
+                            OffsetDateTime.parse(text(record, "effective_at")).toInstant(),
+                        )
+                    }
+                }
+                val shouldAudit = priorAudit == null &&
+                    written.none { it.status == REJECTED } &&
+                    (
+                        prepared.any { it.patch != null } || text(record, "record_type") == ANNOTATION_RECORD ||
+                            written.any { it.status == UNCHANGED } ||
+                            (entries(record).isEmpty() && text(record, "snapshot_scope") == "full")
+                        )
+                if (shouldAudit) {
+                    importRecordRepository.save(
+                        OperatorV3ImportRecord(
+                            userId = userId,
+                            accountId = targetAccountId,
+                            sourceAccountId = text(record, "account_id"),
+                            recordId = text(record, "record_id"),
+                            game = game,
+                            sourceKind = text(record, "source_kind"),
+                            snapshotScope = text(record, "snapshot_scope"),
+                            payload = objectMapper.writeValueAsString(record),
+                            revisions = written.mapNotNull { item -> item.revision?.let { item.operatorId to it } }.toMap(),
+                        ),
                     )
                 }
-                written += result
-                if (command.scanAccountId != null) publishScanEvent(userId, result)
             }
-            if (priorAudit == null &&
-                text(record, "snapshot_scope") == "full" &&
-                written.none { it.status == REJECTED || it.status == REVIEW }
-            ) {
-                operatorService.completeFullImport(
-                    userId,
-                    targetAccountId,
-                    game,
-                    entries(record).map { text(it, "operator_id") }.toSet(),
-                    OffsetDateTime.parse(text(record, "effective_at")).toInstant(),
-                )
-            }
-            val shouldAudit = priorAudit == null && (
-                prepared.any { it.patch != null } ||
-                    written.any { it.status == UNCHANGED } ||
-                    (entries(record).isEmpty() && text(record, "snapshot_scope") == "full")
-                )
-            if (shouldAudit) {
-                importRecordRepository.save(
-                    OperatorV3ImportRecord(
-                        userId = userId,
-                        accountId = targetAccountId,
-                        sourceAccountId = text(record, "account_id"),
-                        recordId = text(record, "record_id"),
-                        game = game,
-                        sourceKind = text(record, "source_kind"),
-                        snapshotScope = text(record, "snapshot_scope"),
-                        payload = objectMapper.writeValueAsString(record),
-                        revisions = written.mapNotNull { item ->
-                            item.revision?.let { item.operatorId to it }
-                        }.toMap(),
-                    ),
-                )
-            }
+            if (command.scanAccountId != null) written.forEach { publishScanEvent(userId, it) }
             committed += written
         }
         return committed.toCommitResponse()
@@ -136,8 +171,27 @@ class OperatorV3ImportService(
         )
     }
 
-    private fun prepare(userId: String, command: ImportCommand): List<PreparedItem> =
-        records(command.document).flatMap { prepareRecord(userId, command, it) }
+    private fun prepare(userId: String, command: ImportCommand): List<PreparedItem> = records(command.document).flatMap { record ->
+        val items = prepareRecord(userId, command, record)
+        if (text(record, "record_type") == ANNOTATION_RECORD && items.any { it.response.status == REJECTED }) {
+            items.map { item ->
+                if (item.response.status == REJECTED) {
+                    item
+                } else {
+                    item.copy(
+                        patch = null,
+                        response = item.response.copy(
+                            status = REJECTED,
+                            blockingErrors = item.response.blockingErrors +
+                                issue("invalid_annotation_snapshot", "Another entry rejected this atomic annotation record"),
+                        ),
+                    )
+                }
+            }
+        } else {
+            items
+        }
+    }
 
     private fun prepareRecord(userId: String, command: ImportCommand, record: ObjectNode): List<PreparedItem> {
         val sourceAccountId = text(record, "account_id")
@@ -173,7 +227,108 @@ class OperatorV3ImportService(
                 )
             }
         }
-        return entries(record).map { entry -> prepareEntry(userId, command, record, entry, target, targetGame) }
+        return if (text(record, "record_type") == ANNOTATION_RECORD) {
+            val listed = entries(record).map { entry -> prepareAnnotationEntry(userId, record, entry, target, targetGame) }
+            if (text(record, "snapshot_scope") != "full") {
+                listed
+            } else {
+                val listedIds = listed.map { it.operatorId }.toSet()
+                listed + requireNotNull(subjectiveService).subjectiveOperatorIds(userId, targetAccountId)
+                    .filter { it !in listedIds }
+                    .map { operatorId -> prepareAnnotationReset(userId, record, target, targetGame, operatorId) }
+            }
+        } else {
+            entries(record).map { entry -> prepareEntry(userId, command, record, entry, target, targetGame) }
+        }
+    }
+
+    private fun prepareAnnotationReset(
+        userId: String,
+        record: ObjectNode,
+        target: SubAccount,
+        targetGame: String,
+        operatorId: String,
+    ): PreparedItem {
+        val before = requireNotNull(subjectiveService).subjectiveState(userId, target.accountId, operatorId)
+        val defaults = linkedMapOf<String, Any?>(
+            "growth_state" to OperatorSubjectiveService.ACTIVE,
+            "favorite" to false,
+            "note" to null,
+            "targets" to null,
+        )
+        val changes = defaults.mapNotNull { (field, value) ->
+            if (before[field] == value) null else field to OperatorV3FieldChange(before[field], value)
+        }.toMap()
+        return PreparedItem(
+            target.accountId,
+            targetGame,
+            operatorId,
+            null,
+            OperatorV3ImportItem(
+                accountId = target.accountId,
+                operatorId = operatorId,
+                recordId = text(record, "record_id"),
+                status = if (changes.isEmpty()) UNCHANGED else ACCEPTED,
+                changes = changes,
+                targetRevision = 0,
+            ),
+        )
+    }
+
+    private fun prepareAnnotationEntry(
+        userId: String,
+        record: ObjectNode,
+        entry: ObjectNode,
+        target: SubAccount,
+        targetGame: String,
+    ): PreparedItem {
+        val recordId = text(record, "record_id")
+        val operatorId = text(entry, "operator_id")
+        return try {
+            val catalog = catalogService.getOperator(operatorId)
+                ?: invalid("unknown_operator", "Unknown operator_id: $operatorId", recordId, operatorId, "operator_id")
+            if (targetGame !in
+                catalog.games
+            ) {
+                invalid("invalid_game", "Operator is not available in target game", recordId, operatorId, "game")
+            }
+            val before = requireNotNull(subjectiveService).subjectiveState(userId, target.accountId, operatorId)
+            val after = LinkedHashMap(before)
+            listOf("growth_state", "favorite", "note", "targets").forEach { field ->
+                if (entry.has(field)) after[field] = objectMapper.convertValue(entry.get(field), Any::class.java)
+            }
+            val changes = linkedMapOf<String, OperatorV3FieldChange>()
+            after.forEach { (field, value) -> if (before[field] != value) changes[field] = OperatorV3FieldChange(before[field], value) }
+            val revision = requireNotNull(subjectiveService).subjectiveRevision(userId, target.accountId, operatorId)
+            PreparedItem(
+                target.accountId,
+                targetGame,
+                operatorId,
+                entry,
+                OperatorV3ImportItem(
+                    accountId = target.accountId,
+                    operatorId = operatorId,
+                    recordId = recordId,
+                    status = if (changes.isEmpty()) UNCHANGED else ACCEPTED,
+                    changes = changes,
+                    targetRevision = if (changes.isEmpty()) revision else revision + 1,
+                ),
+            )
+        } catch (e: OperatorApiException) {
+            PreparedItem(
+                target.accountId,
+                targetGame,
+                operatorId,
+                null,
+                OperatorV3ImportItem(
+                    accountId = target.accountId,
+                    operatorId = operatorId,
+                    recordId = recordId,
+                    status = REJECTED,
+                    blockingErrors = listOf(issue(e.code, e.message, e.fieldPath)),
+                ),
+            )
+        }
     }
 
     private fun prepareEntry(
@@ -325,15 +480,24 @@ class OperatorV3ImportService(
         records.forEach { record ->
             val source = text(record, "account_id")
             if (source !in accountIds) schemaError("record account_id does not reference accounts", text(record, "record_id"))
-            if (text(record, "record_type") != "operator_snapshot") {
+            val recordType = text(record, "record_type")
+            if (recordType !in setOf("operator_snapshot", ANNOTATION_RECORD)) {
                 throw OperatorApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     if (scanAccountId != null) "scan_scope_not_allowed" else "unsupported_record_type",
-                    "This release only imports operator_snapshot records",
+                    "Unsupported operator record type",
                     text(record, "record_id"),
                 )
             }
             parseTimestamp(text(record, "effective_at"), "effective_at", text(record, "record_id"))
+            if (scanAccountId != null && recordType == ANNOTATION_RECORD) {
+                throw OperatorApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "scan_scope_not_allowed",
+                    "OpenAPI scan import cannot contain operator annotations",
+                    text(record, "record_id"),
+                )
+            }
             if (scanAccountId != null &&
                 (text(record, "source_kind") != "scan" || text(record, "snapshot_scope") != "listed")
             ) {
@@ -605,6 +769,8 @@ class OperatorV3ImportService(
         else -> emptyMap()
     }
 
+    private fun <T> inTransaction(block: () -> T): T = transactionTemplate?.execute { block() } ?: block()
+
     private data class ImportCommand(
         val document: ObjectNode,
         val mapping: Map<String, String>,
@@ -628,5 +794,6 @@ class OperatorV3ImportService(
         private const val REJECTED = "rejected"
         private const val UNCHANGED = "unchanged"
         const val SCAN_EVENT_NAME = "operator_scan_import"
+        private const val ANNOTATION_RECORD = "operator_annotation_snapshot"
     }
 }

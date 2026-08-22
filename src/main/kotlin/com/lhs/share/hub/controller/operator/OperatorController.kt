@@ -13,7 +13,6 @@ import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
-import com.lhs.share.hub.controller.operator.response.OperatorExportResponse
 import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
@@ -32,6 +31,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -47,6 +47,9 @@ class OperatorController(
     private val helper: AuthenticationHelper,
     private val v3ImportService: OperatorV3ImportService? = null,
     private val objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
+    private val subjectiveService: com.lhs.share.hub.service.operator.OperatorSubjectiveService? = null,
+    private val upgradeService: com.lhs.share.hub.service.operator.OperatorUpgradeService? = null,
+    private val v3ExportService: com.lhs.share.hub.service.operator.OperatorV3ExportService? = null,
 ) {
     @Operation(
         summary = "提交密探交换文档",
@@ -112,6 +115,58 @@ class OperatorController(
         @RequestParam(required = false) game: String?,
     ): ApiResult<List<OperatorCurrentResponse>> = success(service.current(helper.requireUserId(), accountId, game))
 
+    @Operation(summary = "读取子账号的密探主观养成标注", description = "未返回的密探默认 growth_state=active。")
+    @GetMapping("/annotations")
+    fun annotations(@RequestParam(name = "account_id") accountId: String) =
+        success(requireNotNull(subjectiveService).annotations(helper.requireUserId(), accountId))
+
+    @Operation(summary = "合并密探主观养成标注", description = "字段缺失保留旧值；note=null 明确清除；相同内容重复提交幂等。")
+    @PutMapping("/annotations/{operatorId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun putAnnotation(
+        @PathVariable operatorId: String,
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestBody request: ObjectNode,
+    ) = success(requireNotNull(subjectiveService).putAnnotation(helper.requireUserId(), accountId, operatorId, request))
+
+    @Operation(summary = "读取子账号的密探养成目标")
+    @GetMapping("/growth-targets")
+    fun growthTargets(@RequestParam(name = "account_id") accountId: String) =
+        success(requireNotNull(subjectiveService).targets(helper.requireUserId(), accountId))
+
+    @Operation(
+        summary = "合并密探养成目标",
+        description = "level/elite/star_level/heart_paper 字段缺失保留旧值；targets=null 明确删除整组目标。",
+    )
+    @PutMapping("/growth-targets/{operatorId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun putGrowthTarget(
+        @PathVariable operatorId: String,
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestBody request: ObjectNode,
+    ) = success(requireNotNull(subjectiveService).putTarget(helper.requireUserId(), accountId, operatorId, request))
+
+    @Operation(summary = "删除密探养成目标")
+    @DeleteMapping("/growth-targets/{operatorId}")
+    fun deleteGrowthTarget(
+        @PathVariable operatorId: String,
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestParam(name = "expected_revision") expectedRevision: Long,
+    ): ApiResult<Boolean> {
+        requireNotNull(subjectiveService).deleteTarget(helper.requireUserId(), accountId, operatorId, expectedRevision)
+        return success(true)
+    }
+
+    @Operation(summary = "预览密探快捷提升", description = "材料由服务端计算；预览不写数据库。五铢钱不参与库存校验。")
+    @PostMapping("/upgrades/preview", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun previewUpgrade(@RequestBody request: com.lhs.share.hub.controller.operator.request.OperatorUpgradeRequest) =
+        success(requireNotNull(upgradeService).preview(helper.requireUserId(), request))
+
+    @Operation(summary = "执行密探快捷提升并原子扣减库存")
+    @PostMapping("/upgrades/execute", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun executeUpgrade(
+        @org.springframework.web.bind.annotation.RequestHeader("Idempotency-Key") idempotencyKey: String,
+        @RequestBody request: com.lhs.share.hub.controller.operator.request.OperatorUpgradeExecuteRequest,
+    ) = success(requireNotNull(upgradeService).execute(helper.requireUserId(), idempotencyKey, request))
+
     @Operation(
         summary = "局部校正密探当前养成",
         description = "只合并请求中出现的字段；star_stones 出现时完整替换六槽当前装备，空数组清空；" +
@@ -153,7 +208,16 @@ class OperatorController(
     fun export(
         @RequestParam(name = "account_id", required = false) accountId: String?,
         @RequestParam(required = false) scope: String?,
-    ): OperatorExportResponse = service.export(helper.requireUserId(), accountId, scope)
+        @RequestParam(required = false, defaultValue = "2") version: Int,
+    ): Any = when (version) {
+        2 -> service.export(helper.requireUserId(), accountId, scope)
+        3 -> requireNotNull(v3ExportService).export(helper.requireUserId(), accountId, scope)
+        else -> throw com.lhs.share.hub.service.operator.OperatorApiException(
+            org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+            "unsupported_exchange_version",
+            "Export version must be 2 or 3",
+        )
+    }
 
     /**
      * 公共开放 API（图鉴）：无需登录，返回全局只读密探目录。
