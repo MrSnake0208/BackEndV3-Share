@@ -26,6 +26,7 @@ data class InventoryImportEvent(
                     recordId = record.recordId,
                     recordType = record.recordType,
                     entityType = record.entityType,
+                    acquisitionChannel = record.acquisitionChannel,
                     entries = record.entries.map { InventoryImportEventEntry(it.id, it.count) },
                 )
             },
@@ -37,6 +38,7 @@ data class InventoryImportEventRecord(
     val recordId: String,
     val recordType: String,
     val entityType: String,
+    val acquisitionChannel: String? = null,
     val entries: List<InventoryImportEventEntry>,
 )
 
