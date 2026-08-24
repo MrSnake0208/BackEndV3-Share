@@ -112,6 +112,20 @@ curl --fail-with-body "$API_BASE_URL/user/open-api/tokens" \
   -H "Authorization: Bearer $JWT_TOKEN" | jq '.data[] | {token_id, account_id, account_name, scopes, remark}'
 ```
 
+已生成 Token 的权限可通过登录 JWT 完整替换；请求中的 `scopes` 是更新后的完整集合，因此既可新增也可
+移除权限：
+
+```bash
+curl --fail-with-body -X PATCH "$API_BASE_URL/user/open-api/tokens/$TOKEN_ID/scopes" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"scopes":["operator:scan:write","inventory:write","inventory:read"]}' | jq
+```
+
+更新会立即同步到 MongoDB 和无过期 Redis 缓存，新增权限立即可用、移除权限立即失效；Token 明文不会
+改变，也无需在 MaaYuan 中重新填写。Token 明文仍只在首次生成时返回，列表和权限更新响应均不返回明文。
+当前 Token 仍不会自动过期。
+
 > **统一子账号说明（2026-08）**：`/v1/inventory/accounts` 与 `/v1/operator/accounts` 已合并为
 > **`/v1/accounts`**（POST 创建 / GET 列表 / PATCH 修改 / DELETE 删除）。子账号对库存、密探、
 > 特别关注全局可用；token 绑定的账号为共享账号，**可访问的域由 scopes 声明**（`inventory:*` 走
