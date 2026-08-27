@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.report.request
 
+import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 
 /**
@@ -14,8 +15,10 @@ import jakarta.validation.constraints.Size
 data class FeedbackReportCreateRequest(
     val type: String = "FEEDBACK",
     val category: String? = null,
-    @field:Size(min = 1, max = 1000, message = "正文长度应在 1~1000 字符之间")
+    @field:NotBlank(message = "正文不能为空")
+    @field:Size(max = 1000, message = "正文长度不能超过 1000 字符")
     val content: String,
+    @field:Size(max = 3, message = "图片数量不能超过 3 张")
     val mediaIds: List<String> = emptyList(),
     val clientInfoConsent: Boolean = false,
 )
