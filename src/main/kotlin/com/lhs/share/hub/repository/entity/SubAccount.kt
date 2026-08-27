@@ -24,6 +24,7 @@ data class SubAccount(
     val userId: String,
     val accountId: String,
     val name: String,
+    val game: String = "代号鸢",
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now(),
 )

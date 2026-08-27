@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogDiscRequest
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogStarStoneRequest
 import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
+import com.lhs.share.hub.controller.operator.response.OperatorOddityRules
 import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
@@ -42,6 +43,7 @@ class OperatorCatalogServiceTest {
         name = "新密探",
         alias = "new alias",
         rarity = 5,
+        specialOddityName = "增伤值",
         prof = listOf("阳"),
         subProf = listOf("shenji"),
         games = listOf("如鸢", "代号鸢"),
@@ -61,8 +63,26 @@ class OperatorCatalogServiceTest {
 
         assertEquals("char_090_new", saved.captured.operatorId)
         assertEquals("新密探", saved.captured.name)
+        assertEquals("增伤值", saved.captured.specialOddityName)
+        assertEquals(15, entity.odditySchema.special.max)
+        assertEquals(emptyList<String>(), entity.incompleteFields)
         assertEquals(saved.captured.catalogVersion, entity.catalogVersion)
         assertNotEquals("", entity.catalogVersion)
+    }
+
+    @Test
+    fun `create requires a non-blank special oddity name after trimming`() {
+        seed()
+        every { repository.findByOperatorId("char_090_new") } returns null
+
+        listOf(null, "   ", "x".repeat(33)).forEach { value ->
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.create(writeRequest().copy(specialOddityName = value))
+            }
+            assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+            assertEquals("schema_validation_failed", error.code)
+        }
+        verify(exactly = 0) { repository.save(any()) }
     }
 
     @Test
@@ -106,7 +126,37 @@ class OperatorCatalogServiceTest {
         assertEquals(row.id, updated.id)
         assertEquals(row.createdAt, updated.createdAt)
         assertEquals("改名", updated.name)
+        assertEquals("增伤值", updated.specialOddityName)
         assertNotEquals(row.catalogVersion, updated.catalogVersion)
+    }
+
+    @Test
+    fun `update null preserves the old special name and explicit value is trimmed and bumps version`() {
+        seed()
+        val row = existing("char_090_new").copy(specialOddityName = "免伤值")
+        every { repository.findByOperatorId("char_090_new") } returns row
+        val saved = mutableListOf<OperatorCatalogEntity>()
+        every { repository.save(any()) } answers { firstArg<OperatorCatalogEntity>().also(saved::add) }
+
+        val preserved = service.update("char_090_new", writeRequest().copy(specialOddityName = null))
+        val changed = service.update("char_090_new", writeRequest().copy(specialOddityName = "  治疗加成  "))
+
+        assertEquals("免伤值", preserved.specialOddityName)
+        assertEquals("免伤值", saved[0].specialOddityName)
+        assertEquals("治疗加成", changed.specialOddityName)
+        assertEquals("治疗加成", saved[1].specialOddityName)
+        assertNotEquals(row.catalogVersion, saved[1].catalogVersion)
+    }
+
+    @Test
+    fun `oddity rules derive exact limits for rarities three four and five`() {
+        val three = OperatorOddityRules.schema(3, "增伤值")
+        val four = OperatorOddityRules.schema(4, "免伤值")
+        val five = OperatorOddityRules.schema(5, "治疗加成")
+
+        assertEquals(listOf(300, 1560, 9), listOf(three.attack.max, three.hp.max, three.special.max))
+        assertEquals(listOf(305, 1820, 11), listOf(four.attack.max, four.hp.max, four.special.max))
+        assertEquals(listOf(500, 2600, 15), listOf(five.attack.max, five.hp.max, five.special.max))
     }
 
     @Test
@@ -137,7 +187,7 @@ class OperatorCatalogServiceTest {
         val rows = listOf(existing("char_002"), existing("char_001"))
         seed(rows)
         every { repository.findAllByOrderByOperatorIdAsc() } returns rows
-        assertEquals(rows, service.listForAdmin())
+        assertEquals(listOf("char_002", "char_001"), service.listForAdmin().map { it.id })
     }
 
     @Test
@@ -234,6 +284,58 @@ class OperatorCatalogServiceTest {
         verify(exactly = 0) { repository.save(any()) }
     }
 
+    @Test
+    fun `resource special name backfills only null and carries a detectable catalog version`() {
+        val resource = ObjectMapper().readTree("""{"spOf":"char_base","specialOddityName":"  免伤值  "}""")
+        val missing = existing("char_missing").copy(specialOddityName = null)
+        val maintained = existing("char_maintained").copy(specialOddityName = "管理员名称")
+
+        val backfilled = service.mergeResourceFields(missing, resource, "catalog-backfill-v2")
+        val preserved = service.mergeResourceFields(maintained, resource, "catalog-backfill-v2")
+
+        assertEquals("免伤值", backfilled.specialOddityName)
+        assertEquals("catalog-backfill-v2", backfilled.catalogVersion)
+        assertEquals("管理员名称", preserved.specialOddityName)
+        assertEquals(maintained.catalogVersion, preserved.catalogVersion)
+    }
+
+    @Test
+    fun `fresh resource parsing reads special oddity name without persisting derived schema`() {
+        val resource = ObjectMapper().readTree(
+            """{"id":"char_999_test","name":"测试","rarity":4,"prof":["阳"],"subProf":[],"games":["代号鸢"],"discs":[],"starStones":[],"specialOddityName":"免伤值"}""",
+        )
+
+        val entity = service.fromResource(resource, "catalog-v1")!!
+
+        assertEquals("免伤值", entity.specialOddityName)
+        assertEquals(4, entity.rarity)
+    }
+
+    @Test
+    fun `runtime resource carries all high-confidence captured special oddity names`() {
+        val rows = requireNotNull(javaClass.classLoader.getResourceAsStream("operator/operators.json")).use {
+            ObjectMapper().readTree(it)
+        }
+        val maintained = rows.filter { it.path("specialOddityName").asText().isNotBlank() }
+        val missingIds = rows
+            .filter { it.path("specialOddityName").asText().isBlank() }
+            .map { it.path("id").asText() }
+            .toSet()
+
+        assertEquals(116, maintained.size)
+        assertEquals(setOf("增伤值", "免伤值", "治疗加成"), maintained.map { it.path("specialOddityName").asText() }.toSet())
+        assertEquals(
+            setOf(
+                "char_023_shizimiao",
+                "char_084_chendengsp",
+                "char_102_jianyong",
+                "char_119_sunjing",
+                "char_122_zhangsong",
+            ),
+            missingIds,
+        )
+    }
+
     private fun existing(
         id: String,
         createdAt: Instant = Instant.parse("2026-08-01T00:00:00Z"),
@@ -250,6 +352,7 @@ class OperatorCatalogServiceTest {
             discs = listOf(OperatorDiscCatalog("初始能量+1")),
             starStones = listOf(OperatorStarStoneCatalog("主星石", "main")),
             avatar = avatar,
+            specialOddityName = "增伤值",
             catalogVersion = "2026-08-16",
             createdAt = createdAt,
         )

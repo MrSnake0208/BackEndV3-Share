@@ -19,6 +19,7 @@ data class InventoryRecordListItemDto(
     val effectiveAt: Instant,
     val receivedAt: Instant,
     val stockEffect: String,
+    val transactionId: String?,
     val entries: List<InventoryRecordEntryDto>,
 ) {
     companion object {
@@ -32,6 +33,7 @@ data class InventoryRecordListItemDto(
             effectiveAt = record.effectiveAt,
             receivedAt = record.receivedAt,
             stockEffect = record.stockEffect,
+            transactionId = record.transactionId,
             entries = record.entries.map { InventoryRecordEntryDto(id = it.id, name = it.name, count = it.count) },
         )
     }

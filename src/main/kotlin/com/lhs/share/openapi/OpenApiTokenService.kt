@@ -28,10 +28,7 @@ class OpenApiTokenService(
      * 子账号由库存、密探共用;可访问的域完全由 scopes 决定(可混合 inventory:* 与 operator:*)。
      */
     fun generate(userId: String, accountId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
-        val permissions = scopes.map { scope ->
-            OpenApiPermission.byKey(scope) ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "未知 scope: $scope")
-        }
-        if (permissions.distinct().size != permissions.size) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不得重复")
+        val permissions = parseScopes(scopes)
         val accountName = accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
             ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
         if (tokenRepository.countByUserIdAndAccountId(userId, accountId) >= MAX_TOKENS_PER_ACCOUNT) {
@@ -130,22 +127,42 @@ class OpenApiTokenService(
     }
 
     /**
+     * 完整替换 token 权限。Token 明文及除 scope 外的持久化字段保持不变。
+     */
+    fun updateScopes(userId: String, tokenId: String, scopes: List<String>): OpenApiTokenListItemDto {
+        val permissions = parseScopes(scopes)
+        val entity = tokenRepository.findByIdAndUserId(tokenId, userId)
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
+        val accountName = checkNotNull(accountRepository.findByUserIdAndAccountId(userId, entity.accountId)) {
+            "Token references a missing account"
+        }.name
+        val updated = entity.copy(scope = permissions.map { it.code })
+
+        // 鉴权优先读无过期 Redis 缓存，因此必须先删除旧权限，再更新持久化权威来源并回填新权限。
+        redisCache.delete(redisKey(entity.token))
+        tokenRepository.save(updated)
+        redisCache.setCache(
+            redisKey(entity.token),
+            TokenCacheData(
+                userId = updated.userId,
+                accountId = updated.accountId,
+                scope = updated.scope,
+                createTime = updated.createTime.toEpochMilli(),
+            ),
+            0,
+        )
+
+        return updated.toListItemDto(accountName)
+    }
+
+    /**
      * 列出当前用户的 token(按创建时间倒序)
      */
     fun list(userId: String): List<OpenApiTokenListItemDto> = tokenRepository.findByUserIdOrderByCreateTimeDesc(userId).map { token ->
         val accountName = checkNotNull(accountRepository.findByUserIdAndAccountId(userId, token.accountId)) {
             "Token references a missing account"
         }.name
-        OpenApiTokenListItemDto(
-            tokenId = checkNotNull(token.id) { "Token document has no id" },
-            accountId = token.accountId,
-            accountName = accountName,
-            remark = token.remark,
-            scopes = token.scope
-                .mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
-                .map { permission -> permission.key },
-            createdAt = token.createTime,
-        )
+        token.toListItemDto(accountName)
     }
 
     fun revokeByAccount(userId: String, accountId: String) {
@@ -156,6 +173,28 @@ class OpenApiTokenService(
     }
 
     private fun redisKey(token: String): String = REDIS_KEY_PREFIX + token
+
+    private fun parseScopes(scopes: List<String>): List<OpenApiPermission> {
+        if (scopes.isEmpty()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不能为空")
+        val permissions = scopes.map { scope ->
+            OpenApiPermission.byKey(scope) ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "未知 scope: $scope")
+        }
+        if (permissions.distinct().size != permissions.size) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "scopes 不得重复")
+        }
+        return permissions
+    }
+
+    private fun OpenApiToken.toListItemDto(accountName: String) = OpenApiTokenListItemDto(
+        tokenId = checkNotNull(id) { "Token document has no id" },
+        accountId = accountId,
+        accountName = accountName,
+        remark = remark,
+        scopes = scope
+            .mapNotNull { code -> OpenApiPermission.entries.firstOrNull { permission -> permission.code == code } }
+            .map { permission -> permission.key },
+        createdAt = createTime,
+    )
 
     companion object {
         private const val REDIS_KEY_PREFIX = "open-api-token:"

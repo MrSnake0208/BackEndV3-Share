@@ -5,6 +5,7 @@ import com.lhs.share.config.doc.SpringDocConfig
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.hub.controller.inventory.InventoryController
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
 import com.lhs.share.hub.service.inventory.InventoryAgentFavoriteService
@@ -54,6 +55,9 @@ class InventoryOpenApiContractTest {
 
     @MockitoBean
     lateinit var subAccountService: SubAccountService
+
+    @MockitoBean
+    lateinit var accountEventService: AccountEventService
 
     @MockitoBean
     lateinit var inventoryAgentFavoriteService: InventoryAgentFavoriteService
@@ -202,6 +206,7 @@ class InventoryOpenApiContractTest {
                 "operator:read",
                 "operator:write",
                 "operator:export",
+                "operator:scan:write",
             ),
             scopeItems["enum"].map { it.asText() }.toSet(),
         )
@@ -221,6 +226,14 @@ class InventoryOpenApiContractTest {
         val tokenDelete = root.at("/paths/~1user~1open-api~1tokens~1{tokenId}/delete")
         assertTrue(tokenDelete.isObject)
         listOf("200", "401", "404", "500").forEach { assertTrue(tokenDelete["responses"].has(it)) }
+        val tokenScopesUpdate = root.at("/paths/~1user~1open-api~1tokens~1{tokenId}~1scopes/patch")
+        assertTrue(tokenScopesUpdate.isObject)
+        assertTrue(tokenScopesUpdate["security"].any { it.has("Jwt") })
+        listOf("200", "400", "401", "404", "500").forEach { assertTrue(tokenScopesUpdate["responses"].has(it)) }
+        val updateScopeItems = root.at("/components/schemas/OpenApiTokenScopesUpdateRequest/properties/scopes/items")
+        assertEquals(scopeItems["enum"].toSet(), updateScopeItems["enum"].toSet())
+        val updateResponse = tokenScopesUpdate.at("/responses/200/content/application~1json/schema")
+        assertFalse(updateResponse.toString().contains("OpenApiTokenCreatedResponse"))
         assertLocalReferencesResolve(root, root)
     }
 

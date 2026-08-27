@@ -47,7 +47,8 @@ data class InventoryRecord(
     val userId: String,
     val accountId: String,
     /**
-     * 记录类型: reward_delta(奖励增量) | stock_snapshot(库存快照)
+     * 记录类型: reward_delta(奖励增量) | stock_snapshot(库存快照) |
+     * consumption_delta(升级消费；仅服务端事务生成)
      */
     val recordType: String,
     /**
@@ -89,6 +90,8 @@ data class InventoryRecord(
      * 仅用于排查导入结果,不参与业务计算
      */
     val stockEffect: String = "applied",
+    /** Groups item and agent consumption records created by one atomic upgrade. */
+    val transactionId: String? = null,
 ) : Serializable
 
 /**
@@ -124,7 +127,8 @@ data class RecordEntry(
      */
     val name: String? = null,
     /**
-     * 数量:reward_delta 恒 > 0,stock_snapshot 为 0..Int.MAX_VALUE
+     * 数量:reward_delta / consumption_delta 恒 > 0,stock_snapshot 为 0..Int.MAX_VALUE；
+     * consumption_delta 的正数由 recordType 表达扣减方向。
      */
     val count: Long,
 )

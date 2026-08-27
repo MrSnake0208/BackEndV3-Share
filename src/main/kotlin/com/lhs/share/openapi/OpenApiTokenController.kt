@@ -3,9 +3,11 @@ package com.lhs.share.openapi
 import com.lhs.share.config.doc.OpenApiTokenDeleteResponses
 import com.lhs.share.config.doc.OpenApiTokenGenerateResponses
 import com.lhs.share.config.doc.OpenApiTokenListResponses
+import com.lhs.share.config.doc.OpenApiTokenScopesUpdateResponses
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.request.openapi.OpenApiTokenGenerateRequest
+import com.lhs.share.controller.request.openapi.OpenApiTokenScopesUpdateRequest
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import io.swagger.v3.oas.annotations.Operation
@@ -14,6 +16,7 @@ import jakarta.validation.Valid
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -57,6 +60,18 @@ class OpenApiTokenController(
     @OpenApiTokenListResponses
     @GetMapping("/tokens")
     fun tokens(): ApiResult<List<OpenApiTokenListItemDto>> = success(tokenService.list(helper.requireUserId()))
+
+    /**
+     * 完整替换第三方 API Token 权限(需登录),不改变 Token 明文。
+     */
+    @Operation(summary = "更新第三方 API Token 权限", description = "完整替换 scopes；Token 明文保持不变，权限变更立即生效")
+    @RequireJwt
+    @OpenApiTokenScopesUpdateResponses
+    @PatchMapping("/tokens/{tokenId}/scopes", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun updateScopes(
+        @PathVariable tokenId: String,
+        @Valid @RequestBody request: OpenApiTokenScopesUpdateRequest,
+    ): ApiResult<OpenApiTokenListItemDto> = success(tokenService.updateScopes(helper.requireUserId(), tokenId, request.scopes))
 
     /**
      * 删除第三方 API Token(需登录)
