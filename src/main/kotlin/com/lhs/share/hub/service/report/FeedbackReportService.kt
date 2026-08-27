@@ -49,10 +49,10 @@ class FeedbackReportService(
     private val random = SecureRandom()
 
     companion object {
-        /** 允许的工单类型 */
-        private val VALID_TYPES = setOf("FEEDBACK", "REPORT")
+        /** 当前支持落库的工单类型 */
+        private const val FEEDBACK_TYPE = "FEEDBACK"
 
-        /** 允许的分类(仅 FEEDBACK 时必填) */
+        /** 允许的反馈分类 */
         private val VALID_CATEGORIES = setOf("FEATURE", "BUG", "CONTENT", "ACCOUNT", "OTHER")
 
         /** 允许的状态 */
@@ -72,23 +72,25 @@ class FeedbackReportService(
     }
 
     /**
-     * 创建反馈工单
+     * 创建反馈工单只接受规范的 FEEDBACK 类型和分类值。
      */
-    fun create(userId: String, request: FeedbackReportCreateRequest): FeedbackReportResponse {
-        // 校验 type
-        if (request.type !in VALID_TYPES) {
+    private fun validateCreateTypeAndCategory(request: FeedbackReportCreateRequest): String {
+        if (request.type != FEEDBACK_TYPE) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的工单类型: ${request.type}")
         }
-        // 第一期仅支持 FEEDBACK
-        if (request.type != "FEEDBACK") {
-            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "第一期仅支持 FEEDBACK 类型")
-        }
-
-        // 校验 category
         val category = request.category
         if (category == null || category !in VALID_CATEGORIES) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的分类: $category, 可选: $VALID_CATEGORIES")
         }
+        return category
+    }
+
+    /**
+     * 创建反馈工单
+     */
+    fun create(userId: String, request: FeedbackReportCreateRequest): FeedbackReportResponse {
+        val type = FEEDBACK_TYPE
+        val category = validateCreateTypeAndCategory(request)
 
         // 校验 media_ids 归属
         val mediaAssets = validateMediaIds(userId, request.mediaIds)
@@ -114,7 +116,7 @@ class FeedbackReportService(
         val now = Instant.now()
         val ticket = FeedbackTicket(
             id = ticketId,
-            type = request.type,
+            type = type,
             category = category,
             status = "OPEN",
             reporterUserId = userId,
@@ -147,8 +149,31 @@ class FeedbackReportService(
         sortBy: String,
         sortOrder: String,
     ): FeedbackReportListResponse {
+        if (page < 1) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
+        }
+        if (pageSize !in 1..100) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "pageSize 必须在 1..100 之间")
+        }
+
+        val normalizedStatus = status?.trim()?.uppercase()
+        if (normalizedStatus != null && normalizedStatus !in VALID_STATUSES) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的状态: $status")
+        }
+        val normalizedType = type?.trim()?.uppercase()
+        if (normalizedType != null && normalizedType != FEEDBACK_TYPE) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的工单类型: $type")
+        }
+        if (sortBy !in setOf("createdAt", "updatedAt")) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortBy 只允许 createdAt 或 updatedAt")
+        }
+        if (!sortOrder.equals("asc", ignoreCase = true) && !sortOrder.equals("desc", ignoreCase = true)) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortOrder 只允许 asc 或 desc")
+        }
+
         val actualMine = if (!isAdmin) true else mine
         val actualReporterUserId = if (actualMine) currentUserId else reporterUserId
+        val escapedKeyword = keyword?.takeIf { it.isNotBlank() }?.let { Regex.escape(it.trim()) }
 
         val pageable = PageRequest.of(
             page - 1,
@@ -159,27 +184,27 @@ class FeedbackReportService(
 
         val resultPage: Page<FeedbackTicket> = when {
             // 搜索关键词
-            !keyword.isNullOrBlank() && actualReporterUserId != null ->
+            escapedKeyword != null && actualReporterUserId != null ->
                 feedbackTicketRepository.searchByReporterUserIdAndKeywordOrderByCreatedAtDesc(
-                    actualReporterUserId, keyword, pageable,
+                    actualReporterUserId, escapedKeyword, pageable,
                 )
-            !keyword.isNullOrBlank() ->
-                feedbackTicketRepository.searchByKeywordOrderByCreatedAtDesc(keyword, pageable)
+            escapedKeyword != null ->
+                feedbackTicketRepository.searchByKeywordOrderByCreatedAtDesc(escapedKeyword, pageable)
 
             // 按用户+状态+类型
-            actualReporterUserId != null && status != null && type != null ->
+            actualReporterUserId != null && normalizedStatus != null && normalizedType != null ->
                 feedbackTicketRepository.findByReporterUserIdAndStatusAndTypeOrderByCreatedAtDesc(
-                    actualReporterUserId, status, type, pageable,
+                    actualReporterUserId, normalizedStatus, normalizedType, pageable,
                 )
             // 按用户+状态
-            actualReporterUserId != null && status != null ->
+            actualReporterUserId != null && normalizedStatus != null ->
                 feedbackTicketRepository.findByReporterUserIdAndStatusOrderByCreatedAtDesc(
-                    actualReporterUserId, status, pageable,
+                    actualReporterUserId, normalizedStatus, pageable,
                 )
             // 按用户+类型
-            actualReporterUserId != null && type != null ->
+            actualReporterUserId != null && normalizedType != null ->
                 feedbackTicketRepository.findByReporterUserIdAndTypeOrderByCreatedAtDesc(
-                    actualReporterUserId, type, pageable,
+                    actualReporterUserId, normalizedType, pageable,
                 )
             // 按用户
             actualReporterUserId != null ->
@@ -187,14 +212,14 @@ class FeedbackReportService(
                     actualReporterUserId, pageable,
                 )
             // 按状态+类型
-            status != null && type != null ->
-                feedbackTicketRepository.findByStatusAndTypeOrderByCreatedAtDesc(status, type, pageable)
+            normalizedStatus != null && normalizedType != null ->
+                feedbackTicketRepository.findByStatusAndTypeOrderByCreatedAtDesc(normalizedStatus, normalizedType, pageable)
             // 按状态
-            status != null ->
-                feedbackTicketRepository.findByStatusOrderByCreatedAtDesc(status, pageable)
+            normalizedStatus != null ->
+                feedbackTicketRepository.findByStatusOrderByCreatedAtDesc(normalizedStatus, pageable)
             // 按类型
-            type != null ->
-                feedbackTicketRepository.findByTypeOrderByCreatedAtDesc(type, pageable)
+            normalizedType != null ->
+                feedbackTicketRepository.findByTypeOrderByCreatedAtDesc(normalizedType, pageable)
             // 全部
             else ->
                 feedbackTicketRepository.findAllByOrderByCreatedAtDesc(pageable)
@@ -344,7 +369,7 @@ class FeedbackReportService(
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "无权操作该工单")
         }
 
-        val newStatus = request.status
+        val newStatus = request.status.trim().uppercase()
         if (newStatus !in VALID_STATUSES) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的状态: $newStatus")
         }
@@ -437,8 +462,8 @@ class FeedbackReportService(
     private fun countPendingMessagesAfterLastAdminReply(ticket: FeedbackTicket): Int {
         val lastAdminIndex = ticket.messages.lastIndexOfLast { it.senderKind == "ADMIN" }
         if (lastAdminIndex < 0) {
-            // 没有管理员回复, 统计所有提交人消息
-            return ticket.messages.count { it.senderKind == "REPORTER" }
+            // 首条消息已包含在工单创建请求中, 只统计后续补充消息
+            return (ticket.messages.count { it.senderKind == "REPORTER" } - 1).coerceAtLeast(0)
         }
         // 统计最后一条管理员回复之后的提交人消息数
         return ticket.messages.drop(lastAdminIndex + 1).count { it.senderKind == "REPORTER" }
@@ -481,7 +506,8 @@ class FeedbackReportService(
         val pendingCount = if (ticket.status == "OPEN" && isReporter) {
             countPendingMessagesAfterLastAdminReply(ticket)
         } else 0
-        val canAppend = ticket.status == "OPEN" && (isReporter || userService.hasAdminPrivileges(currentUserId))
+        val isAdmin = userService.hasAdminPrivileges(currentUserId)
+        val canAppend = ticket.status == "OPEN" && (isAdmin || (isReporter && pendingCount < PENDING_LIMIT))
 
         val messageResponses = ticket.messages.map { msg ->
             val authorInfo = hubUserInfoService.get(msg.authorUserId)
