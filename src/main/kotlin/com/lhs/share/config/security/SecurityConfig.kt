@@ -1,5 +1,6 @@
 package com.lhs.share.config.security
 
+import jakarta.servlet.DispatcherType
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -51,6 +52,9 @@ class SecurityConfig(
 
         http.authorizeHttpRequests { authorize ->
             authorize
+                // 首次 REQUEST 已完成鉴权；SSE 完成/异常后的容器二次调度不能再次改写已提交响应。
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR)
+                .permitAll()
                 .requestMatchers(*URL_WHITELIST)
                 .anonymous()
                 .requestMatchers(*URL_PERMIT_ALL)

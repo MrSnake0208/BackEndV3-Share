@@ -347,6 +347,22 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `scope update returns not found when token account was deleted`() {
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns entity()
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns null
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u1", "token-id", listOf("inventory:write"))
+        }
+
+        assertEquals(404, error.statusCode)
+        assertEquals("子账号不存在", error.message)
+        verify(exactly = 0) { tokenRepository.save(any()) }
+        verify(exactly = 0) { redisCache.delete(any()) }
+        verify(exactly = 0) { redisCache.setCache(any(), any<Any>(), any()) }
+    }
+
+    @Test
     fun `account revocation clears every bound token regardless of legacy kind`() {
         every { tokenRepository.findAllByUserIdAndAccountId("u1", "main") } returns
             listOf(

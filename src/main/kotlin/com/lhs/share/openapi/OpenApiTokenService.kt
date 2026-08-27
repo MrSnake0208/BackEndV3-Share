@@ -6,13 +6,10 @@ import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.util.UUID
-
-private val log = KotlinLogging.logger { }
 
 /**
  * 第三方 API Token 服务
@@ -136,9 +133,8 @@ class OpenApiTokenService(
         val permissions = parseScopes(scopes)
         val entity = tokenRepository.findByIdAndUserId(tokenId, userId)
             ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
-        val accountName = checkNotNull(accountRepository.findByUserIdAndAccountId(userId, entity.accountId)) {
-            "Token references a missing account"
-        }.name
+        val accountName = accountRepository.findByUserIdAndAccountId(userId, entity.accountId)?.name
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
         val updated = entity.copy(scope = permissions.map { it.code })
 
         // 鉴权优先读无过期 Redis 缓存，因此必须先删除旧权限，再更新持久化权威来源并回填新权限。
@@ -165,11 +161,7 @@ class OpenApiTokenService(
         // 历史脏数据可能残留指向已不存在子账号的 token(如旧版按 kind 撤销的遗漏、统一子账号迁移
         // 未校验 token 引用)。这类 token 无法解析账号名,但保留在列表里让用户仍可看到并删除,
         // 而不是让一条脏数据把整个用户的列表打成 500。
-        val account = accountRepository.findByUserIdAndAccountId(userId, token.accountId)
-        if (account == null) {
-            log.warn { "Token ${token.id} references a missing account (userId=$userId, accountId=${token.accountId}); shown as deleted" }
-        }
-        val accountName = account?.name ?: DELETED_ACCOUNT_NAME
+        val accountName = accountRepository.findByUserIdAndAccountId(userId, token.accountId)?.name ?: DELETED_ACCOUNT_NAME
         OpenApiTokenListItemDto(
             tokenId = checkNotNull(token.id) { "Token document has no id" },
             accountId = token.accountId,
