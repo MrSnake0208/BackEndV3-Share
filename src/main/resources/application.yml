@@ -3,10 +3,10 @@ spring:
     active: dev
   servlet:
     multipart:
-      # 最大文件阈值
-      max-file-size: 500KB
+      # 最大文件阈值(媒体上传支持最大 10MB)
+      max-file-size: 12MB
       # 最大请求阈值
-      max-request-size: 500KB
+      max-request-size: 12MB
   jackson:
     property-naming-strategy: SNAKE_CASE
     date-format: yyyy-MM-dd'T'HH:mm:ss'Z'
@@ -66,6 +66,9 @@ share:
   avatar:
     # 密探头像文件目录(存放 {operatorId}.webp;application-local.yml 同步保留默认值即可)
     dir: ${SHARE_AVATAR_DIR:./data/avatar}
+  media:
+    # 媒体文件存储目录(存放 med_xxx.{jpg,png,webp};生产用环境变量 SHARE_MEDIA_DIR 覆盖)
+    dir: ${SHARE_MEDIA_DIR:./data/media}
   mails:
     # 邮件服务器 SMTP 配置(可配置多个,发送时轮询)
     # - host: smtp.qq.com

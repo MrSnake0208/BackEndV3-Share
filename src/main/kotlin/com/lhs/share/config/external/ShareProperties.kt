@@ -28,6 +28,8 @@ data class ShareProperties(
     var ledger: Ledger = Ledger(),
     @NestedConfigurationProperty
     var avatar: Avatar = Avatar(),
+    @NestedConfigurationProperty
+    var media: Media = Media(),
 ) {
     /**
      * JWT 配置
@@ -125,5 +127,19 @@ data class ShareProperties(
          * 生产用环境变量 SHARE_AVATAR_DIR / Docker volume 覆盖
          */
         var dir: String = "./data/avatar",
+    )
+
+    /**
+     * 媒体文件上传配置
+     */
+    data class Media(
+        /**
+         * 媒体文件存储目录,生产用环境变量 SHARE_MEDIA_DIR / Docker volume 覆盖
+         */
+        var dir: String = "./data/media",
+        /**
+         * 单文件大小上限(字节),默认 10MB
+         */
+        var maxSize: Long = 10 * 1024 * 1024,
     )
 }
