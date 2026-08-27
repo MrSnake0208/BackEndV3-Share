@@ -13,6 +13,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -181,6 +182,168 @@ class OpenApiTokenServiceTest {
 
         verify { redisCache.delete("open-api-token:tok123") }
         verify { tokenRepository.deleteById("token-id") }
+    }
+
+    @Test
+    fun `scope update adds permission while preserving token and all other fields`() {
+        val original = entity(scope = listOf(20004, 10002)).copy(
+            kind = "OPERATOR",
+            lastUsedAt = Instant.parse("2026-08-24T07:00:00Z"),
+        )
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns original
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        val saved = slot<OpenApiToken>()
+        every { tokenRepository.save(capture(saved)) } answers { saved.captured }
+        val cached = slot<TokenCacheData>()
+        every { redisCache.setCache("open-api-token:tok123", capture(cached), 0) } just runs
+
+        val response = service.updateScopes(
+            "u1",
+            "token-id",
+            listOf("operator:scan:write", "inventory:write", "inventory:read"),
+        )
+
+        assertEquals(original.copy(scope = listOf(20004, 10002, 10001)), saved.captured)
+        assertEquals("tok123", saved.captured.token)
+        assertEquals("token-id", response.tokenId)
+        assertEquals("main", response.accountId)
+        assertEquals("大号", response.accountName)
+        assertEquals("note", response.remark)
+        assertEquals(
+            listOf("operator:scan:write", "inventory:write", "inventory:read"),
+            response.scopes,
+        )
+        assertEquals(Instant.parse("2023-11-14T22:13:20Z"), response.createdAt)
+        assertEquals(
+            TokenCacheData(
+                userId = "u1",
+                accountId = "main",
+                scope = listOf(20004, 10002, 10001),
+                createTime = original.createTime.toEpochMilli(),
+            ),
+            cached.captured,
+        )
+        verifyOrder {
+            redisCache.delete("open-api-token:tok123")
+            tokenRepository.save(any())
+            redisCache.setCache("open-api-token:tok123", any<TokenCacheData>(), 0)
+        }
+    }
+
+    @Test
+    fun `scope update removes permission from Mongo and Redis`() {
+        val original = entity(scope = listOf(20004, 10002, 10001))
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns original
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        val saved = slot<OpenApiToken>()
+        every { tokenRepository.save(capture(saved)) } answers { saved.captured }
+        val cached = slot<TokenCacheData>()
+        every { redisCache.setCache("open-api-token:tok123", capture(cached), 0) } just runs
+
+        val response = service.updateScopes(
+            "u1",
+            "token-id",
+            listOf("operator:scan:write", "inventory:write"),
+        )
+
+        assertEquals(listOf(20004, 10002), saved.captured.scope)
+        assertEquals(listOf(20004, 10002), cached.captured.scope)
+        assertEquals(listOf("operator:scan:write", "inventory:write"), response.scopes)
+        assertFalse(saved.captured.scope.contains(10001))
+        assertFalse(cached.captured.scope.contains(10001))
+    }
+
+    @Test
+    fun `scope update cache write failure cannot restore the old cached permissions`() {
+        val original = entity(scope = listOf(10001))
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns original
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        every { tokenRepository.save(any()) } answers { firstArg() }
+        every { redisCache.setCache("open-api-token:tok123", any<TokenCacheData>(), 0) } throws
+            IllegalStateException("Redis unavailable")
+
+        assertThrows(IllegalStateException::class.java) {
+            service.updateScopes("u1", "token-id", listOf("inventory:write"))
+        }
+
+        verifyOrder {
+            redisCache.delete("open-api-token:tok123")
+            tokenRepository.save(original.copy(scope = listOf(10002)))
+            redisCache.setCache("open-api-token:tok123", any<TokenCacheData>(), 0)
+        }
+    }
+
+    @Test
+    fun `scope update cannot modify another user's token`() {
+        every { tokenRepository.findByIdAndUserId("token-id", "u2") } returns null
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u2", "token-id", listOf("inventory:read"))
+        }
+
+        assertEquals(404, error.statusCode)
+        verify(exactly = 0) { tokenRepository.save(any()) }
+        verify(exactly = 0) { redisCache.delete(any()) }
+        verify(exactly = 0) { redisCache.setCache(any(), any<Any>(), any()) }
+    }
+
+    @Test
+    fun `scope update returns 404 when token does not exist`() {
+        every { tokenRepository.findByIdAndUserId("missing", "u1") } returns null
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u1", "missing", listOf("inventory:read"))
+        }
+
+        assertEquals(404, error.statusCode)
+    }
+
+    @Test
+    fun `scope update rejects empty scopes`() {
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u1", "token-id", emptyList())
+        }
+
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun `scope update rejects duplicate scopes`() {
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u1", "token-id", listOf("inventory:read", "inventory:read"))
+        }
+
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun `scope update rejects unknown scopes`() {
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateScopes("u1", "token-id", listOf("inventory:admin"))
+        }
+
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun `scope update allows mixed inventory and operator permissions`() {
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns entity()
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+        val saved = slot<OpenApiToken>()
+        every { tokenRepository.save(capture(saved)) } answers { saved.captured }
+
+        val response = service.updateScopes(
+            "u1",
+            "token-id",
+            listOf("inventory:write", "operator:scan:write"),
+        )
+
+        assertEquals(listOf(10002, 20004), saved.captured.scope)
+        assertEquals(listOf("inventory:write", "operator:scan:write"), response.scopes)
     }
 
     @Test

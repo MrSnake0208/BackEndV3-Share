@@ -8,4 +8,6 @@ class OperatorApiException(
     override val message: String,
     val recordId: String? = null,
     val entryId: String? = null,
+    val operatorId: String? = null,
+    val fieldPath: String? = null,
 ) : RuntimeException(message)

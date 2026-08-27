@@ -14,9 +14,11 @@ import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDt
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
 import com.lhs.share.hub.repository.entity.InventoryRecord
+import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.StockEntry
@@ -41,8 +43,8 @@ private val log = KotlinLogging.logger { }
 /**
  * 库存与奖励服务(HubBackend.inventory_current / inventory_records)
  *
- * 系统只维护两类事实:current_stock(可被背包快照覆盖的绝对库存)与
- * reward_delta(奖励增量流水,仅用于幂等、延迟上报与历史统计)。
+ * 系统维护 current_stock、外部 reward_delta/stock_snapshot，以及只由升级事务
+ * 生成的 consumption_delta。获得量统计仍只读取 reward_delta。
  *
  * 整份文档先完成协议、目录和幂等冲突预检,再在 Hub Mongo transaction 中同时
  * 写入 inventory_records 与 inventory_current。部署 MongoDB 必须支持 transaction。
@@ -55,6 +57,7 @@ class InventoryService(
     private val catalogService: EntityCatalogService,
     @param:Qualifier("hubMongoTemplate") private val hubMongoTemplate: MongoTemplate,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
+    private val inventoryRevisionRepository: InventoryRevisionRepository? = null,
 ) {
     // ==================== import ====================
 
@@ -96,6 +99,7 @@ class InventoryService(
                         var duplicates = 0
                         var historyOnly = 0
                         var superseded = 0
+                        val changedAccounts = mutableSetOf<String>()
                         prepared.forEach { item ->
                             if (item.duplicate) {
                                 duplicates++
@@ -109,11 +113,15 @@ class InventoryService(
                                         superseded++
                                         accepted++
                                     }
-                                    Effect.APPLIED -> accepted++
+                                    Effect.APPLIED -> {
+                                        accepted++
+                                        changedAccounts += item.validated.record.accountId
+                                    }
                                     Effect.DUPLICATE -> error("Duplicate records are removed during preflight")
                                 }
                             }
                         }
+                        changedAccounts.forEach { bumpInventoryRevision(userId, it) }
                         InventoryImportResult(accepted, duplicates, historyOnly, superseded)
                     },
                 )
@@ -523,6 +531,14 @@ class InventoryService(
         requireAccount(userId, accountId)
         val record = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
             ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "record_not_found", "Record not found", recordId)
+        if (record.recordType == CONSUMPTION_DELTA) {
+            throw InventoryApiException(
+                HttpStatus.CONFLICT,
+                "consumption_record_delete_forbidden",
+                "Upgrade consumption records cannot be deleted without rolling back the operator upgrade",
+                recordId,
+            )
+        }
         val entityType = record.entityType
 
         transactionTemplate.executeWithoutResult {
@@ -534,9 +550,16 @@ class InventoryService(
                 .filter { it.entityType == entityType }
                 .sortedWith(
                     compareBy<InventoryRecord> { it.effectiveAt }
-                        .thenBy { if (it.recordType == REWARD_DELTA) 0 else 1 },
+                        .thenBy {
+                            when (it.recordType) {
+                                REWARD_DELTA -> 0
+                                STOCK_SNAPSHOT -> 1
+                                else -> 2
+                            }
+                        },
                 )
             remaining.forEach { replayRecord(userId, accountId, it) }
+            bumpInventoryRevision(userId, accountId)
             log.info {
                 "删除库存记录并重放完成: userId=$userId, accountId=$accountId, recordId=$recordId, " +
                     "entityType=$entityType, 重放 ${remaining.size} 条"
@@ -562,8 +585,25 @@ class InventoryService(
                     applySnapshotToCurrent(userId, accountId, entity, comp)
                 }
             }
+            CONSUMPTION_DELTA -> applyConsumptionDelta(userId, accountId, entity)
             else -> throw IllegalStateException("已落库记录类型非法: ${entity.recordType}")
         }
+    }
+
+    private fun applyConsumptionDelta(userId: String, accountId: String, entity: InventoryRecord) {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
+            ?: throw IllegalStateException("Consumption replay has no ${entity.entityType} inventory baseline")
+        val entries = current.entries.toMutableMap()
+        entity.entries.forEach { consumed ->
+            val old = entries[consumed.id]
+                ?: throw IllegalStateException("Consumption replay is missing inventory entry ${consumed.id}")
+            if (old.count < consumed.count) {
+                throw IllegalStateException("Consumption replay would make inventory negative for ${consumed.id}")
+            }
+            entries[consumed.id] = old.copy(count = old.count - consumed.count)
+        }
+        currentRepository.save(current.copy(entries = entries, updatedAt = entity.effectiveAt))
+        if (entity.stockEffect != APPLIED) recordRepository.save(entity.copy(stockEffect = APPLIED))
     }
 
     /**
@@ -828,6 +868,20 @@ class InventoryService(
         return max
     }
 
+    private fun bumpInventoryRevision(userId: String, accountId: String) {
+        val repository = inventoryRevisionRepository ?: return
+        val current = repository.findByUserIdAndAccountId(userId, accountId)
+        repository.save(
+            InventoryRevision(
+                id = "$userId:$accountId",
+                userId = userId,
+                accountId = accountId,
+                revision = (current?.revision ?: 0) + 1,
+                updatedAt = Instant.now(),
+            ),
+        )
+    }
+
     private data class ValidatedRecord(
         val record: InventoryRecordRequest,
         val effectiveAt: Instant,
@@ -889,6 +943,7 @@ class InventoryService(
         private const val FORMAT = "myshare-inventory-exchange"
         private const val REWARD_DELTA = "reward_delta"
         private const val STOCK_SNAPSHOT = "stock_snapshot"
+        private const val CONSUMPTION_DELTA = "consumption_delta"
         private const val ENTITY_ITEM = "item"
         private const val ENTITY_AGENT = "agent"
         private const val SNAPSHOT_FULL = "full"

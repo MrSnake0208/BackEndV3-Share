@@ -12,9 +12,11 @@ import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
+import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
 import com.lhs.share.hub.repository.entity.InventoryRecord
+import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -46,11 +48,13 @@ class InventoryServiceTest {
     private val accountRepository = mockk<SubAccountRepository>()
     private val currentRepository = mockk<InventoryCurrentRepository>()
     private val recordRepository = mockk<InventoryRecordRepository>()
+    private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val catalogService = mockk<EntityCatalogService>()
     private val mongoTemplate = mockk<MongoTemplate>()
     private val accounts = mutableMapOf<Pair<String, String>, SubAccount>()
     private val currents = mutableMapOf<Triple<String, String, String>, InventoryCurrent>()
     private val records = mutableMapOf<Triple<String, String, String>, InventoryRecord>()
+    private val revisions = mutableMapOf<Pair<String, String>, InventoryRevision>()
     private var nextRecordId = 1
 
     private val transactionTemplate = TransactionTemplate(
@@ -70,6 +74,7 @@ class InventoryServiceTest {
         currents.clear()
         records.clear()
         accounts.clear()
+        revisions.clear()
         accounts["u1" to "main"] = SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
         accounts["u1" to "alt"] = SubAccount(id = "a2", userId = "u1", accountId = "alt", name = "小号")
         accounts["u2" to "main"] = SubAccount(id = "a3", userId = "u2", accountId = "main", name = "导入账号")
@@ -130,6 +135,12 @@ class InventoryServiceTest {
             val accountId = secondArg<String>()
             records.values.filter { it.userId == userId && it.accountId == accountId }.sortedByDescending { it.effectiveAt }
         }
+        every { revisionRepository.findByUserIdAndAccountId(any(), any()) } answers {
+            revisions[firstArg<String>() to secondArg<String>()]
+        }
+        every { revisionRepository.save(any()) } answers {
+            firstArg<InventoryRevision>().also { revisions[it.userId to it.accountId] = it }
+        }
         service = InventoryService(
             accountRepository,
             currentRepository,
@@ -137,6 +148,7 @@ class InventoryServiceTest {
             catalogService,
             mongoTemplate,
             transactionTemplate,
+            revisionRepository,
         )
     }
 
@@ -188,6 +200,16 @@ class InventoryServiceTest {
         assertEquals(12, count("u1", "baijinbi"))
         assertEquals(7, count("u1", "baimozhijiu"))
         assertEquals(5, records[Triple("u1", "main", "r1")]!!.entries.single().count)
+    }
+
+    @Test
+    fun `inventory revision advances only when an import changes current stock`() {
+        service.import("u1", document(snapshot("full", "2026-08-16T11:00:00Z", "full", entry("baijinbi", 10))))
+        service.import("u1", document(reward("history", "2026-08-16T10:00:00Z", "baijinbi", 2)))
+        service.import("u1", document(reward("applied", "2026-08-16T12:00:00Z", "baijinbi", 2)))
+
+        assertEquals(2, revisions.getValue("u1" to "main").revision)
+        assertEquals("history_only", records.getValue(Triple("u1", "main", "history")).stockEffect)
     }
 
     @Test
@@ -457,6 +479,52 @@ class InventoryServiceTest {
         assertEquals("u1", match.getString("userId"))
         assertEquals("alt", match.getString("accountId"))
         assertEquals("reward_delta", match.getString("recordType"))
+    }
+
+    @Test
+    fun `consumption delta replays as subtraction and cannot be deleted independently`() {
+        val snapshot = InventoryRecord(
+            id = "snapshot-id",
+            recordId = "snapshot",
+            userId = "u1",
+            accountId = "main",
+            recordType = "stock_snapshot",
+            entityType = "item",
+            snapshotScope = "full",
+            effectiveAt = Instant.parse("2026-08-16T10:00:00Z"),
+            producer = ProducerInfo("test"),
+            entries = listOf(RecordEntry("baijinbi", count = 10)),
+        )
+        val consumption = InventoryRecord(
+            id = "consumption-id",
+            recordId = "upgrade:tx:item",
+            userId = "u1",
+            accountId = "main",
+            recordType = "consumption_delta",
+            entityType = "item",
+            effectiveAt = Instant.parse("2026-08-16T11:00:00Z"),
+            producer = ProducerInfo("myshare"),
+            entries = listOf(RecordEntry("baijinbi", count = 4)),
+            transactionId = "tx",
+        )
+        val removable = storedRecord("remove-id", "remove", "2026-08-16T09:00:00Z")
+        listOf(snapshot, consumption, removable).forEach { records[Triple(it.userId, it.accountId, it.recordId)] = it }
+        currents[Triple("u1", "main", "item")] = InventoryCurrent(
+            id = "current",
+            userId = "u1",
+            accountId = "main",
+            entityType = "item",
+            entries = mapOf("baijinbi" to com.lhs.share.hub.repository.entity.StockEntry(7)),
+        )
+
+        service.deleteRecord("u1", "main", "remove")
+        assertEquals(6, count("u1", "baijinbi"))
+
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.deleteRecord("u1", "main", "upgrade:tx:item")
+        }
+        assertEquals("consumption_record_delete_forbidden", error.code)
+        assertEquals(6, count("u1", "baijinbi"))
     }
 
     @Test
