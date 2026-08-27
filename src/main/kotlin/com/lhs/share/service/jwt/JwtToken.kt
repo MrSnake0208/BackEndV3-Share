@@ -2,6 +2,7 @@ package com.lhs.share.service.jwt
 
 import cn.hutool.json.JSONObject
 import cn.hutool.jwt.JWT
+import cn.hutool.jwt.JWTException
 import cn.hutool.jwt.JWTUtil
 import cn.hutool.jwt.RegisteredPayload
 import java.time.Instant
@@ -15,8 +16,12 @@ open class JwtToken {
     private val payload: JSONObject
 
     constructor(token: String, requiredType: String, key: ByteArray) {
-        if (!JWTUtil.verify(token, key)) throw JwtInvalidException()
-        this.jwt = JWTUtil.parseToken(token)
+        this.jwt = try {
+            if (!JWTUtil.verify(token, key)) throw JwtInvalidException()
+            JWTUtil.parseToken(token)
+        } catch (_: JWTException) {
+            throw JwtInvalidException()
+        }
         jwt.setKey(key)
         this.payload = jwt.payloads
 
