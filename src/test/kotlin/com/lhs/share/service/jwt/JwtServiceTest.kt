@@ -32,6 +32,13 @@ class JwtServiceTest {
     }
 
     @Test
+    fun `格式错误的 refresh token 抛出 JwtInvalidException`() {
+        assertThrows(JwtInvalidException::class.java) {
+            jwtService.verifyAndParseRefreshToken("invalid")
+        }
+    }
+
+    @Test
     fun `伪造 token 抛出 JwtInvalidException`() {
         val token = jwtService.issueAuthToken("user-1", null, emptyList())
         val tampered = token.value.dropLast(4) + "xxxx"
