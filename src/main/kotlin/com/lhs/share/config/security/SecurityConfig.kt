@@ -107,6 +107,7 @@ class SecurityConfig(
                 "/v1/inventory/catalog",
                 "/v1/operator/catalog",
                 "/avatar/**",
+                "/media/**",
                 "/user/open-api/permissions",
                 "/open-api/**",
             )

@@ -363,6 +363,24 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `token list tolerates a missing account with a placeholder name`() {
+        every { tokenRepository.findByUserIdOrderByCreateTimeDesc("u1") } returns listOf(
+            entity(accountId = "gone"),
+            entity(id = "alive", token = "tok456", accountId = "main"),
+        )
+        every { accountRepository.findByUserIdAndAccountId("u1", "gone") } returns null
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
+
+        val items = service.list("u1")
+
+        assertEquals(2, items.size)
+        assertEquals("gone", items[0].accountId)
+        assertEquals("已删除账号", items[0].accountName)
+        assertEquals("大号", items[1].accountName)
+    }
+
+    @Test
     fun `token list uses DTO and never exposes secret or integer scopes`() {
         every { tokenRepository.findByUserIdOrderByCreateTimeDesc("u1") } returns listOf(
             entity(scope = listOf(10001, 10002, 10003)),
