@@ -1,6 +1,5 @@
 package com.lhs.share.hub.controller.report.response
 
-import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import java.time.Instant
 
 /**
@@ -36,8 +35,8 @@ data class FeedbackMessageResponse(
  * 反馈工单响应
  *
  * @property id 工单 id: rpt_<hex>
- * @property type REPORT | FEEDBACK
- * @property category 分类
+ * @property type BUG / FEATURE / CONTENT / ACCOUNT / REPORT / OTHER
+ * @property category 反馈归属板块
  * @property status OPEN / RESOLVED / DISMISSED
  * @property content 首条正文
  * @property messages 消息列表
@@ -53,11 +52,14 @@ data class FeedbackReportResponse(
     val id: String,
     val type: String,
     val category: String?,
+    val area: String,
     val status: String,
     val content: String,
     val messages: List<FeedbackMessageResponse>,
+    val hasAdminReply: Boolean,
     val quota: QuotaInfo,
     val viewerIsReporter: Boolean,
+    val viewerCanManage: Boolean,
     val clientInfo: ClientInfoResponse?,
     val reporter: UserInfo,
     val handler: UserInfo?,
@@ -102,6 +104,7 @@ data class FeedbackReportListItem(
     val id: String,
     val type: String,
     val category: String?,
+    val area: String,
     val status: String,
     val content: String,
     val hasAdminReply: Boolean,
