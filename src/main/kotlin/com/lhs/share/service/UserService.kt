@@ -221,6 +221,9 @@ class UserService(
 
     fun search(userName: String, pageable: Pageable): Page<MaaUserInfo> = userRepository.searchUsers(userName, pageable)
 
+    fun searchFeedbackAccessUsers(query: String, pageable: Pageable): Page<MaaUser> =
+        userRepository.searchFeedbackAccessUsers(query, pageable)
+
     fun hasAdminPrivileges(userId: String?): Boolean = !userId.isNullOrBlank() && findByUserIdOrDefault(userId).status >= ADMIN_STATUS
 
     class UserDict(users: List<MaaUser>) {
