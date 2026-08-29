@@ -10,7 +10,6 @@ import com.lhs.share.hub.controller.report.request.FeedbackStatusUpdateRequest
 import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
 import com.lhs.share.hub.service.report.FeedbackReportService
-import com.lhs.share.service.UserService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
@@ -34,7 +33,6 @@ import org.springframework.web.bind.annotation.RestController
 class FeedbackReportController(
     private val feedbackReportService: FeedbackReportService,
     private val helper: AuthenticationHelper,
-    private val userService: UserService,
 ) {
     /**
      * 创建反馈工单
@@ -58,6 +56,9 @@ class FeedbackReportController(
         @RequestParam(defaultValue = "20") pageSize: Int,
         @RequestParam(required = false) status: String?,
         @RequestParam(required = false) type: String?,
+        @RequestParam(required = false) category: String?,
+        /** 第一版参数，使用 category 代替。 */
+        @RequestParam(required = false) area: String?,
         @RequestParam(defaultValue = "true") mine: Boolean,
         @RequestParam(required = false) reporterUserId: String?,
         @RequestParam(required = false) q: String?,
@@ -65,21 +66,15 @@ class FeedbackReportController(
         @RequestParam(defaultValue = "desc") sortOrder: String,
     ): ApiResult<FeedbackReportListResponse> {
         val userId = helper.requireUserId()
-        val isAdmin = userService.hasAdminPrivileges(userId)
-
-        // 非管理员请求查看全部(mine=false) → 403
-        if (!mine && !isAdmin) {
-            return ApiResult.fail(403, "无权查看全部工单")
-        }
-
         return success(
             feedbackReportService.list(
                 currentUserId = userId,
-                isAdmin = isAdmin,
                 page = page,
                 pageSize = pageSize,
                 status = status,
                 type = type,
+                category = category,
+                area = area,
                 mine = mine,
                 reporterUserId = reporterUserId,
                 keyword = q,
@@ -111,8 +106,7 @@ class FeedbackReportController(
         @Valid @RequestBody request: FeedbackMessageAppendRequest,
     ): ApiResult<FeedbackReportResponse> {
         val userId = helper.requireUserId()
-        val isAdmin = userService.hasAdminPrivileges(userId)
-        return success(feedbackReportService.appendMessage(userId, id, request, isAdmin))
+        return success(feedbackReportService.appendMessage(userId, id, request))
     }
 
     /**
@@ -121,12 +115,8 @@ class FeedbackReportController(
     @Operation(summary = "更新工单状态")
     @RequireJwt
     @PatchMapping("/{id}/status")
-    fun updateStatus(
-        @PathVariable id: String,
-        @RequestBody request: FeedbackStatusUpdateRequest,
-    ): ApiResult<FeedbackReportResponse> {
+    fun updateStatus(@PathVariable id: String, @RequestBody request: FeedbackStatusUpdateRequest): ApiResult<FeedbackReportResponse> {
         val userId = helper.requireUserId()
-        val isAdmin = userService.hasAdminPrivileges(userId)
-        return success(feedbackReportService.updateStatus(userId, id, request, isAdmin))
+        return success(feedbackReportService.updateStatus(userId, id, request))
     }
 }

@@ -14,8 +14,9 @@ import java.time.Instant
  * 状态机: OPEN → RESOLVED / DISMISSED
  *
  * @property id 工单 id: rpt_<hex>
- * @property type REPORT | FEEDBACK(第一期仅 FEEDBACK)
- * @property category 分类: FEATURE / BUG / CONTENT / ACCOUNT / OTHER
+ * @property type 反馈类型: BUG / FEATURE / CONTENT / ACCOUNT / REPORT / OTHER
+ * @property category 反馈归属板块
+ * @property area 旧版板块字段；过渡期与 category 双写
  * @property status OPEN / RESOLVED / DISMISSED
  * @property reporterUserId 提交人用户 id
  * @property handlerUserId 最近处理管理员用户 id
@@ -34,16 +35,20 @@ import java.time.Instant
  */
 @Document("feedback_tickets")
 @CompoundIndex(name = "idx_reporter_created", def = "{'reporterUserId': 1, 'createdAt': -1}")
-@CompoundIndex(name = "idx_status_type_created", def = "{'status': 1, 'type': 1, 'createdAt': -1}")
+@CompoundIndex(name = "idx_status_area_created", def = "{'status': 1, 'area': 1, 'createdAt': -1}")
+@CompoundIndex(name = "idx_status_type_category_created", def = "{'status': 1, 'type': 1, 'category': 1, 'createdAt': -1}")
 data class FeedbackTicket(
     @Id
     val id: String? = null,
 
-    /** 工单类型: REPORT | FEEDBACK */
+    /** 反馈类型；FEEDBACK 仅兼容旧数据。 */
     val type: String,
 
-    /** 分类: FEATURE / BUG / CONTENT / ACCOUNT / OTHER */
+    /** 反馈归属板块。 */
     val category: String? = null,
+
+    /** 旧版反馈归属板块；新记录与 category 双写，旧文档可为空。 */
+    val area: String? = null,
 
     /** 状态: OPEN / RESOLVED / DISMISSED */
     val status: String = "OPEN",
