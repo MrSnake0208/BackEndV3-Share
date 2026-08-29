@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.report
 
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
+import com.lhs.share.repository.entity.MaaUser
 import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.Optional
+import org.springframework.data.domain.PageImpl
 
 class FeedbackAccessServiceTest {
     private val repository = mockk<FeedbackAccessGrantRepository>()
@@ -50,8 +52,8 @@ class FeedbackAccessServiceTest {
     @Test
     fun `更新授权分别保存接收与管理模块`() {
         every { userService.hasAdminPrivileges("root") } returns true
-        every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人")
-        every { userService.get("manager") } returns MaaUserInfo("manager", "处理人")
+        every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
+        every { userService.get("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
         every { repository.save(any()) } answers { firstArg() }
 
         val response = service.updateGrant(
@@ -70,13 +72,49 @@ class FeedbackAccessServiceTest {
     @Test
     fun `更新授权拒绝未知模块`() {
         every { userService.hasAdminPrivileges("root") } returns true
-        every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人")
+        every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
 
         assertThrows(ApiResultException::class.java) {
             service.updateGrant(
                 "root",
                 "manager",
                 FeedbackAccessUpdateRequest(receiveAreas = setOf("UNKNOWN")),
+            )
+        }
+    }
+
+    @Test
+    fun `超级管理员可按用户名或邮箱搜索已激活候选`() {
+        every { userService.hasAdminPrivileges("root") } returns true
+        every { userService.searchFeedbackAccessUsers(any(), any()) } returns PageImpl(
+            listOf(
+                MaaUser(
+                    userId = "user-1",
+                    userName = "alice",
+                    email = "alice@example.com",
+                    password = "unused",
+                    status = 1,
+                ),
+            ),
+        )
+
+        val candidates = service.searchUserCandidates("root", "alice+@example.com", 1, 10)
+
+        assertEquals(1, candidates.size)
+        assertEquals("alice@example.com", candidates.single().email)
+        assertTrue(candidates.single().activated)
+    }
+
+    @Test
+    fun `更新授权拒绝未激活用户`() {
+        every { userService.hasAdminPrivileges("root") } returns true
+        every { userService.getRequired("disabled") } returns MaaUserInfo("disabled", "已禁用")
+
+        assertThrows(ApiResultException::class.java) {
+            service.updateGrant(
+                "root",
+                "disabled",
+                FeedbackAccessUpdateRequest(receiveAreas = setOf(FeedbackArea.OPERATOR)),
             )
         }
     }

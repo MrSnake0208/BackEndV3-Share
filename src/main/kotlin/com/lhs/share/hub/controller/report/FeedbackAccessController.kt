@@ -7,12 +7,14 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.controller.report.response.CurrentFeedbackAccessResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
+import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
 import com.lhs.share.hub.service.report.FeedbackAccessService
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -26,6 +28,15 @@ class FeedbackAccessController(
 
     @GetMapping("/v1/admin/feedback-access")
     fun list(): ApiResult<List<FeedbackAccessGrantResponse>> = success(service.listGrants(helper.requireUserId()))
+
+    @GetMapping("/v1/admin/feedback-access/users")
+    fun searchUsers(
+        @RequestParam q: String,
+        @RequestParam page: Int = 1,
+        @RequestParam size: Int = 10,
+    ): ApiResult<List<FeedbackAccessUserCandidateResponse>> {
+        return success(service.searchUserCandidates(helper.requireUserId(), q, page, size))
+    }
 
     @PutMapping("/v1/admin/feedback-access/{userId}")
     fun update(@PathVariable userId: String, @RequestBody request: FeedbackAccessUpdateRequest): ApiResult<FeedbackAccessGrantResponse> {

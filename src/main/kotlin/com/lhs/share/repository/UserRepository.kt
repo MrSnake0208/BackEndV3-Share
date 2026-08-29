@@ -34,4 +34,8 @@ interface UserRepository : MongoRepository<MaaUser, String> {
      */
     @Query("{ 'userName': { '\$regex': ?0, '\$options': 'i' }, 'status': 1 }")
     fun searchUsers(userName: String, pageable: Pageable): Page<MaaUserInfo>
+
+    /** 反馈权限配置专用搜索: 不复用公开用户信息接口, 只查已激活用户。 */
+    @Query("{ '\$or': [ { 'userName': { '\$regex': ?0, '\$options': 'i' } }, { 'email': { '\$regex': ?0, '\$options': 'i' } } ], 'status': 1 }")
+    fun searchFeedbackAccessUsers(query: String, pageable: Pageable): Page<MaaUser>
 }

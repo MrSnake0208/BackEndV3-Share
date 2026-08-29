@@ -4,13 +4,16 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.controller.report.response.CurrentFeedbackAccessResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
+import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAreaOptionResponse
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.service.UserService
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
+import java.util.regex.Pattern
 
 @Service
 class FeedbackAccessService(
@@ -55,9 +58,30 @@ class FeedbackAccessService(
             .map(::toResponse)
     }
 
+    fun searchUserCandidates(adminUserId: String, query: String, page: Int, size: Int): List<FeedbackAccessUserCandidateResponse> {
+        requireSuperAdmin(adminUserId)
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "搜索关键词不能为空")
+        }
+        if (page < 1) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
+        }
+        if (size !in 1..10) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "size 必须在 1..10 之间")
+        }
+        val escapedQuery = Pattern.quote(normalizedQuery)
+        return userService.searchFeedbackAccessUsers(escapedQuery, PageRequest.of(page - 1, size))
+            .content
+            .map(::FeedbackAccessUserCandidateResponse)
+    }
+
     fun updateGrant(adminUserId: String, userId: String, request: FeedbackAccessUpdateRequest): FeedbackAccessGrantResponse {
         requireSuperAdmin(adminUserId)
-        userService.getRequired(userId)
+        val user = userService.getRequired(userId)
+        if (!user.activated) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "只能为已激活用户配置反馈权限")
+        }
         val receiveAreas = validateAreas(request.receiveCategories ?: request.receiveAreas)
         val manageAreas = validateAreas(request.manageCategories ?: request.manageAreas)
         val saved = repository.save(
