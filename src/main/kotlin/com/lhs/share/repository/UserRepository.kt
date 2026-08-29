@@ -19,6 +19,9 @@ interface UserRepository : MongoRepository<MaaUser, String> {
      */
     fun findByEmail(email: String): MaaUser?
 
+    /** 完整邮箱精确匹配, 忽略大小写。 */
+    fun findByEmailIgnoreCase(email: String): MaaUser?
+
     /**
      * 按 userId 查询用户
      */
@@ -35,7 +38,7 @@ interface UserRepository : MongoRepository<MaaUser, String> {
     @Query("{ 'userName': { '\$regex': ?0, '\$options': 'i' }, 'status': 1 }")
     fun searchUsers(userName: String, pageable: Pageable): Page<MaaUserInfo>
 
-    /** 反馈权限配置专用搜索: 不复用公开用户信息接口, 只查已激活用户。 */
-    @Query("{ '\$or': [ { 'userName': { '\$regex': ?0, '\$options': 'i' } }, { 'email': { '\$regex': ?0, '\$options': 'i' } } ], 'status': 1 }")
+    /** 反馈权限配置专用搜索: 不复用公开用户信息接口, 只查 status >= 1 的已激活用户。 */
+    @Query("{ '\$or': [ { 'userName': { '\$regex': ?0, '\$options': 'i' } }, { 'email': { '\$regex': ?0, '\$options': 'i' } } ], 'status': { '\$gte': 1 } }")
     fun searchFeedbackAccessUsers(query: String, pageable: Pageable): Page<MaaUser>
 }

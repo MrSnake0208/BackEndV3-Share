@@ -9,6 +9,7 @@ import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.service.UserService
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -86,6 +87,7 @@ class FeedbackAccessServiceTest {
     @Test
     fun `超级管理员可按用户名或邮箱搜索已激活候选`() {
         every { userService.hasAdminPrivileges("root") } returns true
+        every { userService.findFeedbackAccessUserByEmail("alice+@example.com") } returns null
         every { userService.searchFeedbackAccessUsers(any(), any()) } returns PageImpl(
             listOf(
                 MaaUser(
@@ -103,6 +105,39 @@ class FeedbackAccessServiceTest {
         assertEquals(1, candidates.size)
         assertEquals("alice@example.com", candidates.single().email)
         assertTrue(candidates.single().activated)
+    }
+
+    @Test
+    fun `完整邮箱优先精确匹配并忽略大小写且支持管理员账号`() {
+        every { userService.hasAdminPrivileges("root") } returns true
+        every { userService.findFeedbackAccessUserByEmail("YANGPEIDE0208@GMAIL.COM") } returns MaaUser(
+            userId = "user-1",
+            userName = "yangpeide",
+            email = "yangpeide0208@gmail.com",
+            password = "unused",
+            status = 2,
+        )
+
+        val candidates = service.searchUserCandidates("root", " YANGPEIDE0208@GMAIL.COM ", 1, 10)
+
+        assertEquals("yangpeide", candidates.single().userName)
+        assertTrue(candidates.single().activated)
+        verify(exactly = 0) { userService.searchFeedbackAccessUsers(any(), any()) }
+    }
+
+    @Test
+    fun `候选搜索拒绝空关键词和非法分页`() {
+        every { userService.hasAdminPrivileges("root") } returns true
+
+        assertThrows(ApiResultException::class.java) {
+            service.searchUserCandidates("root", "   ", 1, 10)
+        }
+        assertThrows(ApiResultException::class.java) {
+            service.searchUserCandidates("root", "alice", 0, 10)
+        }
+        assertThrows(ApiResultException::class.java) {
+            service.searchUserCandidates("root", "alice", 1, 11)
+        }
     }
 
     @Test

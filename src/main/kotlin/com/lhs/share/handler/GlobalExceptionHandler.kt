@@ -37,7 +37,7 @@ class GlobalExceptionHandler {
      */
     @ExceptionHandler(MissingServletRequestParameterException::class)
     fun missingServletRequestParameterException(e: MissingServletRequestParameterException, request: HttpServletRequest): ApiResult<Unit> {
-        logWarn(request)
+        logWarn(request, e.parameterName)
         return fail(HttpStatus.BAD_REQUEST.value(), "请求参数缺失:" + e.parameterName)
     }
 
@@ -46,7 +46,7 @@ class GlobalExceptionHandler {
      */
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
     fun methodArgumentTypeMismatchException(e: MethodArgumentTypeMismatchException, request: HttpServletRequest): ApiResult<Unit> {
-        logWarn(request)
+        logWarn(request, e.name)
         return fail(HttpStatus.BAD_REQUEST.value(), "参数类型不匹配:" + e.message)
     }
 
@@ -108,7 +108,8 @@ class GlobalExceptionHandler {
         return fail(HttpStatus.INTERNAL_SERVER_ERROR.value(), e.message)
     }
 
-    private fun logWarn(request: HttpServletRequest) {
-        log.warn { "请求异常, url: ${request.requestURI}, method: ${request.method}" }
+    private fun logWarn(request: HttpServletRequest, parameterName: String? = null) {
+        val parameter = parameterName?.let { ", parameter: $it" }.orEmpty()
+        log.warn { "请求参数异常, url: ${request.requestURI}, method: ${request.method}$parameter" }
     }
 }

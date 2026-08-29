@@ -19,6 +19,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 private val inventoryLog = KotlinLogging.logger { }
@@ -60,6 +61,13 @@ class InventoryExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException::class)
     fun missingQuery(e: MissingServletRequestParameterException): ResponseEntity<InventoryErrorResponse> =
         response(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Missing query parameter: ${e.parameterName}")
+
+    /** SSE clients can disconnect while a scheduled heartbeat is being written. */
+    @ExceptionHandler(AsyncRequestNotUsableException::class)
+    fun clientDisconnected(e: AsyncRequestNotUsableException): ResponseEntity<Void> {
+        inventoryLog.debug { "SSE client disconnected: ${e.message}" }
+        return ResponseEntity.noContent().build()
+    }
 
     @ExceptionHandler(Exception::class)
     fun unexpected(e: Exception, request: HttpServletRequest): ResponseEntity<InventoryErrorResponse> {

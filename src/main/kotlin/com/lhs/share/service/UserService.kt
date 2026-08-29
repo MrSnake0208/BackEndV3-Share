@@ -219,6 +219,9 @@ class UserService(
 
     fun getRequired(userId: String): MaaUserInfo = get(userId) ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "用户不存在: $userId")
 
+    fun findFeedbackAccessUserByEmail(email: String): MaaUser? = userRepository.findByEmailIgnoreCase(email)
+        ?.takeIf { it.status > 0 }
+
     fun search(userName: String, pageable: Pageable): Page<MaaUserInfo> = userRepository.searchUsers(userName, pageable)
 
     fun searchFeedbackAccessUsers(query: String, pageable: Pageable): Page<MaaUser> =
