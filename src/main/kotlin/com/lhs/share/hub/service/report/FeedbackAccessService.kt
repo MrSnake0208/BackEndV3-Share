@@ -70,6 +70,11 @@ class FeedbackAccessService(
         if (size !in 1..10) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "size 必须在 1..10 之间")
         }
+        if (page == 1 && normalizedQuery.contains('@')) {
+            userService.findFeedbackAccessUserByEmail(normalizedQuery)?.let {
+                return listOf(FeedbackAccessUserCandidateResponse(it))
+            }
+        }
         val escapedQuery = Pattern.quote(normalizedQuery)
         return userService.searchFeedbackAccessUsers(escapedQuery, PageRequest.of(page - 1, size))
             .content

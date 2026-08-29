@@ -31,6 +31,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import java.time.Instant
 
 class AccountControllerContractTest {
@@ -160,5 +161,15 @@ class AccountControllerContractTest {
         assertEquals("no", response.headers.getFirst("X-Accel-Buffering"))
         verify { accountService.requireAccount("jwt-user", "main") }
         verify { eventService.subscribe("jwt-user", "main") }
+    }
+
+    @Test
+    fun `disconnected account event streams do not get a JSON error body`() {
+        val response = InventoryExceptionHandler().clientDisconnected(
+            AsyncRequestNotUsableException("Broken pipe"),
+        )
+
+        assertEquals(HttpStatus.NO_CONTENT, response.statusCode)
+        assertEquals(null, response.body)
     }
 }

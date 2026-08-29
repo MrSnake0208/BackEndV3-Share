@@ -13,6 +13,6 @@ data class FeedbackAccessUserCandidateResponse(
         id = user.userId!!,
         userName = user.userName,
         email = user.email,
-        activated = user.status == 1,
+        activated = user.status > 0,
     )
 }
