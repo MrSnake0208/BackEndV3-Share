@@ -33,3 +33,25 @@ this project actually produces it. Then keep the fix in scope:
    Before running any check, answer: what specific failure would this detect, and
    what would I do differently if it occurred? No answer means do not run it.
    Say plainly when something is correct. Do not manufacture findings.
+
+## Inventory domain standards
+
+Tasks involving inventory, reward records, inventory import/export, inventory snapshots, or the inventory exchange protocol must read and follow these repository-local standards before implementation:
+
+- `docs/standards/inventory/backend-design.md`
+- `docs/standards/inventory/exchange-protocol-v1.md`
+
+Machine-readable protocol schema:
+
+- `docs/standards/inventory/schema/inventory-exchange-v1.schema.json`
+
+These documents are the authoritative inventory-domain specifications for this repository. Non-inventory tasks do not need to read them.
+
+### Inventory invariants
+
+- Current inventory state and historical reward records are different facts; do not derive ordinary current-stock reads by replaying the full reward history.
+- `reward_delta` is an increment event; `stock_snapshot` is an absolute observation. Do not interchange their semantics.
+- `record_id` is the idempotency key for exchanged records; repeated imports of the same record must not apply stock changes twice.
+- Cross-platform object identity uses the stable `(entity_type, id)` pair. Display names are not database or protocol identity keys.
+- Snapshot baseline rules determine whether a delayed reward changes current stock; historical rewards may remain valid for statistics without changing current stock.
+- Protocol behavior and field semantics must stay aligned with `exchange-protocol-v1.md` and its JSON Schema.
