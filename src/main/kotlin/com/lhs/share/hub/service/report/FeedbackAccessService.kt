@@ -7,11 +7,19 @@ import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAreaOptionResponse
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
+import com.lhs.share.hub.repository.entity.AdminAuditAction
+import com.lhs.share.hub.repository.entity.AdminAuditLog
+import com.lhs.share.hub.repository.entity.AdminAuditSnapshot
+import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
+import com.lhs.share.hub.service.admin.AdminAuditService
+import com.lhs.share.hub.service.admin.AdminAuthorizationService
+import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.service.UserService
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.regex.Pattern
 
@@ -19,47 +27,39 @@ import java.util.regex.Pattern
 class FeedbackAccessService(
     private val repository: FeedbackAccessGrantRepository,
     private val userService: UserService,
+    private val authorizationService: AdminAuthorizationService,
+    private val auditService: AdminAuditService,
 ) {
     fun current(userId: String): CurrentFeedbackAccessResponse {
-        val superAdmin = userService.hasAdminPrivileges(userId)
+        val superAdmin = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)
         val grant = repository.findById(userId).orElse(null)
         return CurrentFeedbackAccessResponse(
             superAdmin = superAdmin,
             receiveAreas = grant?.receiveAreas.orEmpty(),
-            manageAreas = if (superAdmin) FeedbackArea.all else grant?.manageAreas.orEmpty(),
+            manageAreas = authorizationService.manageableAreasFor(userId),
             availableAreas = FeedbackArea.labels.map { (key, label) -> FeedbackAreaOptionResponse(key, label) },
         )
     }
 
-    fun canView(userId: String, area: String): Boolean {
-        if (userService.hasAdminPrivileges(userId)) return true
-        val grant = repository.findById(userId).orElse(null) ?: return false
-        return area in grant.receiveAreas || area in grant.manageAreas
-    }
+    fun canView(userId: String, area: String): Boolean = authorizationService.canReadFeedback(userId, area)
 
-    fun canManage(userId: String, area: String): Boolean {
-        if (userService.hasAdminPrivileges(userId)) return true
-        return repository.findById(userId).orElse(null)?.manageAreas?.contains(area) == true
-    }
+    fun canManage(userId: String, area: String): Boolean = authorizationService.canManageFeedback(userId, area)
 
-    fun manageableAreas(userId: String): Set<String> {
-        if (userService.hasAdminPrivileges(userId)) return FeedbackArea.all
-        return repository.findById(userId).orElse(null)?.manageAreas.orEmpty()
-    }
+    fun manageableAreas(userId: String): Set<String> = authorizationService.manageableAreasFor(userId)
 
     fun receiverUserIds(area: String): Set<String> = repository.findByReceiveAreasContaining(area)
         .map { it.userId }
         .toSet()
 
     fun listGrants(adminUserId: String): List<FeedbackAccessGrantResponse> {
-        requireSuperAdmin(adminUserId)
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         return repository.findAll()
             .sortedBy { userService.get(it.userId)?.userName ?: it.userId }
             .map(::toResponse)
     }
 
     fun searchUserCandidates(adminUserId: String, query: String, page: Int, size: Int): List<FeedbackAccessUserCandidateResponse> {
-        requireSuperAdmin(adminUserId)
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val normalizedQuery = query.trim()
         if (normalizedQuery.isEmpty()) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "搜索关键词不能为空")
@@ -81,29 +81,55 @@ class FeedbackAccessService(
             .map(::FeedbackAccessUserCandidateResponse)
     }
 
+    @Transactional(transactionManager = "hubTransactionManager")
     fun updateGrant(adminUserId: String, userId: String, request: FeedbackAccessUpdateRequest): FeedbackAccessGrantResponse {
-        requireSuperAdmin(adminUserId)
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val user = userService.getRequired(userId)
         if (!user.activated) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "只能为已激活用户配置反馈权限")
         }
         val receiveAreas = validateAreas(request.receiveCategories ?: request.receiveAreas)
         val manageAreas = validateAreas(request.manageCategories ?: request.manageAreas)
+        val before = repository.findById(userId).orElse(null)
+        val now = Instant.now()
         val saved = repository.save(
             FeedbackAccessGrant(
                 userId = userId,
                 receiveAreas = receiveAreas,
                 manageAreas = manageAreas,
                 updatedBy = adminUserId,
-                updatedAt = Instant.now(),
+                updatedAt = now,
+            ),
+        )
+        auditService.record(
+            AdminAuditLog(
+                actorUserId = adminUserId,
+                action = AdminAuditAction.FEEDBACK_ACCESS_UPDATED,
+                targetUserId = userId,
+                targetResource = "feedback_access_grants/$userId",
+                before = before?.let(::auditSnapshot),
+                after = auditSnapshot(saved),
+                occurredAt = now,
             ),
         )
         return toResponse(saved)
     }
 
+    @Transactional(transactionManager = "hubTransactionManager")
     fun deleteGrant(adminUserId: String, userId: String) {
-        requireSuperAdmin(adminUserId)
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val before = repository.findById(userId).orElse(null) ?: return
         repository.deleteById(userId)
+        auditService.record(
+            AdminAuditLog(
+                actorUserId = adminUserId,
+                action = AdminAuditAction.FEEDBACK_ACCESS_DELETED,
+                targetUserId = userId,
+                targetResource = "feedback_access_grants/$userId",
+                before = auditSnapshot(before),
+                occurredAt = Instant.now(),
+            ),
+        )
     }
 
     private fun validateAreas(areas: Set<String>): Set<String> = areas.map { area ->
@@ -113,12 +139,6 @@ class FeedbackAccessService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), e.message)
         }
     }.toSet()
-
-    private fun requireSuperAdmin(userId: String) {
-        if (!userService.hasAdminPrivileges(userId)) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "仅超级管理员可配置反馈权限")
-        }
-    }
 
     private fun toResponse(grant: FeedbackAccessGrant): FeedbackAccessGrantResponse {
         return FeedbackAccessGrantResponse(
@@ -130,4 +150,9 @@ class FeedbackAccessService(
             updatedAt = grant.updatedAt,
         )
     }
+
+    private fun auditSnapshot(grant: FeedbackAccessGrant) = AdminAuditSnapshot(
+        receiveAreas = grant.receiveAreas,
+        manageAreas = grant.manageAreas,
+    )
 }

@@ -9,7 +9,8 @@ import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
 import com.lhs.share.hub.controller.operator.response.AdminOperatorCatalogResponse
 import com.lhs.share.hub.service.operator.OperatorApiException
 import com.lhs.share.hub.service.operator.OperatorCatalogService
-import com.lhs.share.service.UserService
+import com.lhs.share.hub.service.admin.AdminAuthorizationService
+import com.lhs.share.hub.service.admin.AdminPermission
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
@@ -36,17 +37,16 @@ import org.springframework.web.multipart.MultipartFile
  * - **本控制器（管理 API）**：路径前缀 `/v1/admin/operator-catalog`，管理员对支撑公共图鉴的
  *   `operator_catalog` 全局字典做增删改查。改动即时反映到公共图鉴；**不涉及**任何个人子账号密探数据。
  *
- * 权限：所有端点需要 JWT 登录，且用户 `status >= Administrator`（见 [UserService.hasAdminPrivileges]），
- * 否则返回 403 `forbidden`（OperatorErrorResponse）。
+ * 权限：所有端点需要 JWT 登录和 `operator_catalog:write` 权限，否则返回 403 `forbidden`。
  */
-@Tag(name = "Operator Admin", description = "密探公共API管理（仅管理员，status >= 2）")
+@Tag(name = "Operator Admin", description = "密探公共API管理（平台管理员或超级管理员）")
 @RestController
 @RequestMapping("/v1/admin/operator-catalog", produces = [MediaType.APPLICATION_JSON_VALUE])
 @RequireJwt
 class AdminOperatorCatalogController(
     private val catalogService: OperatorCatalogService,
     private val helper: AuthenticationHelper,
-    private val userService: UserService,
+    private val authorizationService: AdminAuthorizationService,
 ) {
     /**
      * 管理员查看密探目录全量（含内部字段 starStones / catalogVersion / createdAt，
@@ -122,7 +122,7 @@ class AdminOperatorCatalogController(
     }
 
     private fun requireAdmin() {
-        if (!userService.hasAdminPrivileges(helper.requireUserId())) {
+        if (!authorizationService.hasPermission(helper.requireUserId(), AdminPermission.OPERATOR_CATALOG_WRITE)) {
             throw OperatorApiException(HttpStatus.FORBIDDEN, "forbidden", "Administrator privileges are required")
         }
     }
