@@ -67,8 +67,10 @@ share:
     # 密探头像文件目录(存放 {operatorId}.webp;application-local.yml 同步保留默认值即可)
     dir: ${SHARE_AVATAR_DIR:./data/avatar}
   media:
-    # 媒体文件存储目录(存放 med_xxx.{jpg,png,webp};生产用环境变量 SHARE_MEDIA_DIR 覆盖)
+    # 公开图片存储目录(存放 med_xxx.{jpg,png,webp};生产用环境变量 SHARE_MEDIA_DIR 覆盖)
     dir: ${SHARE_MEDIA_DIR:./data/media}
+    # 私有附件存储目录(不得位于公开图片目录下;生产用环境变量 SHARE_PRIVATE_MEDIA_DIR 覆盖)
+    private-dir: ${SHARE_PRIVATE_MEDIA_DIR:./data/private-media}
     # 单个业务媒体文件大小上限(字节),10 MiB
     max-size: 10485760
   mails:

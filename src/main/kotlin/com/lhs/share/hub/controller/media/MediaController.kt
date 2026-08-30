@@ -19,8 +19,8 @@ import org.springframework.web.multipart.MultipartFile
 /**
  * 媒体文件上传接口
  *
- * 提供文件上传能力,支持 JPG/PNG/WebP 格式,单文件上限 10 MiB。
- * 上传后的文件通过 /media/{medId}.{ext} 静态资源路径公开访问。
+ * 支持 JPG/PNG/WebP 图片和 TXT/LOG/JSON/PDF/ZIP 普通文件,单文件上限 10 MiB。
+ * 仅图片通过 /media/{medId}.{ext} 静态资源路径公开访问。
  */
 @Tag(name = "Media", description = "媒体文件上传")
 @RequestMapping("/v1/media")
@@ -33,8 +33,8 @@ class MediaController(
     /**
      * 上传媒体文件(需登录)
      *
-     * @param file 上传的图片文件(multipart/form-data,字段名 file)
-     * @return 上传后的文件元数据,包含可直接访问的 URL
+     * @param file 上传的附件(multipart/form-data,字段名 file)
+     * @return 上传后的文件元数据,普通文件的 URL 为空
      */
     @Operation(summary = "上传媒体文件")
     @RequireJwt

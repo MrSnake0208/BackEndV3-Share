@@ -3,14 +3,20 @@ package com.lhs.share.hub.controller.report
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
+import com.lhs.share.controller.response.ApiResult.Companion.fail
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMessageAppendRequest
 import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackStatusUpdateRequest
 import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
+import com.lhs.share.hub.service.media.MediaStorageService
 import com.lhs.share.hub.service.report.FeedbackReportService
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.web.bind.annotation.GetMapping
@@ -21,6 +27,14 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.core.io.Resource
+import org.springframework.http.CacheControl
+import org.springframework.http.ContentDisposition
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.web.server.ResponseStatusException
+import java.nio.charset.StandardCharsets
 
 /**
  * 反馈工单接口
@@ -32,6 +46,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 class FeedbackReportController(
     private val feedbackReportService: FeedbackReportService,
+    private val mediaStorageService: MediaStorageService,
     private val helper: AuthenticationHelper,
 ) {
     /**
@@ -95,6 +110,48 @@ class FeedbackReportController(
         return success(feedbackReportService.getById(userId, id))
     }
 
+    /** 下载工单中已绑定的普通文件。 */
+    @Operation(summary = "下载反馈附件")
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", description = "附件二进制", content = [Content(mediaType = "application/octet-stream")]),
+            ApiResponse(responseCode = "403", description = "无工单查看权限", content = [Content(mediaType = "application/json")]),
+            ApiResponse(responseCode = "404", description = "工单或附件不存在", content = [Content(mediaType = "application/json")]),
+        ],
+    )
+    @RequireJwt
+    @GetMapping("/{id}/attachments/{mediaId}")
+    fun downloadAttachment(
+        @PathVariable id: String,
+        @PathVariable mediaId: String,
+    ): ResponseEntity<*> {
+        return try {
+            val userId = helper.requireUserId()
+            val asset = feedbackReportService.getAttachment(userId, id, mediaId)
+            val resource = mediaStorageService.loadPrivateFile(asset)
+            val filename = safeDownloadName(asset.originalName)
+            val contentType = try {
+                MediaType.parseMediaType(asset.mime)
+            } catch (_: Exception) {
+                MediaType.APPLICATION_OCTET_STREAM
+            }
+            ResponseEntity.ok()
+                .contentType(contentType)
+                .contentLength(resource.contentLength())
+                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header("X-Content-Type-Options", "nosniff")
+                .header(
+                    HttpHeaders.CONTENT_DISPOSITION,
+                    ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build().toString(),
+                )
+                .body(resource)
+        } catch (e: ApiResultException) {
+            ResponseEntity.status(e.statusCode).body(fail(e.statusCode, e.message))
+        } catch (e: ResponseStatusException) {
+            ResponseEntity.status(e.statusCode).body(fail(e.statusCode.value(), e.reason))
+        }
+    }
+
     /**
      * 追加消息
      */
@@ -119,4 +176,11 @@ class FeedbackReportController(
         val userId = helper.requireUserId()
         return success(feedbackReportService.updateStatus(userId, id, request))
     }
+
+    private fun safeDownloadName(originalName: String): String = originalName
+        .replace('\r', '_')
+        .replace('\n', '_')
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+        .ifBlank { "attachment" }
 }

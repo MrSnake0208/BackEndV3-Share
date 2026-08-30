@@ -1,6 +1,8 @@
 package com.lhs.share.hub.controller.media.response
 
 import com.lhs.share.hub.repository.entity.MediaAsset
+import com.lhs.share.hub.repository.entity.MediaKind
+import com.lhs.share.hub.repository.entity.effectiveKind
 import java.time.Instant
 
 /**
@@ -14,7 +16,9 @@ import java.time.Instant
  */
 data class MediaUploadResponse(
     val id: String,
-    val url: String,
+    val kind: String,
+    val name: String,
+    val url: String?,
     val mime: String,
     val size: Long,
     val createdAt: Instant,
@@ -26,12 +30,17 @@ data class MediaUploadResponse(
          * @param asset 持久化后的媒体资产
          * @param baseUrl 应用基础 URL(如 https://hub.maayuan.fun:16666),用于拼接完整访问地址
          */
-        fun of(asset: MediaAsset, baseUrl: String): MediaUploadResponse = MediaUploadResponse(
-            id = checkNotNull(asset.id) { "实体未持久化" },
-            url = "${baseUrl.trimEnd('/')}${asset.storagePath}",
-            mime = asset.mime,
-            size = asset.size,
-            createdAt = asset.createdAt,
-        )
+        fun of(asset: MediaAsset, baseUrl: String): MediaUploadResponse {
+            val kind = asset.effectiveKind()
+            return MediaUploadResponse(
+                id = checkNotNull(asset.id) { "实体未持久化" },
+                kind = kind.name,
+                name = asset.originalName,
+                url = if (kind == MediaKind.IMAGE) "${baseUrl.trimEnd('/')}${asset.storagePath}" else null,
+                mime = asset.mime,
+                size = asset.size,
+                createdAt = asset.createdAt,
+            )
+        }
     }
 }

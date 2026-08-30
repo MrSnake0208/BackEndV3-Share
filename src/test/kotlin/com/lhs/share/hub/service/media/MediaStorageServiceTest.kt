@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.media
 
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.hub.repository.MediaAssetRepository
+import com.lhs.share.hub.repository.entity.MediaKind
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -46,9 +47,32 @@ class MediaStorageServiceTest {
             assertEquals("user-1", asset.ownerUserId)
             assertEquals(name, asset.originalName)
             assertEquals(mime, asset.mime)
+            assertEquals(MediaKind.IMAGE, asset.kind)
             assertEquals(bytes.size.toLong(), asset.size)
             assertTrue(asset.storagePath.endsWith(".${name.substringAfterLast('.')}"))
-            assertArrayEquals(bytes, Files.readAllBytes(tempDir.resolve(asset.storagePath.substringAfterLast('/'))))
+            assertArrayEquals(bytes, Files.readAllBytes(publicDir().resolve(asset.storagePath.substringAfterLast('/'))))
+        }
+    }
+
+    @Test
+    fun `supported files are normalized and stored only in private directory`() {
+        every { repository.save(any()) } answers { firstArg() }
+        val cases = listOf(
+            Triple("note.txt", "text/plain", "plain text".toByteArray()),
+            Triple("error.log", "", "log text".toByteArray()),
+            Triple("sample.json", "application/json", "{truncated".toByteArray()),
+            Triple("guide.pdf", "application/pdf", "%PDF-1.7\n".toByteArray()),
+            Triple("bundle.zip", "application/x-zip-compressed", zipBytes()),
+        )
+
+        cases.forEach { (name, mime, bytes) ->
+            val asset = storage().upload("user-1", file(name, mime, bytes))
+
+            assertEquals(MediaKind.FILE, asset.kind)
+            assertEquals(if (name.endsWith(".zip")) "application/zip" else if (name.endsWith(".log")) "text/plain" else mime, asset.mime)
+            assertFalse(asset.storagePath.startsWith('/'))
+            assertArrayEquals(bytes, Files.readAllBytes(privateDir().resolve(asset.storagePath)))
+            assertFalse(Files.exists(publicDir().resolve(asset.storagePath)))
         }
     }
 
@@ -60,10 +84,19 @@ class MediaStorageServiceTest {
             service.upload("user-1", file("empty.png", "image/png", ByteArray(0)))
         }
         assertStatus(HttpStatus.BAD_REQUEST) {
-            service.upload("user-1", file("note.txt", "text/plain", "not an image".toByteArray()))
+            service.upload("user-1", file("note.exe", "application/octet-stream", "not allowed".toByteArray()))
         }
         assertStatus(HttpStatus.BAD_REQUEST) {
             service.upload("user-1", file("wrong.jpg", "image/jpeg", pngBytes()))
+        }
+        assertStatus(HttpStatus.BAD_REQUEST) {
+            service.upload("user-1", file("wrong.pdf", "application/pdf", "not pdf".toByteArray()))
+        }
+        assertStatus(HttpStatus.BAD_REQUEST) {
+            service.upload("user-1", file("wrong.zip", "application/zip", "not zip".toByteArray()))
+        }
+        assertStatus(HttpStatus.BAD_REQUEST) {
+            service.upload("user-1", file("binary.log", "text/plain", byteArrayOf(1, 0, 2)))
         }
     }
 
@@ -85,7 +118,7 @@ class MediaStorageServiceTest {
         }
 
         assertSame(failure, thrown)
-        Files.list(tempDir).use { entries -> assertEquals(0, entries.count()) }
+        Files.list(publicDir()).use { entries -> assertEquals(0, entries.count()) }
     }
 
     @Test
@@ -99,18 +132,22 @@ class MediaStorageServiceTest {
 
         assertEquals("../../outside.png", asset.originalName)
         assertTrue(asset.storagePath.matches(Regex("/media/med_[0-9a-f]{16}\\.png")))
-        assertTrue(Files.exists(tempDir.resolve(asset.storagePath.substringAfterLast('/'))))
+        assertTrue(Files.exists(publicDir().resolve(asset.storagePath.substringAfterLast('/'))))
         assertFalse(Files.exists(tempDir.resolve("outside.png")))
     }
 
     private fun storage(maxSize: Long = 10 * 1024 * 1024): MediaStorageService {
         val properties = ShareProperties().apply {
-            media = ShareProperties.Media(tempDir.toString(), maxSize)
+            media = ShareProperties.Media(publicDir().toString(), maxSize, privateDir().toString())
         }
         return MediaStorageService(repository, properties)
     }
 
-    private fun file(name: String, mime: String, bytes: ByteArray): MockMultipartFile =
+    private fun publicDir(): Path = tempDir.resolve("public")
+
+    private fun privateDir(): Path = tempDir.resolve("private")
+
+    private fun file(name: String, mime: String?, bytes: ByteArray): MockMultipartFile =
         MockMultipartFile("file", name, mime, bytes)
 
     private fun assertStatus(status: HttpStatus, block: () -> Unit) {
@@ -130,4 +167,6 @@ class MediaStorageServiceTest {
         0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00,
         0x57, 0x45, 0x42, 0x50,
     )
+
+    private fun zipBytes(): ByteArray = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00)
 }

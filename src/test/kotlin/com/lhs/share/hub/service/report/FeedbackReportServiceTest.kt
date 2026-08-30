@@ -9,9 +9,11 @@ import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.FeedbackMessage
+import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.MediaAsset
+import com.lhs.share.hub.repository.entity.MediaKind
 import com.lhs.share.hub.service.HubUserInfoService
 import com.lhs.share.hub.service.notification.NotificationService
 import io.mockk.every
@@ -19,6 +21,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.Optional
@@ -141,6 +144,61 @@ class FeedbackReportServiceTest {
             response.messages.single().images.map { it.url },
         )
         verify { mediaRepository.findAllById(listOf("med_second", "med_first")) }
+    }
+
+    @Test
+    fun `混合附件按类别拆分并返回文件下载契约`() {
+        prepareCreate()
+        val image = media("med_image", "/media/med_image.png")
+        val file = media(
+            id = "med_log",
+            path = "med_log.log",
+            name = "error.log",
+            mime = "text/plain",
+            size = 2048,
+            kind = MediaKind.FILE,
+        )
+        every { mediaRepository.findAllById(listOf("med_image", "med_log")) } returns listOf(file, image)
+
+        val response = service.create(
+            "user",
+            FeedbackReportCreateRequest("BUG", "OPERATOR", null, "混合附件", listOf("med_image", "med_log")),
+        )
+
+        assertEquals(listOf("med_image"), response.messages.single().images.map { it.id })
+        val responseFile = response.messages.single().files.single()
+        assertEquals("med_log", responseFile.id)
+        assertEquals("error.log", responseFile.name)
+        assertEquals(2048, responseFile.size)
+        assertTrue(responseFile.downloadUrl.matches(Regex("/v1/reports/rpt_[0-9a-f]{16}/attachments/med_log")))
+    }
+
+    @Test
+    fun `附件下载要求工单查看权限和真实文件引用`() {
+        val referencedFile = FeedbackMessageFile("med_log", "error.log", "text/plain", 10)
+        val ticket = openTicket().copy(
+            messages = openTicket().messages.map { it.copy(files = listOf(referencedFile)) },
+        )
+        val asset = media("med_log", "med_log.log", kind = MediaKind.FILE, mime = "text/plain")
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { mediaRepository.findById("med_log") } returns Optional.of(asset)
+
+        assertEquals(asset, service.getAttachment("user", "rpt_1", "med_log"))
+
+        every { accessService.canView("admin", FeedbackArea.OPERATOR) } returns true
+        assertEquals(asset, service.getAttachment("admin", "rpt_1", "med_log"))
+
+        every { accessService.canView("outsider", FeedbackArea.OPERATOR) } returns false
+        val forbidden = assertThrows(ApiResultException::class.java) {
+            service.getAttachment("outsider", "rpt_1", "med_log")
+        }
+        assertEquals(403, forbidden.statusCode)
+
+        val missing = assertThrows(ApiResultException::class.java) {
+            service.getAttachment("user", "rpt_1", "med_unbound")
+        }
+        assertEquals(404, missing.statusCode)
+        verify(exactly = 0) { mediaRepository.findById("med_unbound") }
     }
 
     @Test
@@ -301,8 +359,15 @@ class FeedbackReportServiceTest {
         assertEquals("", response.messages.single().images[1].url)
     }
 
-    private fun media(id: String, path: String = "/media/$id.webp", owner: String = "user"): MediaAsset =
-        MediaAsset(id, owner, "$id.webp", "image/webp", 12, path)
+    private fun media(
+        id: String,
+        path: String = "/media/$id.webp",
+        owner: String = "user",
+        name: String = "$id.webp",
+        mime: String = "image/webp",
+        size: Long = 12,
+        kind: MediaKind? = null,
+    ): MediaAsset = MediaAsset(id, owner, name, mime, size, path, kind = kind)
 
     private fun openTicket(): FeedbackTicket = FeedbackTicket(
         id = "rpt_1",

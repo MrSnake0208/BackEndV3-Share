@@ -15,9 +15,12 @@ import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.FeedbackClientInfo
 import com.lhs.share.hub.repository.entity.FeedbackMessage
+import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.MediaAsset
+import com.lhs.share.hub.repository.entity.MediaKind
+import com.lhs.share.hub.repository.entity.effectiveKind
 import com.lhs.share.hub.service.HubUserInfoService
 import com.lhs.share.hub.service.notification.NotificationService
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -60,7 +63,7 @@ class FeedbackReportService(
         /** 每用户最多待处理工单数 */
         private const val PENDING_LIMIT = 3
 
-        /** 消息中最多图片数 */
+        /** 消息中最多附件数 */
         private const val MAX_MEDIA_PER_MESSAGE = 3
 
         /** 管理员可设的状态 */
@@ -178,8 +181,9 @@ class FeedbackReportService(
             senderKind = "REPORTER",
             authorUserId = userId,
             content = request.content,
-            images = mediaAssets.map { FeedbackMessageImage(id = it.id!!, url = it.storagePath) },
+            images = mediaAssets.toMessageImages(),
             createdAt = Instant.now(),
+            files = mediaAssets.toMessageFiles(),
         )
 
         val now = Instant.now()
@@ -297,17 +301,23 @@ class FeedbackReportService(
      * 获取工单详情
      */
     fun getById(currentUserId: String, ticketId: String): FeedbackReportResponse {
-        val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
-            ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
-        }
-
-        val isReporter = ticket.reporterUserId == currentUserId
-        val fields = normalizedTicketFields(ticket)
-        if (!isReporter && !feedbackAccessService.canView(currentUserId, fields.category)) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的查看权限")
-        }
-
+        val ticket = requireViewableTicket(currentUserId, ticketId)
         return toResponse(ticket, currentUserId)
+    }
+
+    /** 返回经过工单范围授权且仍可用的普通文件元数据。 */
+    fun getAttachment(currentUserId: String, ticketId: String, mediaId: String): MediaAsset {
+        val ticket = requireViewableTicket(currentUserId, ticketId)
+        if (ticket.messages.none { message -> message.files.any { it.id == mediaId } }) {
+            throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        val asset = mediaAssetRepository.findById(mediaId).orElseThrow {
+            ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        if (asset.deletedAt != null || asset.effectiveKind() != MediaKind.FILE) {
+            throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        return asset
     }
 
     /**
@@ -351,8 +361,9 @@ class FeedbackReportService(
             senderKind = senderKind,
             authorUserId = currentUserId,
             content = request.content,
-            images = mediaAssets.map { FeedbackMessageImage(id = it.id!!, url = it.storagePath) },
+            images = mediaAssets.toMessageImages(),
             createdAt = Instant.now(),
+            files = mediaAssets.toMessageFiles(),
         )
 
         val now = Instant.now()
@@ -474,15 +485,42 @@ class FeedbackReportService(
             }
     }
 
+    private fun requireViewableTicket(currentUserId: String, ticketId: String): FeedbackTicket {
+        val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
+            ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
+        }
+        val isReporter = ticket.reporterUserId == currentUserId
+        val fields = normalizedTicketFields(ticket)
+        if (!isReporter && !feedbackAccessService.canView(currentUserId, fields.category)) {
+            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的查看权限")
+        }
+        return ticket
+    }
+
+    private fun List<MediaAsset>.toMessageImages(): List<FeedbackMessageImage> =
+        filter { it.effectiveKind() == MediaKind.IMAGE }
+            .map { FeedbackMessageImage(id = checkNotNull(it.id), url = it.storagePath) }
+
+    private fun List<MediaAsset>.toMessageFiles(): List<FeedbackMessageFile> =
+        filter { it.effectiveKind() == MediaKind.FILE }
+            .map {
+                FeedbackMessageFile(
+                    id = checkNotNull(it.id),
+                    name = it.originalName,
+                    mime = it.mime,
+                    size = it.size,
+                )
+            }
+
     /**
-     * 校验媒体 id 列表: 最多 3 个, 必须是当前用户自己的未删除媒体
+     * 校验媒体 id 列表: 最多 3 个附件, 必须是当前用户自己的未删除媒体
      */
     private fun validateMediaIds(userId: String, mediaIds: List<String>): List<MediaAsset> {
         if (mediaIds.isEmpty()) return emptyList()
         if (mediaIds.size > MAX_MEDIA_PER_MESSAGE) {
             throw ApiResultException(
                 HttpStatus.BAD_REQUEST.value(),
-                "图片数量超过上限($MAX_MEDIA_PER_MESSAGE 张)",
+                "附件数量超过上限($MAX_MEDIA_PER_MESSAGE 个)",
             )
         }
         if (mediaIds.size != mediaIds.toSet().size) {
@@ -575,6 +613,15 @@ class FeedbackReportService(
                     FeedbackMessageResponse.ImageInfo(id = img.id, url = toPublicMediaUrl(img.url))
                 },
                 createdAt = msg.createdAt,
+                files = msg.files.map { file ->
+                    FeedbackMessageResponse.FileInfo(
+                        id = file.id,
+                        name = file.name,
+                        mime = file.mime,
+                        size = file.size,
+                        downloadUrl = "/v1/reports/${checkNotNull(ticket.id)}/attachments/${file.id}",
+                    )
+                },
             )
         }
 

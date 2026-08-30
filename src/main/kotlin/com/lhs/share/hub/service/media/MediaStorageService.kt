@@ -3,6 +3,10 @@ package com.lhs.share.hub.service.media
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.MediaAsset
+import com.lhs.share.hub.repository.entity.MediaKind
+import com.lhs.share.hub.repository.entity.effectiveKind
+import org.springframework.core.io.FileSystemResource
+import org.springframework.core.io.Resource
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
@@ -19,7 +23,7 @@ import java.util.Locale
  * Hub 库媒体文件存储服务
  *
  * 处理文件上传校验、磁盘存储及元数据持久化。
- * 文件存储路径: {share.media.dir}/{medId}.{ext},通过 MediaStaticResourceConfig 映射到 /media/。
+ * 图片写入公开目录并映射到 /media/,普通文件写入不对外映射的私有目录。
  */
 @Service
 class MediaStorageService(
@@ -29,14 +33,10 @@ class MediaStorageService(
     private val random = SecureRandom()
     private val hexChars = "0123456789abcdef"
 
-    /** 允许的 MIME 类型 */
-    private val allowedMimes = setOf("image/jpeg", "image/png", "image/webp")
-
-    /** MIME 到扩展名的映射 */
-    private val mimeToExt = mapOf(
-        "image/jpeg" to "jpg",
-        "image/png" to "png",
-        "image/webp" to "webp",
+    private data class UploadType(
+        val kind: MediaKind,
+        val mime: String,
+        val extension: String,
     )
 
     /**
@@ -53,18 +53,8 @@ class MediaStorageService(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件为空")
         }
 
-        // 校验声明的 MIME 类型,但最终类型仍由文件签名确认
-        val declaredMime = file.contentType?.trim()
-        if (declaredMime.isNullOrEmpty()) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "无法识别文件类型")
-        }
-        val mime = declaredMime.lowercase(Locale.ROOT)
-        if (mime !in allowedMimes) {
-            throw ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "不支持的文件类型: $mime, 仅支持 JPG/PNG/WebP",
-            )
-        }
+        val originalName = file.originalFilename.orEmpty()
+        val uploadType = classify(originalName, file.contentType)
 
         // 先用 multipart 元数据快速拒绝明显超限的请求,落盘后再按实际字节数复核
         val maxSize = properties.media.maxSize
@@ -77,12 +67,11 @@ class MediaStorageService(
 
         // 生成唯一 id
         val medId = generateMedId()
-        val ext = mimeToExt[mime] ?: "bin"
-        val storedFileName = "$medId.$ext"
-        val storagePath = "/media/$storedFileName"
+        val storedFileName = "$medId.${uploadType.extension}"
+        val storagePath = if (uploadType.kind == MediaKind.IMAGE) "/media/$storedFileName" else storedFileName
 
         // 确保存储目录存在
-        val mediaDir = Path.of(properties.media.dir).toAbsolutePath()
+        val mediaDir = storageRoot(uploadType.kind)
         try {
             Files.createDirectories(mediaDir)
         } catch (e: IOException) {
@@ -109,7 +98,7 @@ class MediaStorageService(
                     "文件大小超过限制(${maxSize / 1024 / 1024} MiB)",
                 )
             }
-            if (!hasExpectedSignature(tempPath, mime)) {
+            if (!hasExpectedContent(tempPath, uploadType)) {
                 throw ResponseStatusException(HttpStatus.BAD_REQUEST, "文件内容与声明类型不匹配")
             }
 
@@ -119,10 +108,11 @@ class MediaStorageService(
             val asset = MediaAsset(
                 id = medId,
                 ownerUserId = ownerUserId,
-                originalName = file.originalFilename ?: storedFileName,
-                mime = mime,
+                originalName = originalName.ifBlank { storedFileName },
+                mime = uploadType.mime,
                 size = storedSize,
                 storagePath = storagePath,
+                kind = uploadType.kind,
             )
             return mediaAssetRepository.save(asset)
         } catch (e: ResponseStatusException) {
@@ -137,6 +127,68 @@ class MediaStorageService(
         }
     }
 
+    /** 安全读取已绑定普通文件。调用方仍需先完成工单范围权限和引用校验。 */
+    fun loadPrivateFile(asset: MediaAsset): Resource {
+        if (asset.effectiveKind() != MediaKind.FILE) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        val storageKey = asset.storagePath
+        val relativePath = try {
+            Path.of(storageKey)
+        } catch (_: Exception) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        if (relativePath.isAbsolute || relativePath.nameCount != 1 || relativePath.fileName.toString() != storageKey) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        val root = storageRoot(MediaKind.FILE)
+        val path = root.resolve(relativePath).normalize()
+        if (!path.startsWith(root) || !Files.isRegularFile(path)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        return FileSystemResource(path)
+    }
+
+    private fun classify(originalName: String, contentType: String?): UploadType {
+        val extension = originalName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val declaredMime = contentType
+            ?.substringBefore(';')
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            .orEmpty()
+        val type = when (extension) {
+            "jpg", "jpeg" -> UploadType(MediaKind.IMAGE, "image/jpeg", "jpg")
+                .takeIf { declaredMime == "image/jpeg" }
+            "png" -> UploadType(MediaKind.IMAGE, "image/png", "png")
+                .takeIf { declaredMime == "image/png" }
+            "webp" -> UploadType(MediaKind.IMAGE, "image/webp", "webp")
+                .takeIf { declaredMime == "image/webp" }
+            "txt", "log" -> UploadType(MediaKind.FILE, "text/plain", extension)
+                .takeIf { declaredMime.isEmpty() || declaredMime == "text/plain" }
+            "json" -> UploadType(MediaKind.FILE, "application/json", "json")
+                .takeIf { declaredMime == "application/json" }
+            "pdf" -> UploadType(MediaKind.FILE, "application/pdf", "pdf")
+                .takeIf { declaredMime == "application/pdf" }
+            "zip" -> UploadType(MediaKind.FILE, "application/zip", "zip")
+                .takeIf { declaredMime == "application/zip" || declaredMime == "application/x-zip-compressed" }
+            else -> null
+        }
+        return type ?: throw ResponseStatusException(
+            HttpStatus.BAD_REQUEST,
+            "仅支持 JPG、PNG、WebP、TXT、LOG、JSON、PDF 或 ZIP",
+        )
+    }
+
+    private fun storageRoot(kind: MediaKind): Path {
+        val publicRoot = Path.of(properties.media.dir).toAbsolutePath().normalize()
+        if (kind == MediaKind.IMAGE) return publicRoot
+        val privateRoot = Path.of(properties.media.privateDir).toAbsolutePath().normalize()
+        if (privateRoot == publicRoot || privateRoot.startsWith(publicRoot)) {
+            throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "私有附件目录配置不安全")
+        }
+        return privateRoot
+    }
+
     private fun moveToTarget(source: Path, target: Path) {
         try {
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE)
@@ -145,13 +197,15 @@ class MediaStorageService(
         }
     }
 
-    private fun hasExpectedSignature(path: Path, mime: String): Boolean {
-        val headerLength = if (mime == "image/webp") WEBP_HEADER_SIZE else 8
-        val header = Files.newInputStream(path).use { input -> input.readNBytes(headerLength) }
-        return when (mime) {
+    private fun hasExpectedContent(path: Path, type: UploadType): Boolean {
+        val header = Files.newInputStream(path).use { input -> input.readNBytes(CONTENT_PREFIX_SIZE) }
+        return when (type.mime) {
             "image/jpeg" -> startsWith(header, JPEG_SIGNATURE)
             "image/png" -> startsWith(header, PNG_SIGNATURE)
             "image/webp" -> startsWith(header, RIFF_SIGNATURE) && startsWith(header, WEBP_SIGNATURE, 8)
+            "application/pdf" -> startsWith(header, PDF_SIGNATURE)
+            "application/zip" -> ZIP_SIGNATURES.any { startsWith(header, it) }
+            "text/plain", "application/json" -> header.none { it == 0.toByte() }
             else -> false
         }
     }
@@ -187,7 +241,7 @@ class MediaStorageService(
     }
 
     companion object {
-        private const val WEBP_HEADER_SIZE = 12
+        private const val CONTENT_PREFIX_SIZE = 8192
         private val JPEG_SIGNATURE = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())
         private val PNG_SIGNATURE = byteArrayOf(
             0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(),
@@ -199,5 +253,11 @@ class MediaStorageService(
         private val WEBP_SIGNATURE = byteArrayOf(0x57, 0x45, 0x42, 0x50)
             .map { it.toByte() }
             .toByteArray()
+        private val PDF_SIGNATURE = "%PDF-".toByteArray()
+        private val ZIP_SIGNATURES = listOf(
+            byteArrayOf(0x50, 0x4B, 0x03, 0x04),
+            byteArrayOf(0x50, 0x4B, 0x05, 0x06),
+            byteArrayOf(0x50, 0x4B, 0x07, 0x08),
+        )
     }
 }

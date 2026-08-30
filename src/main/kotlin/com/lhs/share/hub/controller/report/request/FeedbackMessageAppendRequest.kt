@@ -13,6 +13,6 @@ data class FeedbackMessageAppendRequest(
     @field:NotBlank(message = "消息不能为空")
     @field:Size(max = 1000, message = "消息长度不能超过 1000 字符")
     val content: String,
-    @field:Size(max = 3, message = "图片数量不能超过 3 张")
+    @field:Size(max = 3, message = "附件数量不能超过 3 个")
     val mediaIds: List<String> = emptyList(),
 )
