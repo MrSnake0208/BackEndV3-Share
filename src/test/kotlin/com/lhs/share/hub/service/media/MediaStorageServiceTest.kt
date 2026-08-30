@@ -59,7 +59,8 @@ class MediaStorageServiceTest {
         every { repository.save(any()) } answers { firstArg() }
         val cases = listOf(
             Triple("note.txt", "text/plain", "plain text".toByteArray()),
-            Triple("error.log", "", "log text".toByteArray()),
+            Triple("error.log", "application/octet-stream", "log text".toByteArray()),
+            Triple("trace.log", "text/x-log", "trace text".toByteArray()),
             Triple("sample.json", "application/json", "{truncated".toByteArray()),
             Triple("guide.pdf", "application/pdf", "%PDF-1.7\n".toByteArray()),
             Triple("bundle.zip", "application/x-zip-compressed", zipBytes()),

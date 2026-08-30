@@ -60,3 +60,12 @@
 - status: success
 - meta.locale: zh-CN
 - meta.date: 2026-08-30 23:37:52
+
+## 2026-08-30 23:45:55
+
+- service: apply_patch / exec_command
+- params: MediaStorageService TXT/LOG MIME aliases and MediaStorageServiceTest
+- result: accepted text/x-log and application/octet-stream for .txt/.log, normalized to text/plain, and preserved binary NUL rejection
+- status: success
+- meta.locale: zh-CN
+- meta.date: 2026-08-30 23:45:55
