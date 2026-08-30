@@ -11,7 +11,7 @@ private const val JSON = "application/json"
 /**
  * 密探公共 API 管理员端点（路径前缀 `/v1/admin/operator-catalog`）统一响应文档。
  *
- * 仅管理员（用户 status >= [com.lhs.share.service.UserService.ADMIN_STATUS]）可访问；
+ * 仅拥有 `operator_catalog:write` 权限的平台管理员或超级管理员可访问；
  * 失败统一返回 [OperatorErrorResponse]。401 由 Spring Security 认证入口产生。
  */
 @Target(AnnotationTarget.FUNCTION)

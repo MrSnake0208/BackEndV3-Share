@@ -11,9 +11,10 @@ import com.lhs.share.hub.controller.operator.request.OperatorCatalogWriteRequest
 import com.lhs.share.hub.controller.operator.response.AdminOperatorCatalogResponse
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
+import com.lhs.share.hub.service.admin.AdminAuthorizationService
+import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.operator.OperatorApiException
 import com.lhs.share.hub.service.operator.OperatorCatalogService
-import com.lhs.share.service.UserService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -36,13 +37,13 @@ import java.time.Instant
 
 /**
  * 密探公共 API 管理端契约测试：路径前缀 `/v1/admin/operator-catalog` 的端点必须 JWT 登录且为管理员
- * （status >= 2），非管理员 403 forbidden；成功路径覆盖列表（含内部字段）/新增/更新/删除；
+ * 且拥有 operator_catalog:write，非管理员 403 forbidden；成功路径覆盖列表（含内部字段）/新增/更新/删除；
  * 业务错误统一映射 OperatorErrorResponse。
  */
 class AdminOperatorCatalogControllerContractTest {
     private val catalogService = mockk<OperatorCatalogService>()
     private val helper = mockk<AuthenticationHelper>()
-    private val userService = mockk<UserService>()
+    private val authorizationService = mockk<AdminAuthorizationService>()
     private lateinit var mockMvc: MockMvc
 
     @BeforeEach
@@ -53,7 +54,7 @@ class AdminOperatorCatalogControllerContractTest {
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         val validator = LocalValidatorFactoryBean().apply { afterPropertiesSet() }
         mockMvc = MockMvcBuilders
-            .standaloneSetup(AdminOperatorCatalogController(catalogService, helper, userService))
+            .standaloneSetup(AdminOperatorCatalogController(catalogService, helper, authorizationService))
             .setControllerAdvice(OperatorExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
@@ -62,7 +63,7 @@ class AdminOperatorCatalogControllerContractTest {
 
     private fun asAdmin() {
         every { helper.requireUserId() } returns "u1"
-        every { userService.hasAdminPrivileges("u1") } returns true
+        every { authorizationService.hasPermission("u1", AdminPermission.OPERATOR_CATALOG_WRITE) } returns true
     }
 
     private fun entity(id: String, name: String) = OperatorCatalogEntity(
@@ -109,7 +110,7 @@ class AdminOperatorCatalogControllerContractTest {
     @Test
     fun `non-admin is forbidden with operator error body`() {
         every { helper.requireUserId() } returns "u1"
-        every { userService.hasAdminPrivileges("u1") } returns false
+        every { authorizationService.hasPermission("u1", AdminPermission.OPERATOR_CATALOG_WRITE) } returns false
 
         mockMvc.perform(get("/v1/admin/operator-catalog"))
             .andExpect(status().isForbidden)

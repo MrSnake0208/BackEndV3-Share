@@ -146,6 +146,9 @@ class UserService(
 
             val userId = old.subject
             val user = userRepository.findById(userId).orElseThrow()
+            if (user.status <= 0) {
+                throw ApiResultException(HttpStatus.UNAUTHORIZED.value(), "用户未启用")
+            }
             if (old.issuedAt.isBefore(user.pwdUpdateTime)) {
                 throw ApiResultException(HttpStatus.UNAUTHORIZED.value(), "invalid token")
             }
@@ -227,8 +230,6 @@ class UserService(
     fun searchFeedbackAccessUsers(query: String, pageable: Pageable): Page<MaaUser> =
         userRepository.searchFeedbackAccessUsers(query, pageable)
 
-    fun hasAdminPrivileges(userId: String?): Boolean = !userId.isNullOrBlank() && findByUserIdOrDefault(userId).status >= ADMIN_STATUS
-
     class UserDict(users: List<MaaUser>) {
         private val userMap = users.associateBy { it.userId!! }
 
@@ -237,9 +238,5 @@ class UserService(
         operator fun get(id: String): MaaUser? = userMap[id]
 
         fun getOrDefault(id: String) = get(id) ?: MaaUser.UNKNOWN
-    }
-
-    companion object {
-        const val ADMIN_STATUS = 2
     }
 }

@@ -305,7 +305,7 @@ OpenAPI scan 处理 entry 后发送 `operator_scan_import` 事件，数据包含
 `invalid_equipped_star_stones`、`scan_scope_not_allowed`、`idempotency_conflict` 和
 `operator_revision_conflict`。
 
-**管理员（用户 `status >= 2`）管理公共图鉴的数据面**，即在 `/v1/admin/operator-catalog/**` 上增删改查
+**平台管理员和超级管理员管理公共图鉴的数据面**，即在 `/v1/admin/operator-catalog/**` 上增删改查
 `operator_catalog` 字典，改动即时反映到公共图鉴与导入校验：
 
 ```text
@@ -315,7 +315,7 @@ PUT    /v1/admin/operator-catalog/{operatorId}    # 更新（path/body id 必须
 DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 ```
 
-以上端点需要 JWT 登录且必须是管理员，否则 403；失败统一返回 `OperatorErrorResponse`
+以上端点需要 JWT 登录和 `operator_catalog:write` 权限，否则 403；失败统一返回 `OperatorErrorResponse`
 （`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
 设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
 
@@ -339,13 +339,21 @@ rarity 派生：3 星 `300/1560/9`、4 星 `305/1820/11`、5 星 `500/2600/15`�
 不覆盖已上传头像），重启后端即可批量生效。详见
 [docs/operator-catalog-avatar-design.md](docs/operator-catalog-avatar-design.md)。
 
-**把账号设为管理员**：管理员判定为 `maa_user.status >= 2`（`UserService.ADMIN_STATUS`），
-在 MaaBackend 数据库直接更新即可（建议先按 email 确认再改）：
+**管理员角色与权限**：平台角色保存在 HubBackend 的 `admin_role_bindings`，不再使用
+`maa_user.status >= 2` 做长期授权。超级管理员可以通过以下端点查询和覆盖角色、配置反馈权限并查看审计：
 
-```bash
-mongosh 'mongodb://<host>:27017/MaaBackend' --quiet \
-  --eval 'db.maa_user.updateOne({ email: "someone@example.com" }, { $set: { status: 2 } })'
+```text
+GET /v1/admin/access/me
+GET /v1/admin/roles/users
+PUT /v1/admin/roles/users/{userId}
+GET /v1/admin/feedback-access
+PUT /v1/admin/feedback-access/{userId}
+GET /v1/admin/audit-logs
 ```
+
+首次切换使用 `scripts/migrations/20260830-admin-role-bindings.js`：填写超级管理员与平台管理员用户 ID，
+先保持 `APPLY = false` 核对 dry-run 输出，再明确改为 `true` 执行。角色回收按数据库当前绑定即时生效，
+不依赖 JWT 里的旧 authority。
 
 ## 项目结构
 

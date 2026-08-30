@@ -145,13 +145,16 @@ class UserServiceTest {
     }
 
     @Test
-    fun `管理员判定 status 大于等于 2`() {
-        every { userRepository.findByUserId("admin") } returns user("admin", status = 2)
-        every { userRepository.findByUserId("normal") } returns user("normal", status = 1)
+    fun `禁用用户不能刷新 token`() {
+        val refreshToken = jwtService.issueRefreshToken("u1", null).value
+        every { userRepository.findById("u1") } returns java.util.Optional.of(user(status = 0))
 
-        assertTrue(userService.hasAdminPrivileges("admin"))
-        assertFalse(userService.hasAdminPrivileges("normal"))
-        assertFalse(userService.hasAdminPrivileges(null))
+        val ex = assertThrows(ApiResultException::class.java) {
+            userService.refreshToken(refreshToken)
+        }
+
+        assertEquals(401, ex.statusCode)
+        assertEquals("用户未启用", ex.message)
     }
 
     @Test
