@@ -51,3 +51,12 @@
 - status: success
 - meta.locale: zh-CN
 - meta.date: 2026-08-30 19:03:03
+
+## 2026-08-30 23:37:52
+
+- service: apply_patch / exec_command
+- params: feedback media entities, storage, report binding, authenticated attachment download, configuration, README, and focused tests
+- result: preserved public image behavior while adding validated TXT/LOG/JSON/PDF/ZIP private storage and ticket-scoped binary downloads with compatibility defaults
+- status: success
+- meta.locale: zh-CN
+- meta.date: 2026-08-30 23:37:52

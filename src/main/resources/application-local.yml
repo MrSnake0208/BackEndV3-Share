@@ -17,6 +17,7 @@ share:
     dir: ./data/avatar
   media:
     dir: ./data/media
+    private-dir: ./data/private-media
 
 debug:
   email:

@@ -41,6 +41,11 @@ curl --fail-with-body http://127.0.0.1:8080/v3/api-docs \
 
 第二条命令在 local profile 下应显示 `http://127.0.0.1:8080`。
 
+反馈附件使用两个独立目录：`SHARE_MEDIA_DIR` 保存可由 `/media/**` 公开访问的截图，
+`SHARE_PRIVATE_MEDIA_DIR` 保存只能经工单 JWT 下载接口读取的普通文件。两个目录不能相同，
+私有目录也不能位于公开目录下；生产部署必须分别挂载持久卷。默认本地路径为
+`./data/media` 与 `./data/private-media`。
+
 MongoDB 与 Redis 使用命名 volume。普通停止不会删除本地数据：
 
 ```bash

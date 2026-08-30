@@ -141,5 +141,9 @@ data class ShareProperties(
          * 单文件业务大小上限(字节),默认 10 MiB
          */
         var maxSize: Long = 10 * 1024 * 1024,
+        /**
+         * 私有附件存储目录,生产用环境变量 SHARE_PRIVATE_MEDIA_DIR / Docker volume 覆盖
+         */
+        var privateDir: String = "./data/private-media",
     )
 }

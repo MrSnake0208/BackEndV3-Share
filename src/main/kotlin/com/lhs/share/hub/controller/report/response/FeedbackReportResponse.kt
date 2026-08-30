@@ -10,6 +10,7 @@ import java.time.Instant
  * @property author 发送人信息
  * @property content 消息正文
  * @property images 图片列表
+ * @property files 普通文件列表
  * @property createdAt 发送时间
  */
 data class FeedbackMessageResponse(
@@ -19,6 +20,7 @@ data class FeedbackMessageResponse(
     val content: String,
     val images: List<ImageInfo>,
     val createdAt: Instant,
+    val files: List<FileInfo> = emptyList(),
 ) {
     data class AuthorInfo(
         val id: String,
@@ -28,6 +30,14 @@ data class FeedbackMessageResponse(
     data class ImageInfo(
         val id: String,
         val url: String,
+    )
+
+    data class FileInfo(
+        val id: String,
+        val name: String,
+        val mime: String,
+        val size: Long,
+        val downloadUrl: String,
     )
 }
 

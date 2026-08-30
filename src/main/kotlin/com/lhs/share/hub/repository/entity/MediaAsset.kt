@@ -10,7 +10,7 @@ import java.time.Instant
 /**
  * Hub 库媒体资产实体(HubBackend.hub_media)
  *
- * 存储用户上传的图片文件元数据,文件本体保存在磁盘目录(share.media.dir)。
+ * 存储用户上传的媒体文件元数据。图片位于公开目录,普通文件位于私有目录。
  * 软删除:删除时设置 deletedAt,不物理移除文件。
  */
 @Document("hub_media")
@@ -54,4 +54,16 @@ data class MediaAsset(
      */
     @Indexed
     val deletedAt: Instant? = null,
+
+    /**
+     * 媒体类别。历史记录没有该字段时根据 MIME 兼容推导。
+     */
+    val kind: MediaKind? = null,
 ) : Serializable
+
+enum class MediaKind {
+    IMAGE,
+    FILE,
+}
+
+fun MediaAsset.effectiveKind(): MediaKind = kind ?: if (mime.startsWith("image/")) MediaKind.IMAGE else MediaKind.FILE
