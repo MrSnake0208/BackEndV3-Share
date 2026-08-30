@@ -138,7 +138,7 @@ data class ShareProperties(
          */
         var dir: String = "./data/media",
         /**
-         * 单文件大小上限(字节),默认 10MB
+         * 单文件业务大小上限(字节),默认 10 MiB
          */
         var maxSize: Long = 10 * 1024 * 1024,
     )

@@ -12,14 +12,14 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
 
 /**
  * 媒体文件上传接口
  *
- * 提供文件上传能力,支持 JPG/PNG/WebP 格式,单文件上限 10MB。
+ * 提供文件上传能力,支持 JPG/PNG/WebP 格式,单文件上限 10 MiB。
  * 上传后的文件通过 /media/{medId}.{ext} 静态资源路径公开访问。
  */
 @Tag(name = "Media", description = "媒体文件上传")
@@ -39,7 +39,7 @@ class MediaController(
     @Operation(summary = "上传媒体文件")
     @RequireJwt
     @PostMapping("/upload", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-    fun upload(@RequestParam("file") file: MultipartFile): ApiResult<MediaUploadResponse> {
+    fun upload(@RequestPart("file") file: MultipartFile): ApiResult<MediaUploadResponse> {
         val userId = helper.requireUserId()
         val asset = mediaStorageService.upload(userId, file)
         val baseUrl = properties.info.publicBaseUrl

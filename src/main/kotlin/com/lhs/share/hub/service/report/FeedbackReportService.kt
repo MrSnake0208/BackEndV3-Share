@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.report
 
 import com.lhs.share.common.utils.IpUtil
+import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMessageAppendRequest
 import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
@@ -42,6 +43,7 @@ class FeedbackReportService(
     private val mediaAssetRepository: MediaAssetRepository,
     private val notificationService: NotificationService,
     private val hubUserInfoService: HubUserInfoService,
+    private val properties: ShareProperties,
 ) {
     private val log = KotlinLogging.logger { }
     private val random = SecureRandom()
@@ -483,22 +485,25 @@ class FeedbackReportService(
                 "图片数量超过上限($MAX_MEDIA_PER_MESSAGE 张)",
             )
         }
+        if (mediaIds.size != mediaIds.toSet().size) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "媒体 ID 不能重复")
+        }
         val assets = mediaAssetRepository.findAllById(mediaIds)
         for (asset in assets) {
             if (asset.ownerUserId != userId) {
-                throw ApiResultException(HttpStatus.FORBIDDEN.value(), "媒体 $asset.id 不属于当前用户")
+                throw ApiResultException(HttpStatus.FORBIDDEN.value(), "媒体 ${asset.id} 不属于当前用户")
             }
             if (asset.deletedAt != null) {
                 throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "媒体 ${asset.id} 已被删除")
             }
         }
         // 确保所有请求的 mediaIds 都存在
-        val foundIds = assets.map { it.id }.toSet()
-        val missingIds = mediaIds.filter { it !in foundIds }
+        val assetsById = assets.associateBy { it.id }
+        val missingIds = mediaIds.filterNot { assetsById.containsKey(it) }
         if (missingIds.isNotEmpty()) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "媒体不存在: $missingIds")
         }
-        return assets
+        return mediaIds.map { mediaId -> assetsById.getValue(mediaId) }
     }
 
     /**
@@ -567,7 +572,7 @@ class FeedbackReportService(
                 ),
                 content = msg.content,
                 images = msg.images.map { img ->
-                    FeedbackMessageResponse.ImageInfo(id = img.id, url = img.url)
+                    FeedbackMessageResponse.ImageInfo(id = img.id, url = toPublicMediaUrl(img.url))
                 },
                 createdAt = msg.createdAt,
             )
@@ -611,6 +616,16 @@ class FeedbackReportService(
             createdAt = ticket.createdAt,
             updatedAt = ticket.updatedAt,
         )
+    }
+
+    private fun toPublicMediaUrl(url: String): String {
+        val normalized = url.trim()
+        if (normalized.isEmpty()) return url
+        if (normalized.startsWith("http://", ignoreCase = true) || normalized.startsWith("https://", ignoreCase = true)) {
+            return url
+        }
+        if (!normalized.startsWith('/')) return url
+        return properties.info.publicBaseUrl.trimEnd('/') + normalized
     }
 }
 
