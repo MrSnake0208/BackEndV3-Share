@@ -164,7 +164,7 @@ class MediaStorageService(
             "webp" -> UploadType(MediaKind.IMAGE, "image/webp", "webp")
                 .takeIf { declaredMime == "image/webp" }
             "txt", "log" -> UploadType(MediaKind.FILE, "text/plain", extension)
-                .takeIf { declaredMime.isEmpty() || declaredMime == "text/plain" }
+                .takeIf { declaredMime in TEXT_FILE_MIMES }
             "json" -> UploadType(MediaKind.FILE, "application/json", "json")
                 .takeIf { declaredMime == "application/json" }
             "pdf" -> UploadType(MediaKind.FILE, "application/pdf", "pdf")
@@ -242,6 +242,7 @@ class MediaStorageService(
 
     companion object {
         private const val CONTENT_PREFIX_SIZE = 8192
+        private val TEXT_FILE_MIMES = setOf("", "text/plain", "text/x-log", "application/octet-stream")
         private val JPEG_SIGNATURE = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())
         private val PNG_SIGNATURE = byteArrayOf(
             0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(),
