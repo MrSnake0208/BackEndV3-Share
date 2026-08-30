@@ -7,12 +7,16 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.ConstraintViolationException
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import org.springframework.web.multipart.MaxUploadSizeExceededException
+import org.springframework.web.multipart.MultipartException
+import org.springframework.web.multipart.support.MissingServletRequestPartException
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 
@@ -60,6 +64,27 @@ class GlobalExceptionHandler {
             return fail(HttpStatus.BAD_REQUEST.value(), "参数校验错误: " + fieldError.defaultMessage)
         }
         return fail(HttpStatus.BAD_REQUEST.value(), "参数校验错误: " + e.message)
+    }
+
+    /** multipart 请求超过 Spring 配置的封套上限。 */
+    @ExceptionHandler(MaxUploadSizeExceededException::class)
+    fun maxUploadSizeExceededException(e: MaxUploadSizeExceededException): ResponseEntity<ApiResult<Nothing>> =
+        multipartError(HttpStatus.PAYLOAD_TOO_LARGE, "上传文件超过请求大小限制")
+
+    /** multipart 格式错误或缺少文件字段。 */
+    @ExceptionHandler(MissingServletRequestPartException::class)
+    fun missingServletRequestPartException(e: MissingServletRequestPartException): ResponseEntity<ApiResult<Nothing>> =
+        multipartError(HttpStatus.BAD_REQUEST, "缺少文件字段: ${e.requestPartName}")
+
+    @ExceptionHandler(MultipartException::class)
+    fun multipartException(e: MultipartException): ResponseEntity<ApiResult<Nothing>> {
+        val isSizeOverflow = generateSequence<Throwable>(e) { it.cause }
+            .any { it is MaxUploadSizeExceededException }
+        return if (isSizeOverflow) {
+            multipartError(HttpStatus.PAYLOAD_TOO_LARGE, "上传文件超过请求大小限制")
+        } else {
+            multipartError(HttpStatus.BAD_REQUEST, "multipart 请求格式错误")
+        }
     }
 
     /**
@@ -112,4 +137,7 @@ class GlobalExceptionHandler {
         val parameter = parameterName?.let { ", parameter: $it" }.orEmpty()
         log.warn { "请求参数异常, url: ${request.requestURI}, method: ${request.method}$parameter" }
     }
+
+    private fun multipartError(status: HttpStatus, message: String): ResponseEntity<ApiResult<Nothing>> =
+        ResponseEntity.status(status).body(fail(status.value(), message))
 }

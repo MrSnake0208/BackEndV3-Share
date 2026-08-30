@@ -1,12 +1,17 @@
 package com.lhs.share.hub.service.report
 
+import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
+import com.lhs.share.hub.controller.report.request.FeedbackMessageAppendRequest
 import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
+import com.lhs.share.hub.repository.entity.FeedbackMessage
+import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.MediaAsset
 import com.lhs.share.hub.service.HubUserInfoService
 import com.lhs.share.hub.service.notification.NotificationService
 import io.mockk.every
@@ -15,6 +20,8 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.Optional
 
 class FeedbackReportServiceTest {
     private val ticketRepository = mockk<FeedbackTicketRepository>()
@@ -23,6 +30,7 @@ class FeedbackReportServiceTest {
     private val mediaRepository = mockk<MediaAssetRepository>()
     private val notificationService = mockk<NotificationService>(relaxed = true)
     private val userInfoService = mockk<HubUserInfoService>()
+    private val properties = ShareProperties().apply { info.publicBaseUrl = "https://api.example.test/" }
     private val service = FeedbackReportService(
         ticketRepository,
         queryRepository,
@@ -30,6 +38,7 @@ class FeedbackReportServiceTest {
         mediaRepository,
         notificationService,
         userInfoService,
+        properties,
     )
 
     private fun prepareCreate() {
@@ -102,4 +111,213 @@ class FeedbackReportServiceTest {
             service.create("user", FeedbackReportCreateRequest(type = "REPORT", content = "缺少板块"))
         }
     }
+
+    @Test
+    fun `媒体引用按请求顺序保存并在响应中转换为绝对 URL`() {
+        prepareCreate()
+        val first = media("med_first", "/media/med_first.png")
+        val second = media("med_second", "/media/med_second.webp")
+        every { mediaRepository.findAllById(listOf("med_second", "med_first")) } returns listOf(first, second)
+
+        val response = service.create(
+            "user",
+            FeedbackReportCreateRequest(
+                type = "BUG",
+                category = "OPERATOR",
+                content = "带截图的问题",
+                mediaIds = listOf("med_second", "med_first"),
+            ),
+        )
+
+        assertEquals(
+            listOf("med_second", "med_first"),
+            response.messages.single().images.map { it.id },
+        )
+        assertEquals(
+            listOf(
+                "https://api.example.test/media/med_second.webp",
+                "https://api.example.test/media/med_first.png",
+            ),
+            response.messages.single().images.map { it.url },
+        )
+        verify { mediaRepository.findAllById(listOf("med_second", "med_first")) }
+    }
+
+    @Test
+    fun `追加消息复用媒体归属校验并保留请求顺序`() {
+        val ticket = openTicket()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { ticketRepository.save(any()) } answers { firstArg() }
+        every { accessService.canManage("user", any()) } returns false
+        every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
+        val first = media("med_first", "/media/med_first.png")
+        val second = media("med_second", "/media/med_second.webp")
+        every { mediaRepository.findAllById(listOf("med_second", "med_first")) } returns listOf(first, second)
+
+        val response = service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("补充截图", listOf("med_second", "med_first")),
+        )
+
+        assertEquals(
+            listOf("med_second", "med_first"),
+            response.messages.last().images.map { it.id },
+        )
+    }
+
+    @Test
+    fun `管理员追加消息也能携带图片并保存为管理员消息`() {
+        val ticket = openTicket()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { ticketRepository.save(any()) } answers { firstArg() }
+        every { accessService.canManage("admin", any()) } returns true
+        every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
+        every { userInfoService.get("admin") } returns MaaUserInfo("admin", "管理员")
+        val first = media("med_first", "/media/med_first.png", owner = "admin")
+        val second = media("med_second", "/media/med_second.webp", owner = "admin")
+        every { mediaRepository.findAllById(listOf("med_first", "med_second")) } returns listOf(second, first)
+
+        val response = service.appendMessage(
+            "admin",
+            "rpt_1",
+            FeedbackMessageAppendRequest("处理结果", listOf("med_first", "med_second")),
+        )
+
+        assertEquals("ADMIN", response.messages.last().senderKind)
+        assertEquals(listOf("med_first", "med_second"), response.messages.last().images.map { it.id })
+    }
+
+    @Test
+    fun `重复媒体 ID 被拒绝且不会查询仓库`() {
+        prepareCreate()
+
+        val exception = assertThrows(ApiResultException::class.java) {
+            service.create(
+                "user",
+                FeedbackReportCreateRequest(
+                    type = "BUG",
+                    category = "OPERATOR",
+                    content = "重复图片",
+                    mediaIds = listOf("med_same", "med_same"),
+                ),
+            )
+        }
+
+        assertEquals(400, exception.statusCode)
+        verify(exactly = 0) { mediaRepository.findAllById(any()) }
+    }
+
+    @Test
+    fun `其他用户媒体和已结束工单不能通过图片追加`() {
+        prepareCreate()
+        every { mediaRepository.findAllById(listOf("med_other")) } returns listOf(media("med_other", owner = "other"))
+        val ownershipException = assertThrows(ApiResultException::class.java) {
+            service.create(
+                "user",
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "越权图片", listOf("med_other")),
+            )
+        }
+        assertEquals(403, ownershipException.statusCode)
+
+        listOf("RESOLVED", "DISMISSED").forEach { status ->
+            val ticketId = "rpt_${status.lowercase()}"
+            every { ticketRepository.findById(ticketId) } returns Optional.of(
+                openTicket().copy(id = ticketId, status = status),
+            )
+            val statusException = assertThrows(ApiResultException::class.java) {
+                service.appendMessage(
+                    "user",
+                    ticketId,
+                    FeedbackMessageAppendRequest("已结束", listOf("med_other")),
+                )
+            }
+            assertEquals(400, statusException.statusCode)
+        }
+    }
+
+    @Test
+    fun `媒体数量、缺失媒体和已删除媒体会被拒绝`() {
+        prepareCreate()
+
+        val tooManyException = assertThrows(ApiResultException::class.java) {
+            service.create(
+                "user",
+                FeedbackReportCreateRequest(
+                    type = "BUG",
+                    category = "OPERATOR",
+                    content = "图片太多",
+                    mediaIds = listOf("med_1", "med_2", "med_3", "med_4"),
+                ),
+            )
+        }
+        assertEquals(400, tooManyException.statusCode)
+
+        every { mediaRepository.findAllById(listOf("med_missing")) } returns emptyList()
+        val missingException = assertThrows(ApiResultException::class.java) {
+            service.create(
+                "user",
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "媒体缺失", listOf("med_missing")),
+            )
+        }
+        assertEquals(400, missingException.statusCode)
+
+        every { mediaRepository.findAllById(listOf("med_deleted")) } returns listOf(
+            media("med_deleted").copy(deletedAt = Instant.parse("2026-08-30T00:00:00Z")),
+        )
+        val deletedException = assertThrows(ApiResultException::class.java) {
+            service.create(
+                "user",
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "媒体已删除", listOf("med_deleted")),
+            )
+        }
+        assertEquals(400, deletedException.statusCode)
+    }
+
+    @Test
+    fun `历史绝对图片 URL 和空 URL 不会被重复拼接或阻断响应`() {
+        val ticket = openTicket().copy(
+            messages = listOf(
+                FeedbackMessage(
+                    id = "rpm_history",
+                    senderKind = "REPORTER",
+                    authorUserId = "user",
+                    content = "历史数据",
+                    images = listOf(
+                        FeedbackMessageImage("med_abs", "https://cdn.example.test/a.webp"),
+                        FeedbackMessageImage("med_empty", ""),
+                    ),
+                    createdAt = Instant.parse("2026-08-30T00:00:00Z"),
+                ),
+            ),
+        )
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { accessService.canManage("user", any()) } returns false
+        every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
+
+        val response = service.getById("user", "rpt_1")
+
+        assertEquals("https://cdn.example.test/a.webp", response.messages.single().images[0].url)
+        assertEquals("", response.messages.single().images[1].url)
+    }
+
+    private fun media(id: String, path: String = "/media/$id.webp", owner: String = "user"): MediaAsset =
+        MediaAsset(id, owner, "$id.webp", "image/webp", 12, path)
+
+    private fun openTicket(): FeedbackTicket = FeedbackTicket(
+        id = "rpt_1",
+        type = FeedbackType.BUG,
+        category = FeedbackArea.OPERATOR,
+        area = FeedbackArea.OPERATOR,
+        reporterUserId = "user",
+        content = "原始反馈",
+        messages = listOf(
+            FeedbackMessage(
+                id = "rpm_initial",
+                senderKind = "REPORTER",
+                authorUserId = "user",
+                content = "原始反馈",
+            ),
+        ),
+    )
 }
