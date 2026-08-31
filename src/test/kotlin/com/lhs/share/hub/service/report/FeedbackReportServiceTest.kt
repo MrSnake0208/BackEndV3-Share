@@ -5,6 +5,7 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
 import com.lhs.share.hub.controller.report.request.FeedbackMessageAppendRequest
 import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
+import com.lhs.share.hub.controller.report.request.FeedbackStatusUpdateRequest
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
@@ -20,6 +21,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -247,6 +251,218 @@ class FeedbackReportServiceTest {
     }
 
     @Test
+    fun `双角色显式提交人追加只产生提交人副作用`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "user", canManage = true)
+
+        val response = service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("个人补充", actorMode = " reporter "),
+        )
+
+        assertEquals("REPORTER", response.messages.last().senderKind)
+        assertEquals(1, response.quota.pendingCount)
+        assertTrue(response.quota.canAppend)
+        verify {
+            ticketRepository.save(match {
+                it.lastMessageSender == "REPORTER" &&
+                    !it.hasAdminReply &&
+                    it.adminReply == null
+            })
+        }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `双角色显式管理员追加更新摘要但不通知自己`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "user", canManage = true)
+
+        val response = service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("工作台回复", actorMode = "ADMIN"),
+        )
+
+        assertEquals("ADMIN", response.messages.last().senderKind)
+        verify {
+            ticketRepository.save(match {
+                it.lastMessageSender == "ADMIN" &&
+                    it.hasAdminReply &&
+                    it.adminReply == "工作台回复"
+            })
+        }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `消息身份非法越权和双角色缺省均拒绝写入`() {
+        val ticket = openTicket()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { accessService.canManage("admin", any()) } returns true
+        every { accessService.canManage("user", any()) } returns false
+        every { accessService.canManage("outsider", any()) } returns false
+
+        val reporterForbidden = assertThrows(ApiResultException::class.java) {
+            service.appendMessage("admin", "rpt_1", FeedbackMessageAppendRequest("越权", actorMode = "REPORTER"))
+        }
+        val adminForbidden = assertThrows(ApiResultException::class.java) {
+            service.appendMessage("user", "rpt_1", FeedbackMessageAppendRequest("越权", actorMode = "ADMIN"))
+        }
+        val invalid = assertThrows(ApiResultException::class.java) {
+            service.appendMessage("outsider", "rpt_1", FeedbackMessageAppendRequest("非法", actorMode = "OWNER"))
+        }
+        every { accessService.canManage("user", any()) } returns true
+        val ambiguous = assertThrows(ApiResultException::class.java) {
+            service.appendMessage("user", "rpt_1", FeedbackMessageAppendRequest("缺省"))
+        }
+
+        assertEquals(403, reporterForbidden.statusCode)
+        assertEquals(403, adminForbidden.statusCode)
+        assertEquals(400, invalid.statusCode)
+        assertEquals(400, ambiguous.statusCode)
+        verify(exactly = 0) { ticketRepository.save(any()) }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `双角色提交人达到补充上限但管理员模式仍可回复`() {
+        val reporterMessages = (1..3).map { index ->
+            FeedbackMessage(
+                id = "rpm_pending_$index",
+                senderKind = "REPORTER",
+                authorUserId = "user",
+                content = "补充 $index",
+            )
+        }
+        val ticket = openTicket().copy(messages = openTicket().messages + reporterMessages)
+        prepareTicket(ticket, "user", canManage = true)
+
+        val detail = service.getById("user", "rpt_1")
+        val quotaException = assertThrows(ApiResultException::class.java) {
+            service.appendMessage(
+                "user",
+                "rpt_1",
+                FeedbackMessageAppendRequest("第四次补充", actorMode = "REPORTER"),
+            )
+        }
+        val adminResponse = service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("管理员回复", actorMode = "ADMIN"),
+        )
+
+        assertEquals(3, detail.quota.pendingCount)
+        assertFalse(detail.quota.canAppend)
+        assertEquals(400, quotaException.statusCode)
+        assertEquals("ADMIN", adminResponse.messages.last().senderKind)
+    }
+
+    @Test
+    fun `双角色以提交人关闭工单不写处理字段也不通知`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "user", canManage = true)
+
+        val response = service.updateStatus(
+            "user",
+            "rpt_1",
+            FeedbackStatusUpdateRequest("RESOLVED", actorMode = "REPORTER"),
+        )
+
+        assertEquals("RESOLVED", response.status)
+        assertNull(response.handler)
+        verify {
+            ticketRepository.save(match {
+                it.status == "RESOLVED" && it.handlerUserId == null && it.handledAt == null
+            })
+        }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `双角色以管理员处理工单写处理字段但不通知自己`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "user", canManage = true)
+
+        val response = service.updateStatus(
+            "user",
+            "rpt_1",
+            FeedbackStatusUpdateRequest("DISMISSED", actorMode = "ADMIN"),
+        )
+
+        assertEquals("DISMISSED", response.status)
+        assertEquals("user", response.handler?.id)
+        verify {
+            ticketRepository.save(match {
+                it.status == "DISMISSED" && it.handlerUserId == "user" && it.handledAt != null
+            })
+        }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `管理员处理他人工单会通知且状态不变时不重复保存`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "admin", canManage = true)
+
+        val response = service.updateStatus(
+            "admin",
+            "rpt_1",
+            FeedbackStatusUpdateRequest("RESOLVED", actorMode = "ADMIN"),
+        )
+
+        assertEquals("admin", response.handler?.id)
+        assertNotNull(response.updatedAt)
+        verify {
+            notificationService.create(
+                userId = "user",
+                kind = "FEEDBACK_STATUS_UPDATED",
+                title = any(),
+                body = any(),
+                refType = "FEEDBACK",
+                refId = "rpt_1",
+            )
+        }
+
+        val resolved = ticket.copy(status = "RESOLVED")
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(resolved)
+        service.updateStatus("admin", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED", actorMode = "ADMIN"))
+        verify(exactly = 1) { ticketRepository.save(any()) }
+        verify(exactly = 1) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `状态身份非法越权和双角色缺省与消息规则一致`() {
+        val ticket = openTicket()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
+        every { accessService.canManage("admin", any()) } returns true
+        every { accessService.canManage("user", any()) } returns false
+        every { accessService.canManage("outsider", any()) } returns false
+
+        val reporterForbidden = assertThrows(ApiResultException::class.java) {
+            service.updateStatus("admin", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED", "REPORTER"))
+        }
+        val adminForbidden = assertThrows(ApiResultException::class.java) {
+            service.updateStatus("user", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED", "ADMIN"))
+        }
+        val invalid = assertThrows(ApiResultException::class.java) {
+            service.updateStatus("outsider", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED", "OWNER"))
+        }
+        every { accessService.canManage("user", any()) } returns true
+        val ambiguous = assertThrows(ApiResultException::class.java) {
+            service.updateStatus("user", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED"))
+        }
+
+        assertEquals(403, reporterForbidden.statusCode)
+        assertEquals(403, adminForbidden.statusCode)
+        assertEquals(400, invalid.statusCode)
+        assertEquals(400, ambiguous.statusCode)
+        verify(exactly = 0) { ticketRepository.save(any()) }
+        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `重复媒体 ID 被拒绝且不会查询仓库`() {
         prepareCreate()
 
@@ -368,6 +584,17 @@ class FeedbackReportServiceTest {
         size: Long = 12,
         kind: MediaKind? = null,
     ): MediaAsset = MediaAsset(id, owner, name, mime, size, path, kind = kind)
+
+    private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {
+        every { ticketRepository.findById(checkNotNull(ticket.id)) } returns Optional.of(ticket)
+        every { ticketRepository.save(any()) } answers { firstArg() }
+        every { accessService.canManage(currentUserId, any()) } returns canManage
+        every { mediaRepository.findAllById(emptyList()) } returns emptyList()
+        every { userInfoService.get(any()) } answers {
+            val userId = firstArg<String>()
+            MaaUserInfo(userId, userId)
+        }
+    }
 
     private fun openTicket(): FeedbackTicket = FeedbackTicket(
         id = "rpt_1",

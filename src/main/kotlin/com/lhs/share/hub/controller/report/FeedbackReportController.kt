@@ -155,7 +155,11 @@ class FeedbackReportController(
     /**
      * 追加消息
      */
-    @Operation(summary = "追加消息到工单")
+    @Operation(
+        summary = "追加消息到工单",
+        description = "actor_mode 可为 REPORTER 或 ADMIN，后端会按工单归属和板块管理权限重新授权。" +
+            "兼容期缺省仅在身份唯一时推断，双角色缺省返回业务 status_code=400，越权返回业务 status_code=403。",
+    )
     @RequireJwt
     @PostMapping("/{id}/messages")
     fun appendMessage(
@@ -169,7 +173,11 @@ class FeedbackReportController(
     /**
      * 更新工单状态
      */
-    @Operation(summary = "更新工单状态")
+    @Operation(
+        summary = "更新工单状态",
+        description = "actor_mode 可为 REPORTER 或 ADMIN，后端会按工单归属和板块管理权限重新授权。" +
+            "兼容期缺省仅在身份唯一时推断，双角色缺省返回业务 status_code=400，越权返回业务 status_code=403。",
+    )
     @RequireJwt
     @PatchMapping("/{id}/status")
     fun updateStatus(@PathVariable id: String, @RequestBody request: FeedbackStatusUpdateRequest): ApiResult<FeedbackReportResponse> {

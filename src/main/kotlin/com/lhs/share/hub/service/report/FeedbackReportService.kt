@@ -56,6 +56,11 @@ class FeedbackReportService(
         val category: String,
     )
 
+    private enum class ActorMode {
+        REPORTER,
+        ADMIN,
+    }
+
     companion object {
         /** 允许的状态 */
         private val VALID_STATUSES = setOf("OPEN", "RESOLVED", "DISMISSED")
@@ -331,9 +336,7 @@ class FeedbackReportService(
         val isReporter = ticket.reporterUserId == currentUserId
         val fields = normalizedTicketFields(ticket)
         val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
-        if (!isReporter && !isManager) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的管理权限")
-        }
+        val actorMode = resolveActorMode(request.actorMode, isReporter, isManager)
 
         // 仅 OPEN 工单可追加
         if (ticket.status != "OPEN") {
@@ -341,7 +344,7 @@ class FeedbackReportService(
         }
 
         // 提交人补充受连续消息限制；模块管理员回复会重置计数。
-        if (!isManager) {
+        if (actorMode == ActorMode.REPORTER) {
             val pendingCount = countPendingMessagesAfterLastAdminReply(ticket)
             if (pendingCount >= PENDING_LIMIT) {
                 throw ApiResultException(
@@ -355,7 +358,7 @@ class FeedbackReportService(
         val mediaAssets = validateMediaIds(currentUserId, request.mediaIds)
 
         // 构建消息
-        val senderKind = if (isManager) "ADMIN" else "REPORTER"
+        val senderKind = actorMode.name
         val message = FeedbackMessage(
             id = generateId("rpm_"),
             senderKind = senderKind,
@@ -380,7 +383,7 @@ class FeedbackReportService(
         log.info { "反馈工单消息追加: ticketId=$ticketId, sender=$senderKind" }
 
         // 管理员回复后, 给提交人生成通知
-        if (senderKind == "ADMIN") {
+        if (actorMode == ActorMode.ADMIN && currentUserId != ticket.reporterUserId) {
             notificationService.create(
                 userId = ticket.reporterUserId,
                 kind = "FEEDBACK_REPLY",
@@ -405,9 +408,7 @@ class FeedbackReportService(
         val isReporter = ticket.reporterUserId == currentUserId
         val fields = normalizedTicketFields(ticket)
         val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
-        if (!isReporter && !isManager) {
-            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的管理权限")
-        }
+        val actorMode = resolveActorMode(request.actorMode, isReporter, isManager)
 
         val newStatus = request.status.trim().uppercase()
         if (newStatus !in VALID_STATUSES) {
@@ -415,7 +416,7 @@ class FeedbackReportService(
         }
 
         // 权限校验状态变更
-        if (isManager) {
+        if (actorMode == ActorMode.ADMIN) {
             if (newStatus !in ADMIN_ALLOWED_STATUSES) {
                 throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "管理员不允许设置状态: $newStatus")
             }
@@ -437,8 +438,8 @@ class FeedbackReportService(
         val now = Instant.now()
         val updatedTicket = ticket.copy(
             status = newStatus,
-            handlerUserId = if (isManager) currentUserId else ticket.handlerUserId,
-            handledAt = if (isManager) now else ticket.handledAt,
+            handlerUserId = if (actorMode == ActorMode.ADMIN) currentUserId else ticket.handlerUserId,
+            handledAt = if (actorMode == ActorMode.ADMIN) now else ticket.handledAt,
             updatedAt = now,
         )
 
@@ -446,7 +447,7 @@ class FeedbackReportService(
         log.info { "反馈工单状态更新: ticketId=$ticketId, ${ticket.status} → $newStatus, by=$currentUserId" }
 
         // 管理员改状态后, 给提交人生成通知 (状态有实际变化)
-        if (isManager && ticket.status != newStatus) {
+        if (actorMode == ActorMode.ADMIN && currentUserId != ticket.reporterUserId) {
             val statusLabel = when (newStatus) {
                 "RESOLVED" -> "已处理"
                 "DISMISSED" -> "已忽略"
@@ -466,6 +467,37 @@ class FeedbackReportService(
     }
 
     // ========== 内部方法 ==========
+
+    private fun resolveActorMode(requestedMode: String?, isReporter: Boolean, isManager: Boolean): ActorMode {
+        val actorMode = requestedMode?.trim()?.uppercase()?.let { normalized ->
+            ActorMode.entries.firstOrNull { it.name == normalized }
+                ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的 actor_mode: $requestedMode")
+        }
+
+        return when (actorMode) {
+            ActorMode.REPORTER -> {
+                if (!isReporter) {
+                    throw ApiResultException(HttpStatus.FORBIDDEN.value(), "当前用户不是工单提交人")
+                }
+                ActorMode.REPORTER
+            }
+            ActorMode.ADMIN -> {
+                if (!isManager) {
+                    throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的管理权限")
+                }
+                ActorMode.ADMIN
+            }
+            null -> when {
+                isReporter && isManager -> throw ApiResultException(
+                    HttpStatus.BAD_REQUEST.value(),
+                    "当前用户同时具有提交人和管理员身份，请明确指定 actor_mode",
+                )
+                isReporter -> ActorMode.REPORTER
+                isManager -> ActorMode.ADMIN
+                else -> throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈工单的操作权限")
+            }
+        }
+    }
 
     private fun notifyCategoryReceivers(ticket: FeedbackTicket) {
         val ticketId = checkNotNull(ticket.id)
@@ -597,7 +629,7 @@ class FeedbackReportService(
             0
         }
         val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
-        val canAppend = ticket.status == "OPEN" && (isManager || (isReporter && pendingCount < PENDING_LIMIT))
+        val canAppend = ticket.status == "OPEN" && isReporter && pendingCount < PENDING_LIMIT
 
         val messageResponses = ticket.messages.map { msg ->
             val authorInfo = hubUserInfoService.get(msg.authorUserId)
