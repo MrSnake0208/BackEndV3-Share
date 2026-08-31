@@ -92,7 +92,8 @@ class GlobalExceptionHandler {
      */
     @ExceptionHandler(NoResourceFoundException::class)
     fun handleNoResourceFoundException(e: NoResourceFoundException): ApiResult<Unit> {
-        log.warn(e) { "请求资源不存在" }
+        log.error { "请求资源不存在, resource: ${e.resourcePath}" }
+        log.debug(e) { "请求资源不存在详细信息" }
         return fail(HttpStatus.NOT_FOUND.value(), "请求资源 " + e.resourcePath + " 不存在")
     }
 
