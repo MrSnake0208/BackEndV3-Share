@@ -17,7 +17,7 @@ import java.time.Instant
  * 通知服务
  *
  * 提供通知的创建、查询、标记已读等功能。
- * 管理员回复/更新状态后，由反馈服务调用 [create] 生成通知。
+ * 反馈消息、管理员回复或状态更新后，由反馈服务调用 [create] 生成通知。
  */
 @Service
 @Transactional

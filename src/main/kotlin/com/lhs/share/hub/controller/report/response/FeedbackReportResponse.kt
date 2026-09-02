@@ -105,6 +105,9 @@ data class FeedbackReportResponse(
  * @property content 正文预览
  * @property hasAdminReply 是否有管理员回复
  * @property lastMessageSender 最后消息发送方
+ * @property lastReporterMessageId 最后一条用户消息 id
+ * @property lastReporterMessageCreatedAt 最后一条用户消息时间
+ * @property lastReporterMessageIndex 最后一条用户消息在消息数组中的零基索引
  * @property reporterUserId 提交人 id
  * @property reporterName 提交人昵称
  * @property createdAt 创建时间
@@ -119,6 +122,9 @@ data class FeedbackReportListItem(
     val content: String,
     val hasAdminReply: Boolean,
     val lastMessageSender: String,
+    val lastReporterMessageId: String?,
+    val lastReporterMessageCreatedAt: Instant?,
+    val lastReporterMessageIndex: Int?,
     val reporterUserId: String,
     val reporterName: String?,
     val createdAt: Instant,

@@ -8,6 +8,8 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.handler.GlobalExceptionHandler
 import com.lhs.share.hub.controller.report.FeedbackReportController
+import com.lhs.share.hub.controller.report.response.FeedbackReportListItem
+import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
 import com.lhs.share.hub.service.media.MediaStorageService
 import com.lhs.share.hub.service.report.FeedbackReportService
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -103,6 +106,50 @@ class FeedbackReportControllerContractTest {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status_code").value(400))
+    }
+
+    @Test
+    fun `feedback list serializes reporter boundary fields as snake case`() {
+        val now = Instant.parse("2026-08-31T00:00:00Z")
+        every { reportService.list(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            FeedbackReportListResponse(
+                reports = listOf(
+                    FeedbackReportListItem(
+                        id = "rpt_1",
+                        type = "BUG",
+                        category = "OPERATOR",
+                        area = "OPERATOR",
+                        status = "OPEN",
+                        content = "原始反馈",
+                        hasAdminReply = false,
+                        lastMessageSender = "REPORTER",
+                        lastReporterMessageId = "rpm_123",
+                        lastReporterMessageCreatedAt = now,
+                        lastReporterMessageIndex = 4,
+                        reporterUserId = "u1",
+                        reporterName = "用户",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                ),
+                total = 1,
+                page = 1,
+                pageSize = 20,
+                mine = false,
+                sortBy = "updatedAt",
+                sortOrder = "desc",
+            )
+
+        mockMvc.perform(
+            get("/v1/reports")
+                .param("mine", "false")
+                .param("sortBy", "updatedAt")
+                .param("sortOrder", "desc"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.reports[0].last_reporter_message_id").value("rpm_123"))
+            .andExpect(jsonPath("$.data.reports[0].last_reporter_message_created_at").value("2026-08-31T00:00:00Z"))
+            .andExpect(jsonPath("$.data.reports[0].last_reporter_message_index").value(4))
     }
 
     private fun response(): FeedbackReportResponse {

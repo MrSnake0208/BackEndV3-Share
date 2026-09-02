@@ -11,7 +11,7 @@ import java.time.Instant
  * 站内通知
  *
  * 存储在 HubBackend 的 notifications 集合。
- * 管理员回复/更新状态后，系统给提交人生成通知。
+ * 反馈消息、管理员回复或状态更新后，系统按权限给相关用户生成通知。
  */
 @Document("notifications")
 @CompoundIndexes(
@@ -26,7 +26,7 @@ data class Notification(
      */
     val userId: String,
     /**
-     * 通知类型：FEEDBACK_REPLY | FEEDBACK_STATUS_UPDATED
+     * 通知类型：FEEDBACK_REPLY | FEEDBACK_STATUS_UPDATED | FEEDBACK_ASSIGNED | FEEDBACK_MESSAGE_FROM_REPORTER
      */
     val kind: String,
     val title: String,

@@ -2,7 +2,6 @@ package com.lhs.share.hub.service.report
 
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
-import com.lhs.share.repository.entity.MaaUser
 import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.entity.AdminAuditAction
@@ -11,6 +10,7 @@ import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.hub.service.admin.AdminAuditService
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
+import com.lhs.share.repository.entity.MaaUser
 import com.lhs.share.service.UserService
 import io.mockk.every
 import io.mockk.mockk
@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.util.Optional
 import org.springframework.data.domain.PageImpl
+import java.util.Optional
 
 class FeedbackAccessServiceTest {
     private val repository = mockk<FeedbackAccessGrantRepository>()
@@ -52,6 +52,17 @@ class FeedbackAccessServiceTest {
 
         assertTrue(service.canManage("root", FeedbackArea.LEDGER))
         assertEquals(FeedbackArea.all, service.manageableAreas("root"))
+    }
+
+    @Test
+    fun `用户反馈通知接收者使用 manageAreas 管理者集合`() {
+        every { authorizationService.managerUserIdsFor(FeedbackArea.OPERATOR) } returns setOf("manager", "root")
+
+        assertEquals(
+            setOf("manager", "root"),
+            service.managerUserIds(FeedbackArea.OPERATOR),
+        )
+        verify { authorizationService.managerUserIdsFor(FeedbackArea.OPERATOR) }
     }
 
     @Test

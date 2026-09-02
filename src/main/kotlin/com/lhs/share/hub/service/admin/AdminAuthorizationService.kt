@@ -53,6 +53,16 @@ class AdminAuthorizationService(
         return feedbackAccessRepository.findById(userId).orElse(null)?.manageAreas.orEmpty()
     }
 
+    fun managerUserIdsFor(area: String): Set<String> {
+        val grantUserIds = feedbackAccessRepository.findByManageAreasContaining(area)
+            .map { it.userId }
+        val superAdminUserIds = roleRepository.findByRolesContaining(AdminRole.SUPER_ADMIN)
+            .map { it.userId }
+        return (grantUserIds + superAdminUserIds)
+            .filter { userService.get(it)?.activated == true }
+            .toSet()
+    }
+
     fun canReadFeedback(userId: String, area: String): Boolean = area in manageableAreasFor(userId)
 
     fun canManageFeedback(userId: String, area: String): Boolean = area in manageableAreasFor(userId)

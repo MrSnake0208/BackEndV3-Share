@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.data.domain.PageImpl
 import java.time.Instant
 import java.util.Optional
 
@@ -48,6 +49,10 @@ class FeedbackReportServiceTest {
         properties,
     )
 
+    init {
+        every { accessService.managerUserIds(any()) } returns emptySet()
+    }
+
     private fun prepareCreate() {
         every { mediaRepository.findAllById(emptyList()) } returns emptyList()
         every { ticketRepository.save(any()) } answers { firstArg() }
@@ -68,11 +73,13 @@ class FeedbackReportServiceTest {
         assertEquals(FeedbackType.BUG, response.type)
         assertEquals(FeedbackArea.OPERATOR, response.category)
         verify {
-            ticketRepository.save(match {
-                it.type == FeedbackType.BUG &&
-                    it.category == FeedbackArea.OPERATOR &&
-                    it.area == FeedbackArea.OPERATOR
-            })
+            ticketRepository.save(
+                match {
+                    it.type == FeedbackType.BUG &&
+                        it.category == FeedbackArea.OPERATOR &&
+                        it.area == FeedbackArea.OPERATOR
+                },
+            )
         }
     }
 
@@ -117,6 +124,95 @@ class FeedbackReportServiceTest {
         assertThrows(ApiResultException::class.java) {
             service.create("user", FeedbackReportCreateRequest(type = "REPORT", content = "缺少板块"))
         }
+    }
+
+    @Test
+    fun `管理列表只从最后一条 REPORTER 消息推导边界`() {
+        val firstReporter = FeedbackMessage(
+            id = "rpm_initial",
+            senderKind = "REPORTER",
+            authorUserId = "user",
+            content = "原始反馈",
+            createdAt = Instant.parse("2026-09-01T10:00:00Z"),
+        )
+        val adminReply = FeedbackMessage(
+            id = "rpm_admin",
+            senderKind = "ADMIN",
+            authorUserId = "admin",
+            content = "已收到",
+            createdAt = Instant.parse("2026-09-01T11:00:00Z"),
+        )
+        val latestReporter = FeedbackMessage(
+            id = "rpm_latest",
+            senderKind = "REPORTER",
+            authorUserId = "user",
+            content = "补充信息",
+            createdAt = Instant.parse("2026-09-01T12:00:00Z"),
+        )
+        val ticket = openTicket().copy(messages = listOf(firstReporter, adminReply, latestReporter))
+        every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
+
+        val item = service.list(
+            currentUserId = "admin",
+            page = 1,
+            pageSize = 20,
+            status = null,
+            type = null,
+            category = null,
+            area = null,
+            mine = false,
+            reporterUserId = null,
+            keyword = null,
+            sortBy = "updatedAt",
+            sortOrder = "desc",
+        ).reports.single()
+
+        assertEquals("rpm_latest", item.lastReporterMessageId)
+        assertEquals(Instant.parse("2026-09-01T12:00:00Z"), item.lastReporterMessageCreatedAt)
+        assertEquals(2, item.lastReporterMessageIndex)
+    }
+
+    @Test
+    fun `没有用户消息时列表边界全部为空`() {
+        val ticket = openTicket().copy(
+            messages = listOf(
+                FeedbackMessage("rpm_admin", "ADMIN", "admin", "管理员回复"),
+            ),
+        )
+        every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
+
+        val item = service.list(
+            "admin", 1, 20, null, null, null, null, false, null, null, "updatedAt", "desc",
+        ).reports.single()
+
+        assertNull(item.lastReporterMessageId)
+        assertNull(item.lastReporterMessageCreatedAt)
+        assertNull(item.lastReporterMessageIndex)
+    }
+
+    @Test
+    fun `消息发送方无法识别时列表边界安全降级为空`() {
+        val ticket = openTicket().copy(
+            messages = listOf(
+                FeedbackMessage("rpm_reporter", "REPORTER", "user", "用户消息"),
+                FeedbackMessage("rpm_unknown", "SYSTEM", "system", "未知消息"),
+            ),
+        )
+        every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
+
+        val item = service.list(
+            "admin", 1, 20, null, null, null, null, false, null, null, "updatedAt", "desc",
+        ).reports.single()
+
+        assertNull(item.lastReporterMessageId)
+        assertNull(item.lastReporterMessageCreatedAt)
+        assertNull(item.lastReporterMessageIndex)
     }
 
     @Test
@@ -251,6 +347,58 @@ class FeedbackReportServiceTest {
     }
 
     @Test
+    fun `提交人每次追加消息都通知对应模块管理员并排除提交人`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "user", canManage = false)
+        every { ticketRepository.findById("rpt_1") } returnsMany listOf(
+            Optional.of(ticket),
+            Optional.of(
+                ticket.copy(
+                    messages = ticket.messages + FeedbackMessage(
+                        id = "rpm_previous",
+                        senderKind = "REPORTER",
+                        authorUserId = "user",
+                        content = "第一次补充",
+                    ),
+                ),
+            ),
+        )
+        every { accessService.managerUserIds(FeedbackArea.OPERATOR) } returns setOf("manager", "user")
+
+        service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("第一次补充", actorMode = "REPORTER"),
+        )
+        service.appendMessage(
+            "user",
+            "rpt_1",
+            FeedbackMessageAppendRequest("第二次补充", actorMode = "REPORTER"),
+        )
+
+        verify(exactly = 2) {
+            notificationService.create(
+                userId = "manager",
+                kind = "FEEDBACK_MESSAGE_FROM_REPORTER",
+                title = any(),
+                body = any(),
+                refType = "FEEDBACK",
+                refId = "rpt_1",
+            )
+        }
+        verify(exactly = 0) {
+            notificationService.create(
+                userId = "user",
+                kind = "FEEDBACK_MESSAGE_FROM_REPORTER",
+                title = any(),
+                body = any(),
+                refType = "FEEDBACK",
+                refId = "rpt_1",
+            )
+        }
+    }
+
+    @Test
     fun `双角色显式提交人追加只产生提交人副作用`() {
         val ticket = openTicket()
         prepareTicket(ticket, "user", canManage = true)
@@ -265,17 +413,19 @@ class FeedbackReportServiceTest {
         assertEquals(1, response.quota.pendingCount)
         assertTrue(response.quota.canAppend)
         verify {
-            ticketRepository.save(match {
-                it.lastMessageSender == "REPORTER" &&
-                    !it.hasAdminReply &&
-                    it.adminReply == null
-            })
+            ticketRepository.save(
+                match {
+                    it.lastMessageSender == "REPORTER" &&
+                        !it.hasAdminReply &&
+                        it.adminReply == null
+                },
+            )
         }
         verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `双角色显式管理员追加更新摘要但不通知自己`() {
+    fun `双角色显式管理员追加更新摘要并通知自己的反馈回复`() {
         val ticket = openTicket()
         prepareTicket(ticket, "user", canManage = true)
 
@@ -287,13 +437,24 @@ class FeedbackReportServiceTest {
 
         assertEquals("ADMIN", response.messages.last().senderKind)
         verify {
-            ticketRepository.save(match {
-                it.lastMessageSender == "ADMIN" &&
-                    it.hasAdminReply &&
-                    it.adminReply == "工作台回复"
-            })
+            ticketRepository.save(
+                match {
+                    it.lastMessageSender == "ADMIN" &&
+                        it.hasAdminReply &&
+                        it.adminReply == "工作台回复"
+                },
+            )
         }
-        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+        verify {
+            notificationService.create(
+                userId = "user",
+                kind = "FEEDBACK_REPLY",
+                title = any(),
+                body = any(),
+                refType = "FEEDBACK",
+                refId = "rpt_1",
+            )
+        }
     }
 
     @Test
@@ -373,15 +534,17 @@ class FeedbackReportServiceTest {
         assertEquals("RESOLVED", response.status)
         assertNull(response.handler)
         verify {
-            ticketRepository.save(match {
-                it.status == "RESOLVED" && it.handlerUserId == null && it.handledAt == null
-            })
+            ticketRepository.save(
+                match {
+                    it.status == "RESOLVED" && it.handlerUserId == null && it.handledAt == null
+                },
+            )
         }
         verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `双角色以管理员处理工单写处理字段但不通知自己`() {
+    fun `双角色以管理员处理自己的反馈写处理字段并收到状态通知`() {
         val ticket = openTicket()
         prepareTicket(ticket, "user", canManage = true)
 
@@ -394,11 +557,22 @@ class FeedbackReportServiceTest {
         assertEquals("DISMISSED", response.status)
         assertEquals("user", response.handler?.id)
         verify {
-            ticketRepository.save(match {
-                it.status == "DISMISSED" && it.handlerUserId == "user" && it.handledAt != null
-            })
+            ticketRepository.save(
+                match {
+                    it.status == "DISMISSED" && it.handlerUserId == "user" && it.handledAt != null
+                },
+            )
         }
-        verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
+        verify {
+            notificationService.create(
+                userId = "user",
+                kind = "FEEDBACK_STATUS_UPDATED",
+                title = any(),
+                body = any(),
+                refType = "FEEDBACK",
+                refId = "rpt_1",
+            )
+        }
     }
 
     @Test
