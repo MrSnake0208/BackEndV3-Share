@@ -5,4 +5,6 @@ import org.springframework.data.mongodb.repository.MongoRepository
 
 interface FeedbackAccessGrantRepository : MongoRepository<FeedbackAccessGrant, String> {
     fun findByReceiveAreasContaining(area: String): List<FeedbackAccessGrant>
+
+    fun findByManageAreasContaining(area: String): List<FeedbackAccessGrant>
 }

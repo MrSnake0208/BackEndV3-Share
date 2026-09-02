@@ -56,6 +56,12 @@ class FeedbackReportService(
         val category: String,
     )
 
+    private data class ReporterMessageBoundary(
+        val id: String?,
+        val createdAt: Instant,
+        val index: Int,
+    )
+
     private enum class ActorMode {
         REPORTER,
         ADMIN,
@@ -276,6 +282,7 @@ class FeedbackReportService(
         val userDict = hubUserInfoService.getDict(resultPage.content.map { it.reporterUserId }.toSet())
         val items = resultPage.content.map { ticket ->
             val fields = normalizedTicketFields(ticket)
+            val reporterBoundary = lastReporterMessageBoundary(ticket)
             FeedbackReportListItem(
                 id = checkNotNull(ticket.id),
                 type = fields.type,
@@ -285,6 +292,9 @@ class FeedbackReportService(
                 content = ticket.content.take(100),
                 hasAdminReply = ticket.hasAdminReply || ticket.messages.any { it.senderKind == "ADMIN" },
                 lastMessageSender = ticket.lastMessageSender,
+                lastReporterMessageId = reporterBoundary?.id,
+                lastReporterMessageCreatedAt = reporterBoundary?.createdAt,
+                lastReporterMessageIndex = reporterBoundary?.index,
                 reporterUserId = ticket.reporterUserId,
                 reporterName = userDict[ticket.reporterUserId]?.userName,
                 createdAt = ticket.createdAt,
@@ -382,8 +392,24 @@ class FeedbackReportService(
         val saved = feedbackTicketRepository.save(updatedTicket)
         log.info { "反馈工单消息追加: ticketId=$ticketId, sender=$senderKind" }
 
-        // 管理员回复后, 给提交人生成通知
-        if (actorMode == ActorMode.ADMIN && currentUserId != ticket.reporterUserId) {
+        // 提交人追加后, 给有该模块管理权限的管理员逐个生成通知
+        if (actorMode == ActorMode.REPORTER) {
+            feedbackAccessService.managerUserIds(fields.category)
+                .filter { it != currentUserId }
+                .forEach { managerId ->
+                    notificationService.create(
+                        userId = managerId,
+                        kind = "FEEDBACK_MESSAGE_FROM_REPORTER",
+                        title = "反馈有新的用户追加消息",
+                        body = "用户追加了反馈消息: \"${request.content.take(100)}\"",
+                        refType = "FEEDBACK",
+                        refId = ticketId,
+                    )
+                }
+        }
+
+        // 管理员回复后, 给提交人生成通知, 包括管理员与提交人为同一账号的场景
+        if (actorMode == ActorMode.ADMIN) {
             notificationService.create(
                 userId = ticket.reporterUserId,
                 kind = "FEEDBACK_REPLY",
@@ -446,8 +472,8 @@ class FeedbackReportService(
         val saved = feedbackTicketRepository.save(updatedTicket)
         log.info { "反馈工单状态更新: ticketId=$ticketId, ${ticket.status} → $newStatus, by=$currentUserId" }
 
-        // 管理员改状态后, 给提交人生成通知 (状态有实际变化)
-        if (actorMode == ActorMode.ADMIN && currentUserId != ticket.reporterUserId) {
+        // 管理员改状态后, 给提交人生成通知 (状态有实际变化), 包括同账号场景
+        if (actorMode == ActorMode.ADMIN) {
             val statusLabel = when (newStatus) {
                 "RESOLVED" -> "已处理"
                 "DISMISSED" -> "已忽略"
@@ -467,6 +493,23 @@ class FeedbackReportService(
     }
 
     // ========== 内部方法 ==========
+
+    /** 从消息数组推导列表判断未读所需的最后一条用户消息边界。 */
+    private fun lastReporterMessageBoundary(ticket: FeedbackTicket): ReporterMessageBoundary? {
+        if (ticket.messages.any { message ->
+                message.senderKind.trim().uppercase() !in setOf("REPORTER", "ADMIN")
+            }) {
+            return null
+        }
+        val entry = ticket.messages.withIndex()
+            .lastOrNull { it.value.senderKind.trim().equals("REPORTER", ignoreCase = true) }
+            ?: return null
+        return ReporterMessageBoundary(
+            id = entry.value.id.trim().takeIf { it.isNotEmpty() },
+            createdAt = entry.value.createdAt,
+            index = entry.index,
+        )
+    }
 
     private fun resolveActorMode(requestedMode: String?, isReporter: Boolean, isManager: Boolean): ActorMode {
         val actorMode = requestedMode?.trim()?.uppercase()?.let { normalized ->

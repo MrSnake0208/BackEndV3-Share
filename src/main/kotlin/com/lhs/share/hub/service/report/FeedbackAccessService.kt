@@ -51,6 +51,8 @@ class FeedbackAccessService(
         .map { it.userId }
         .toSet()
 
+    fun managerUserIds(area: String): Set<String> = authorizationService.managerUserIdsFor(area)
+
     fun listGrants(adminUserId: String): List<FeedbackAccessGrantResponse> {
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         return repository.findAll()

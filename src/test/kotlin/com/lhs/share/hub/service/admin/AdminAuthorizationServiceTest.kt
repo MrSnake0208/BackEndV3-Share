@@ -44,6 +44,27 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
+    fun `反馈消息通知只发送给对应 manageAreas 的激活管理员`() {
+        activeUser("manager")
+        activeUser("root")
+        every { userService.get("disabled") } returns MaaUserInfo("disabled", "禁用用户", activated = false)
+        every { userService.get("disabled-root") } returns MaaUserInfo("disabled-root", "禁用超级管理员", activated = false)
+        every { feedbackRepository.findByManageAreasContaining(FeedbackArea.OPERATOR) } returns listOf(
+            FeedbackAccessGrant("manager", manageAreas = setOf(FeedbackArea.OPERATOR), updatedBy = "root"),
+            FeedbackAccessGrant("disabled", manageAreas = setOf(FeedbackArea.OPERATOR), updatedBy = "root"),
+        )
+        every { roleRepository.findByRolesContaining(AdminRole.SUPER_ADMIN) } returns listOf(
+            binding("root", AdminRole.SUPER_ADMIN),
+            binding("disabled-root", AdminRole.SUPER_ADMIN),
+        )
+
+        assertEquals(
+            setOf("manager", "root"),
+            service.managerUserIdsFor(FeedbackArea.OPERATOR),
+        )
+    }
+
+    @Test
     fun `receiveAreas 只接收通知不能读取工单`() {
         activeUser("receiver")
         every { roleRepository.findById("receiver") } returns Optional.empty()
