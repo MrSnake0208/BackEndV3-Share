@@ -35,12 +35,12 @@ private const val JSON = "application/json"
         ),
         ApiResponse(
             responseCode = "409",
-            description = "record_conflict or account_name_conflict",
+            description = "record_conflict, account_name_conflict, star_inventory_stale_snapshot, or star_inventory_revision_conflict",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
             responseCode = "422",
-            description = "schema_validation_failed, unknown entity or agent, invalid agent id, or unsupported version",
+            description = "schema_validation_failed, star_inventory_invalid_snapshot, unknown entity or agent, invalid agent id, or unsupported version",
             content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
         ),
         ApiResponse(
