@@ -46,6 +46,13 @@ class InventoryAgentFavoriteSecurityTest {
     }
 
     @Test
+    fun `star inventory requires login`() {
+        mockMvc.perform(get("/v1/star-inventory/current").param("account_id", "acc_a"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.error.code").value("unauthorized"))
+    }
+
+    @Test
     fun `authenticated SSE completion permits async dispatch`() {
         val emitter = SseEmitter()
         `when`(accountService.requireAccount("probe-user", "main")).thenReturn(

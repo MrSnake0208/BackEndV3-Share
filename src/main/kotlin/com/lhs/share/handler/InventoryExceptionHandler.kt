@@ -5,6 +5,7 @@ import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryError
 import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
+import com.lhs.share.hub.controller.star.StarInventoryController
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.openapi.OpenApiInventoryController
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -26,7 +27,7 @@ private val inventoryLog = KotlinLogging.logger { }
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
-    assignableTypes = [AccountController::class, InventoryController::class, OpenApiInventoryController::class],
+    assignableTypes = [AccountController::class, InventoryController::class, StarInventoryController::class, OpenApiInventoryController::class],
 )
 class InventoryExceptionHandler {
     @ExceptionHandler(InventoryApiException::class)
@@ -39,19 +40,19 @@ class InventoryExceptionHandler {
     )
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
-    fun unreadable(e: HttpMessageNotReadableException): ResponseEntity<InventoryErrorResponse> {
+    fun unreadable(e: HttpMessageNotReadableException, request: HttpServletRequest): ResponseEntity<InventoryErrorResponse> {
         val invalidJson = generateSequence<Throwable>(e) { it.cause }.any { it is JsonParseException }
         return if (invalidJson) {
             response(HttpStatus.BAD_REQUEST, "invalid_json", "Request body is not valid JSON")
         } else {
-            response(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "Request body does not match the inventory schema")
+            response(HttpStatus.UNPROCESSABLE_ENTITY, request.snapshotValidationCode(), "Request body does not match the inventory schema")
         }
     }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun invalidArgument(e: MethodArgumentNotValidException): ResponseEntity<InventoryErrorResponse> {
+    fun invalidArgument(e: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<InventoryErrorResponse> {
         val message = e.bindingResult.fieldError?.defaultMessage ?: "Request body does not match the inventory schema"
-        return response(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", message)
+        return response(HttpStatus.UNPROCESSABLE_ENTITY, request.snapshotValidationCode(), message)
     }
 
     @ExceptionHandler(ConstraintViolationException::class, MethodArgumentTypeMismatchException::class, IllegalArgumentException::class)
@@ -84,4 +85,7 @@ class InventoryExceptionHandler {
     ): ResponseEntity<InventoryErrorResponse> = ResponseEntity.status(status).body(
         InventoryErrorResponse(InventoryError(code, message, recordId, entryId)),
     )
+
+    private fun HttpServletRequest.snapshotValidationCode(): String =
+        if (requestURI.startsWith("/v1/star-inventory")) "star_inventory_invalid_snapshot" else "schema_validation_failed"
 }

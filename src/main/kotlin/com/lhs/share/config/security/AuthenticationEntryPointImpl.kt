@@ -30,5 +30,7 @@ class AuthenticationEntryPointImpl(
     }
 
     private fun HttpServletRequest.isInventoryRequest(): Boolean =
-        requestURI.startsWith("/v1/inventory") || requestURI.startsWith("/open-api/inventory")
+        requestURI.startsWith("/v1/inventory") ||
+            requestURI.startsWith("/v1/star-inventory") ||
+            requestURI.startsWith("/open-api/inventory")
 }
