@@ -3,6 +3,7 @@ package com.lhs.share.openapi
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.service.operator.OperatorShareService
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -14,7 +15,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
-import org.mockito.Mockito.`when`
 
 @SpringBootTest(
     properties = [
