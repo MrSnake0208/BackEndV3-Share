@@ -3,6 +3,7 @@ package com.lhs.share.hub.controller.operator
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
@@ -15,10 +16,13 @@ import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
 import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
+import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
+import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.hub.service.operator.OperatorService
+import com.lhs.share.hub.service.operator.OperatorShareService
 import com.lhs.share.hub.service.operator.OperatorV3ImportService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
@@ -26,6 +30,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -50,6 +55,7 @@ class OperatorController(
     private val subjectiveService: com.lhs.share.hub.service.operator.OperatorSubjectiveService? = null,
     private val upgradeService: com.lhs.share.hub.service.operator.OperatorUpgradeService? = null,
     private val v3ExportService: com.lhs.share.hub.service.operator.OperatorV3ExportService? = null,
+    private val shareService: OperatorShareService? = null,
 ) {
     @Operation(
         summary = "提交密探交换文档",
@@ -114,6 +120,45 @@ class OperatorController(
         @RequestParam(name = "account_id") accountId: String,
         @RequestParam(required = false) game: String?,
     ): ApiResult<List<OperatorCurrentResponse>> = success(service.current(helper.requireUserId(), accountId, game))
+
+    @Operation(summary = "读取密探分享状态", description = "读取当前用户所属子账号的分享代码状态。")
+    @RequireJwt
+    @GetMapping("/share")
+    fun getShare(@RequestParam(name = "account_id") accountId: String): ApiResult<OperatorShareResponse> = success(
+        requireNotNull(shareService).get(helper.requireUserId(), accountId),
+    )
+
+    @Operation(summary = "创建或复用密探分享代码", description = "为当前用户所属子账号生成或复用长期有效的分享代码。")
+    @RequireJwt
+    @PutMapping("/share")
+    fun createShare(@RequestParam(name = "account_id") accountId: String): ApiResult<OperatorShareResponse> = success(
+        requireNotNull(shareService).create(helper.requireUserId(), accountId),
+    )
+
+    @Operation(summary = "重新生成密探分享代码", description = "覆盖旧代码，旧分享链接立即失效。")
+    @RequireJwt
+    @PostMapping("/share/regenerate")
+    fun regenerateShare(@RequestParam(name = "account_id") accountId: String): ApiResult<OperatorShareResponse> = success(
+        requireNotNull(shareService).regenerate(helper.requireUserId(), accountId),
+    )
+
+    @Operation(summary = "撤销密探分享代码", description = "清空当前子账号的分享代码；重复撤销保持幂等。")
+    @RequireJwt
+    @DeleteMapping("/share")
+    fun revokeShare(@RequestParam(name = "account_id") accountId: String): ApiResult<OperatorShareResponse> = success(
+        requireNotNull(shareService).revoke(helper.requireUserId(), accountId),
+    )
+
+    @Operation(
+        summary = "查看密探公开分享",
+        description = "无需登录；仅返回当前分享代码对应子账号的已招募客观养成数据，不缓存响应。",
+    )
+    @GetMapping("/share/view/{shareCode}")
+    fun viewShare(@PathVariable shareCode: String): ResponseEntity<ApiResult<OperatorShareViewResponse>> {
+        return ResponseEntity.ok()
+            .header("Cache-Control", "no-store")
+            .body(success(requireNotNull(shareService).view(shareCode)))
+    }
 
     @Operation(summary = "读取子账号的密探主观养成标注", description = "未返回的密探默认 growth_state=active。")
     @GetMapping("/annotations")

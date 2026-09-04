@@ -255,6 +255,35 @@ v2 listed/full 导入继续只更新旧字段：`discs` 更新第一套并保留
 删除 v2 record 时会把独立的 `operator_correction_records` 校正审计与剩余 v2 record 按接收顺序重放。
 v2 export 仍只输出第一套镜像 `discs`、既有 `starLevel` 和 `starStones`。
 
+### 密探只读分享
+
+分享管理接口均要求登录 JWT，且 `account_id` 只允许访问当前用户所属的统一子账号：
+
+```text
+GET    /v1/operator/share?account_id=acc_xxx
+PUT    /v1/operator/share?account_id=acc_xxx
+POST   /v1/operator/share/regenerate?account_id=acc_xxx
+DELETE /v1/operator/share?account_id=acc_xxx
+```
+
+同一子账号重复 PUT 会复用已有 UUID；重新生成会覆盖旧代码并立即使其失效，DELETE 清空代码且幂等。
+分享代码只保存在 `sub_accounts.shareToken`，使用 `idx_sub_share_token_unique` 的 sparse 唯一索引，旧账号文档无需回填。
+通用账号响应不会返回该字段，代码也不会写入应用日志。
+
+访客只需访问以下公开接口，不需要 JWT：
+
+```text
+GET /v1/operator/share/view/{shareCode}
+```
+
+接口按代码命中单个子账号后实时读取该账号游戏版本的 `operator_current`，只返回
+`game`、`catalog_version`、`updated_at` 和已招募（`star_level > 0`）条目的
+`level`、`elite`、`star_level`、`disc_loadouts`、`star_stones` 及
+`combat_stats` 的攻生/奇闻数值。用户身份、账号标识、备注、目标、关注、revision、
+listed baseline、观测来源/时间、签名和显示偏好均不返回；成功响应设置 `Cache-Control: no-store`。
+没有 current 数据时返回 200、空 `entries` 和空 `updated_at`；无效、撤销或已删除代码统一返回
+404 `share_not_found`。只有 `/v1/operator/share/view/**` 加入公开白名单，管理路径仍由 JWT 保护。
+
 ### 密探养成交换协议 v3
 
 浏览器 JWT 使用以下接口导入客观养成快照：
