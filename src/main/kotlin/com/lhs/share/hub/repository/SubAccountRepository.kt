@@ -14,6 +14,8 @@ interface SubAccountRepository : MongoRepository<SubAccount, String> {
 
     fun findByUserIdAndAccountId(userId: String, accountId: String): SubAccount?
 
+    fun findByShareToken(shareToken: String): SubAccount?
+
     fun findAllByUserIdOrderByCreatedAtAsc(userId: String): List<SubAccount>
 
     fun findAllByUserIdAndAccountIdIn(userId: String, accountIds: Collection<String>): List<SubAccount>

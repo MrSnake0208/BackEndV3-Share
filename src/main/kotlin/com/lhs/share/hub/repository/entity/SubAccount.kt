@@ -3,6 +3,7 @@ package com.lhs.share.hub.repository.entity
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.CompoundIndexes
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
@@ -27,4 +28,6 @@ data class SubAccount(
     val game: String = "代号鸢",
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now(),
+    @Indexed(name = "idx_sub_share_token_unique", unique = true, sparse = true)
+    val shareToken: String? = null,
 )
