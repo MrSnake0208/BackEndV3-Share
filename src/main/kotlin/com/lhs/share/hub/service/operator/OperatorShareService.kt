@@ -10,6 +10,7 @@ import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareStarStone
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
@@ -21,6 +22,7 @@ class OperatorShareService(
     private val accountRepository: SubAccountRepository,
     private val operatorService: OperatorService,
     private val catalogService: OperatorCatalogService,
+    private val annotationRepository: OperatorAnnotationRepository,
 ) {
     fun get(userId: String, accountId: String): OperatorShareResponse = response(requireAccount(userId, accountId))
 
@@ -44,9 +46,11 @@ class OperatorShareService(
             ?.takeIf { it.shareToken == shareCode && it.activeShareToken() != null }
             ?: throw shareNotFound()
         val current = operatorService.current(account.userId, account.accountId, account.game).firstOrNull()
+        val growthStates = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(account.userId, account.accountId)
+            .associate { it.operatorId to it.growthState }
         val entries = current?.entries.orEmpty()
             .filterValues { it.starLevel > 0 }
-            .mapValues { (_, entry) -> entry.toShareEntry() }
+            .mapValues { (operatorId, entry) -> entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE) }
         return OperatorShareViewResponse(
             game = account.game,
             catalogVersion = catalogService.currentCatalogVersion(),
@@ -93,10 +97,11 @@ class OperatorShareService(
 
     private fun SubAccount.activeShareToken(): String? = shareToken?.takeIf(String::isNotBlank)
 
-    private fun OperatorCurrentEntryDto.toShareEntry() = OperatorShareEntryDto(
+    private fun OperatorCurrentEntryDto.toShareEntry(growthState: String) = OperatorShareEntryDto(
         level = level,
         elite = elite,
         starLevel = starLevel,
+        growthState = growthState,
         discLoadouts = discLoadouts.map { loadout ->
             OperatorShareDiscLoadout(
                 id = loadout.id,

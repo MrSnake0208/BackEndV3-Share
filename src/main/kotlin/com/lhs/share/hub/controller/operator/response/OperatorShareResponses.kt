@@ -20,6 +20,7 @@ data class OperatorShareEntryDto(
     val level: Int,
     val elite: Int,
     val starLevel: Int,
+    val growthState: String,
     val discLoadouts: List<OperatorShareDiscLoadout>,
     val starStones: List<OperatorShareStarStone>,
     val combatStats: OperatorShareCombatStats?,

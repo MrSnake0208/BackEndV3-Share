@@ -5,7 +5,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
+import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.entity.OperatorAnnotation
 import com.lhs.share.hub.repository.entity.OperatorCombatDisplayMode
 import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorDisc
@@ -29,7 +31,8 @@ class OperatorShareServiceTest {
     private val accountRepository = mockk<SubAccountRepository>()
     private val operatorService = mockk<OperatorService>()
     private val catalogService = mockk<OperatorCatalogService>()
-    private val service = OperatorShareService(accountRepository, operatorService, catalogService)
+    private val annotationRepository = mockk<OperatorAnnotationRepository>(relaxed = true)
+    private val service = OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository)
 
     @Test
     fun `create is idempotent and regenerate replaces the old code`() {
@@ -70,6 +73,9 @@ class OperatorShareServiceTest {
     fun `public view filters un recruited entries and omits private current fields`() {
         every { accountRepository.findByShareToken("code") } returns account("code")
         every { catalogService.currentCatalogVersion() } returns "2026-09-03"
+        every { annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "acc1") } returns listOf(
+            OperatorAnnotation(userId = "u1", accountId = "acc1", operatorId = "recruited", growthState = "graduated"),
+        )
         every { operatorService.current("u1", "acc1", "代号鸢") } returns listOf(
             OperatorCurrentResponse(
                 userId = "u1",
@@ -90,6 +96,7 @@ class OperatorShareServiceTest {
         assertEquals("2026-09-03", view.catalogVersion)
         assertEquals(setOf("recruited"), view.entries.keys)
         assertEquals(27, view.entries.getValue("recruited").starLevel)
+        assertEquals("graduated", view.entries.getValue("recruited").growthState)
         val json = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
