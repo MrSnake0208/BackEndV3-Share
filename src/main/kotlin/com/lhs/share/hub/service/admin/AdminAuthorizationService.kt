@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service
 
 enum class AdminPermission(val value: String) {
     OPERATOR_CATALOG_WRITE("operator_catalog:write"),
+    LEVEL_CATALOG_WRITE("level_catalog:write"),
     ADMIN_ROLE_MANAGE("admin:role:manage"),
     ADMIN_FEEDBACK_ACCESS_MANAGE("admin:feedback_access:manage"),
     ADMIN_AUDIT_READ("admin:audit:read"),
@@ -32,7 +33,10 @@ class AdminAuthorizationService(
     fun hasPermission(userId: String, permission: AdminPermission): Boolean {
         val roles = rolesFor(userId)
         if (AdminRole.SUPER_ADMIN in roles) return true
-        return permission == AdminPermission.OPERATOR_CATALOG_WRITE && AdminRole.PLATFORM_ADMIN in roles
+        return permission in setOf(
+            AdminPermission.OPERATOR_CATALOG_WRITE,
+            AdminPermission.LEVEL_CATALOG_WRITE,
+        ) && AdminRole.PLATFORM_ADMIN in roles
     }
 
     fun requirePermission(userId: String, permission: AdminPermission) {

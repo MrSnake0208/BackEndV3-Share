@@ -29,6 +29,7 @@ class AdminAuthorizationServiceTest {
         every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))
 
         assertTrue(service.hasPermission("platform", AdminPermission.OPERATOR_CATALOG_WRITE))
+        assertTrue(service.hasPermission("platform", AdminPermission.LEVEL_CATALOG_WRITE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_ROLE_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE))
     }
