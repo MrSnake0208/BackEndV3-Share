@@ -26,6 +26,7 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -109,6 +110,30 @@ class LevelCatalogControllerContractTest {
             .andExpect(jsonPath("$.data.revision").value(1))
 
         verify { service.create("admin", any()) }
+    }
+
+    @Test
+    fun `explicit null end time reaches service as an explicit null node`() {
+        every { helper.requireUserId() } returns "admin"
+        every { authorizationService.hasPermission("admin", AdminPermission.LEVEL_CATALOG_WRITE) } returns true
+        every { service.update("admin", "lvl_1", any()) } returns adminItem()
+
+        mockMvc.perform(
+            put("/v1/admin/level-catalog/lvl_1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"game":"代号鸢","cat_one":"主线","cat_two":"第一章","cat_three":"",
+                     "name":"第一关","level_id":"level/1","stage_id":"stage_1","status":"ACTIVE",
+                     "is_open":true,"end_time":null,"sort_order":0,"expected_revision":1}
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isOk)
+
+        verify {
+            service.update("admin", "lvl_1", match { it.endTime?.isNull == true && it.expectedRevision == 1L })
+        }
     }
 
     @Test

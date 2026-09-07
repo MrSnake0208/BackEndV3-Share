@@ -36,7 +36,7 @@ class LevelCatalogService(
     private val repository: LevelCatalogRepository,
     private val revisionRepository: LevelCatalogRevisionRepository,
     private val objectMapper: ObjectMapper,
-    @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate? = null,
+    @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
 ) {
     fun catalog(
         game: String? = null,
@@ -82,13 +82,13 @@ class LevelCatalogService(
 
     fun currentCatalogVersion(): String = repository.findTopByOrderByUpdatedAtDesc()?.updatedAt?.toString() ?: "0"
 
-    fun create(actorUserId: String, request: LevelCatalogWriteRequest): LevelCatalogAdminResponse {
+    fun create(actorUserId: String, request: LevelCatalogWriteRequest): LevelCatalogAdminResponse = inTransaction {
         if (request.expectedRevision != null) {
             invalid("expected_revision", "Create must not provide expected_revision")
         }
         val payload = normalizeWrite(request, null, requireAll = true)
         ensureUnique(payload, null)
-        val now = Instant.now()
+        val now = nextCatalogTimestamp()
         val entity = LevelCatalogEntity(
             levelKey = newLevelKey(),
             game = payload.game,
@@ -110,16 +110,21 @@ class LevelCatalogService(
         )
         val saved = save(entity)
         recordHistory(actorUserId, LevelCatalogRevisionAction.CREATE, null, saved)
-        return LevelCatalogAdminResponse.of(saved)
+        LevelCatalogAdminResponse.of(saved)
     }
 
-    fun update(actorUserId: String, levelKey: String, request: LevelCatalogWriteRequest): LevelCatalogAdminResponse {
+    fun update(actorUserId: String, levelKey: String, request: LevelCatalogWriteRequest): LevelCatalogAdminResponse = inTransaction {
         val existing = findRequired(levelKey)
         val expectedRevision = request.expectedRevision
             ?: invalid("expected_revision", "expected_revision is required")
         if (expectedRevision < 0) invalid("expected_revision", "expected_revision must not be negative")
         if (expectedRevision != existing.revision) {
             revisionConflict(levelKey)
+        }
+        request.status?.let { requestedStatus ->
+            if (parseStatus(requestedStatus) != existing.status) {
+                invalid("status", "status changes must use the archive or restore endpoint")
+            }
         }
         val payload = normalizeWrite(request, existing, requireAll = false)
         ensureUnique(payload, levelKey)
@@ -136,7 +141,7 @@ class LevelCatalogService(
             endTime = payload.endTime,
             sortOrder = payload.sortOrder,
             revision = expectedRevision + 1,
-            updatedAt = Instant.now(),
+            updatedAt = nextCatalogTimestamp(),
             updatedBy = actorUserId,
         )
         val saved = try {
@@ -148,14 +153,16 @@ class LevelCatalogService(
             throw conflict(levelKey)
         }
         recordHistory(actorUserId, LevelCatalogRevisionAction.UPDATE, existing, saved)
-        return LevelCatalogAdminResponse.of(saved)
+        LevelCatalogAdminResponse.of(saved)
     }
 
-    fun archive(actorUserId: String, levelKey: String, expectedRevision: Long): LevelCatalogAdminResponse =
+    fun archive(actorUserId: String, levelKey: String, expectedRevision: Long): LevelCatalogAdminResponse = inTransaction {
         changeStatus(actorUserId, levelKey, expectedRevision, LevelStatus.ARCHIVED, LevelCatalogRevisionAction.ARCHIVE)
+    }
 
-    fun restore(actorUserId: String, levelKey: String, expectedRevision: Long): LevelCatalogAdminResponse =
+    fun restore(actorUserId: String, levelKey: String, expectedRevision: Long): LevelCatalogAdminResponse = inTransaction {
         changeStatus(actorUserId, levelKey, expectedRevision, LevelStatus.ACTIVE, LevelCatalogRevisionAction.RESTORE)
+    }
 
     fun history(levelKey: String): List<LevelCatalogHistoryResponse> {
         findRequired(levelKey)
@@ -187,7 +194,7 @@ class LevelCatalogService(
         return inTransaction {
             prepared.plans.forEach { plan ->
                 if (plan.existing == null) {
-                    val now = Instant.now()
+                    val now = nextCatalogTimestamp()
                     val key = plan.levelKey ?: newLevelKey()
                     val created = save(
                         LevelCatalogEntity(
@@ -226,7 +233,7 @@ class LevelCatalogService(
                         endTime = plan.payload.endTime,
                         sortOrder = plan.payload.sortOrder,
                         revision = existing.revision + 1,
-                        updatedAt = Instant.now(),
+                        updatedAt = nextCatalogTimestamp(),
                         updatedBy = actorUserId,
                     )
                     val updated = repository.updateIfRevision(existing.levelKey, existing.revision, replacement)
@@ -252,7 +259,7 @@ class LevelCatalogService(
         val replacement = existing.copy(
             status = status,
             revision = expectedRevision + 1,
-            updatedAt = Instant.now(),
+            updatedAt = nextCatalogTimestamp(),
             updatedBy = actorUserId,
         )
         val saved = repository.updateIfRevision(levelKey, expectedRevision, replacement)
@@ -273,10 +280,17 @@ class LevelCatalogService(
             stageId = request.stageId ?: existing?.stageId,
             status = request.status ?: existing?.status?.name,
             isOpen = request.isOpen ?: existing?.isOpen,
-            endTime = request.endTime ?: existing?.endTime?.toString(),
+            endTime = resolveWriteEndTime(request.endTime, existing),
             sortOrder = request.sortOrder ?: existing?.sortOrder,
             requireAll = requireAll,
         )
+    }
+
+    private fun resolveWriteEndTime(value: JsonNode?, existing: LevelCatalogEntity?): String? = when {
+        value == null -> existing?.endTime?.toString()
+        value.isNull -> null
+        value.isTextual -> value.asText()
+        else -> invalid("end_time", "end_time must be a string or null")
     }
 
     private fun normalizeImport(entry: LevelCatalogImportEntry): LevelPayload = normalize(
@@ -513,7 +527,7 @@ class LevelCatalogService(
         )
     }
 
-    private fun <T> inTransaction(block: () -> T): T = transactionTemplate?.execute { block() } ?: block()
+    private fun <T : Any> inTransaction(block: () -> T): T = requireNotNull(transactionTemplate.execute { block() })
 
     private fun required(value: String?, field: String, requireAll: Boolean): String {
         if (value == null) {
@@ -574,6 +588,12 @@ class LevelCatalogService(
         levelKey = levelKey,
         fieldPath = "expected_revision",
     )
+
+    private fun nextCatalogTimestamp(): Instant {
+        val now = Instant.now()
+        val current = repository.findTopByOrderByUpdatedAtDesc()?.updatedAt
+        return if (current != null && !now.isAfter(current)) current.plusNanos(1) else now
+    }
 
     private fun newLevelKey(): String = "lvl_" + UUID.randomUUID().toString().replace("-", "")
 
