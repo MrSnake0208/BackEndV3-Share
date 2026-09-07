@@ -2,6 +2,7 @@ package com.lhs.share.hub.controller.level.request
 
 import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
 
 /** Full replacement payload for create/update; revision is only accepted on update. */
 data class LevelCatalogWriteRequest(
@@ -14,7 +15,7 @@ data class LevelCatalogWriteRequest(
     @JsonProperty("stage_id") val stageId: String? = null,
     val status: String? = null,
     @JsonProperty("is_open") val isOpen: Boolean? = null,
-    @JsonProperty("end_time") val endTime: String? = null,
+    @JsonProperty("end_time") val endTime: JsonNode? = null,
     @JsonProperty("sort_order") val sortOrder: Int? = null,
     @JsonProperty("expected_revision") val expectedRevision: Long? = null,
 )
