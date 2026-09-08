@@ -32,6 +32,8 @@ class AdminAuthorizationServiceTest {
         assertTrue(service.hasPermission("platform", AdminPermission.LEVEL_CATALOG_WRITE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_ROLE_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE))
+        assertFalse(service.hasPermission("platform", AdminPermission.CHANGELOG_WRITE))
+        assertFalse(service.hasPermission("platform", AdminPermission.CHANGELOG_REVIEW))
     }
 
     @Test
@@ -41,7 +43,22 @@ class AdminAuthorizationServiceTest {
 
         assertTrue(service.hasPermission("root", AdminPermission.OPERATOR_CATALOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.ADMIN_ROLE_MANAGE))
+        assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_WRITE))
+        assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_REVIEW))
         assertEquals(FeedbackArea.all, service.manageableAreasFor("root"))
+    }
+
+    @Test
+    fun `更新日志编辑和审核角色彼此隔离`() {
+        activeUser("editor")
+        activeUser("reviewer")
+        every { roleRepository.findById("editor") } returns Optional.of(binding("editor", AdminRole.CHANGELOG_EDITOR))
+        every { roleRepository.findById("reviewer") } returns Optional.of(binding("reviewer", AdminRole.CHANGELOG_REVIEWER))
+
+        assertTrue(service.hasPermission("editor", AdminPermission.CHANGELOG_WRITE))
+        assertFalse(service.hasPermission("editor", AdminPermission.CHANGELOG_REVIEW))
+        assertTrue(service.hasPermission("reviewer", AdminPermission.CHANGELOG_REVIEW))
+        assertFalse(service.hasPermission("reviewer", AdminPermission.CHANGELOG_WRITE))
     }
 
     @Test

@@ -194,6 +194,63 @@ PUT 必须提交 `effective_at` 和 `entries`，每次是完整替换；服务�
 密探公共 API = 公共图鉴 `GET /v1/operator/catalog`（无需登录，全局只读密探目录：有哪些密探、长什么样），
 与个人密探数据严格分离——`/v1/operator/**`（除 catalog）与 `/open-api/operator/**` 只能访问自己的养成档案。
 
+### 公共关卡目录与管理员维护
+
+关卡基础数据以 `HubBackend.level_catalog` 为权威存储，历史审计写入 `HubBackend.level_catalog_revisions`。
+公共读取无需登录：
+
+```text
+GET /v1/level/catalog
+GET /v1/level/catalog/{levelKey}
+```
+
+列表支持 `game`、`cat_one`、`cat_two`、`q`、`include_archived`、`open_only`；默认隐藏 `ARCHIVED`。
+响应中的 `catalog_version` 用于客户端缓存失效。每条关卡使用稳定的 `lvl_...` 业务 ID（`levelKey`），修改
+`stageId` / `levelId` 不改变关卡身份；同一 game 内 `stageId`、`levelId` 分别有唯一索引。
+
+管理员维护入口为 `/v1/admin/level-catalog/**`，必须使用登录 JWT 且具有 `level_catalog:write`；当前
+`PLATFORM_ADMIN` 与 `SUPER_ADMIN` 获得该权限。写入采用 revision 乐观锁，过期 `expected_revision` 返回
+HTTP 409 `level_revision_conflict`。归档/恢复必须走专用端点，所有 create/update/archive/restore/import
+都与对应 history 在同一 Hub Mongo transaction 中提交，因此本地开发仍要求 HubBackend 使用 replica set。
+完整请求、响应、错误和导入导出契约见父工作区 `YuanHub/docs/api-contract.md` 的“公共关卡目录与管理员管理”章节；
+运行中的 Swagger 以 `/swagger-ui/index.html` 和 `/v3/api-docs` 为最终接口参考。
+
+初始历史数据迁移脚本：
+
+```text
+scripts/migrations/20260907-level-catalog.js
+scripts/migrations/level-catalog-normalizer.js
+```
+
+该脚本是一次性初始迁移工具，不属于每次启动流程。默认源数据是父工作区根目录的 `levels (2).json`；当前已验收的
+初始迁移为 143 条（代号鸢 35、如鸢 5、通用 103），并包含 2027 白鹄 `stageId` 修正。执行前必须先 dry-run：
+
+```bash
+# 从 yituliu 工作区根目录执行
+node --test BackEndV3-Share/scripts/migrations/20260907-level-catalog.test.js
+node BackEndV3-Share/scripts/migrations/20260907-level-catalog.js --dry-run
+
+# 如需验证另一份源文件
+node BackEndV3-Share/scripts/migrations/20260907-level-catalog.js --dry-run --source /path/to/levels.json
+```
+
+`--apply` **不能通过 Node runner 执行**，只能在明确连接目标 MongoDB 的 `mongosh` 环境中运行；执行者必须先确认目标
+是预期的 `HubBackend`，并先审阅 dry-run 报告。apply 会拒绝对“不属于本迁移且已非空”的目录做盲目覆盖，创建/验证
+`levelKey`、`(game,stageId)`、`(game,levelId)` 三组唯一索引，并支持对本迁移结果幂等复跑。
+
+当前仍保留旧 MaaYuan 的 GitHub JSON / webhook / `ManualArkLevels` 兼容链路；它们只有在生产稳定确认并正式进入
+关卡计划“阶段 6：清理历史链路”后才能下线。本节新增 YuanHub 权威目录说明，不代表提前删除旧兼容配置。
+
+### 可视化更新日志
+
+公开读取 `GET /v1/changelog` 无需登录，只返回审核通过且未撤回的当前快照。管理接口位于
+`/v1/admin/changelog/**`：`CHANGELOG_EDITOR` 具有 `changelog:write`，可保存草稿和提交审核；
+`CHANGELOG_REVIEWER` 具有 `changelog:review`，可审核发布、退回和撤回；`SUPER_ADMIN` 继承两项权限，
+`PLATFORM_ADMIN` 不自动获得权限。作者不能审核自己的修订。
+
+正文存储为服务端白名单校验的 Tiptap JSON；图片复用 `/v1/media/upload`，只接受当前可用的 JPG、PNG、WebP
+资产。条目使用 Mongo `@Version` 乐观锁；已发布条目的新修订获批前，公开快照保持不变。
+
 ### 密探当前养成资料底座
 
 `GET /v1/operator/current?account_id=acc_xxx&game=代号鸢` 的每个 entry 在既有 `level / elite /

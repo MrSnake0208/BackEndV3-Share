@@ -7,6 +7,8 @@ import java.time.Instant
 
 enum class AdminRole {
     PLATFORM_ADMIN,
+    CHANGELOG_EDITOR,
+    CHANGELOG_REVIEWER,
     SUPER_ADMIN,
 }
 

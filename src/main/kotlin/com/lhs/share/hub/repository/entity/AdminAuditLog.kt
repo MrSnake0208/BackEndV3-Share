@@ -10,6 +10,9 @@ enum class AdminAuditAction {
     ROLE_REPLACED,
     FEEDBACK_ACCESS_UPDATED,
     FEEDBACK_ACCESS_DELETED,
+    CHANGELOG_PUBLISHED,
+    CHANGELOG_REJECTED,
+    CHANGELOG_WITHDRAWN,
 }
 
 data class AdminAuditSnapshot(
