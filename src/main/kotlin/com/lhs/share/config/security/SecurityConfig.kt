@@ -112,6 +112,7 @@ class SecurityConfig(
                 "/v1/operator/catalog",
                 "/v1/level/catalog",
                 "/v1/level/catalog/**",
+                "/v1/changelog/**",
                 "/v1/operator/share/view/**",
                 "/avatar/**",
                 "/media/**",
