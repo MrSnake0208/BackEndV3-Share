@@ -144,6 +144,9 @@ class InventoryOpenApiContractTest {
         val exportAccountRequired = root.at("/components/schemas/InventoryExportAccountDto/required")
         assertTrue(exportAccountRequired.any { it.asText() == "id" })
         assertTrue(exportAccountRequired.any { it.asText() == "name" })
+        val catalogItem = root.at("/components/schemas/EntityCatalogItemDto")
+        assertEquals("string", catalogItem.at("/properties/category/type").asText())
+        assertFalse(catalogItem["required"].any { it.asText() == "category" })
         assertEquals(
             setOf("item", "agent"),
             root.at("/components/schemas/InventoryRecordRequest/properties/entity_type/enum").map { it.asText() }.toSet(),

@@ -10,8 +10,8 @@ import java.time.Instant
 /**
  * 对象目录条目(HubBackend.entity_catalog)
  *
- * 跨平台主键为 (entityType, entityId);name 为展示信息,不得用中文名代替稳定 id
- * 做主键。数据来源:item 取 agent/items.json 的 id/name,agent 取
+ * 跨平台主键为 (entityType, entityId);name/category 为展示信息,不得用中文名代替稳定 id
+ * 做主键。数据来源:item 取 agent/items.json 的 id/name/category,agent 取
  * agent/operators.json 的 formal id/name;首次启动时由 EntityCatalogService
  * 从 classpath 加载并 upsert,之后作为只读字典供校验与目录查询。
  */
@@ -37,6 +37,10 @@ data class EntityCatalogEntity(
      * 展示名称
      */
     val name: String,
+    /**
+     * 可选目录分类；item 使用 MaaYuan 道具目录分类，agent 当前不提供。
+     */
+    val category: String? = null,
     /**
      * 目录版本(来源于加载时的 catalog_version,便于排查)
      */
