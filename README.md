@@ -2,6 +2,8 @@
 
 基于 MaaYuan-Share-Backend 架构模板搭建的后端框架骨架。
 
+逐模块审阅顺序、进度清单与报告模板见 [后端 Review 计划](docs/backend-review-plan.md)。
+
 ## 技术栈
 
 - Kotlin 2.2 (JDK 21)
