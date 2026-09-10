@@ -98,6 +98,17 @@ class EntityCatalogServiceTest {
     }
 
     @Test
+    fun `admin operator upsert becomes available to inventory immediately`() {
+        service.upsertAgent("char_126_new", "新密探", "2026-09-10T10:00:00Z")
+
+        assertTrue(service.exists("agent", "char_126_new"))
+        val agent = service.catalog().entities.single { it.id == "char_126_new" }
+        assertEquals("agent", agent.entityType)
+        assertEquals("新密探", agent.name)
+        assertEquals("2026-09-10T10:00:00Z", service.catalog().catalogVersion)
+    }
+
+    @Test
     fun `failed catalog refresh preserves the previous valid catalog`() {
         val existing = EntityCatalogEntity(
             entityType = "agent",

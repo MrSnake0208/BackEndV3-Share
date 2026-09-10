@@ -10,9 +10,11 @@ import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
+import com.lhs.share.hub.service.inventory.EntityCatalogService
 import org.springframework.core.io.ClassPathResource
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.time.Instant
 import java.time.LocalDate
@@ -22,6 +24,7 @@ class OperatorCatalogService(
     private val repository: OperatorCatalogRepository,
     private val objectMapper: ObjectMapper,
     private val avatarStorage: AvatarStorage,
+    private val entityCatalogService: EntityCatalogService,
 ) {
     @Volatile private var seeded = false
 
@@ -80,6 +83,7 @@ class OperatorCatalogService(
         }
     }
 
+    @Transactional(transactionManager = "hubTransactionManager")
     fun create(request: OperatorCatalogWriteRequest): AdminOperatorCatalogResponse {
         ensureSeeded()
         if (repository.findByOperatorId(request.id) != null) {
@@ -89,10 +93,14 @@ class OperatorCatalogService(
         val specialOddityName = requireSpecialOddityName(request.specialOddityName)
         val version = nextCatalogVersion()
         return repository.save(request.toEntity(catalogVersion = version, specialOddityName = specialOddityName))
-            .also { spIndexCache = null }
+            .also {
+                entityCatalogService.upsertAgent(it.operatorId, it.name, it.catalogVersion)
+                spIndexCache = null
+            }
             .let(AdminOperatorCatalogResponse::of)
     }
 
+    @Transactional(transactionManager = "hubTransactionManager")
     fun update(operatorId: String, request: OperatorCatalogWriteRequest): AdminOperatorCatalogResponse {
         ensureSeeded()
         if (operatorId != request.id) {
@@ -113,7 +121,10 @@ class OperatorCatalogService(
                 catalogVersion = version,
                 specialOddityName = specialOddityName,
             ).copy(avatar = existing.avatar),
-        ).also { spIndexCache = null }.let(AdminOperatorCatalogResponse::of)
+        ).also {
+            entityCatalogService.upsertAgent(it.operatorId, it.name, it.catalogVersion)
+            spIndexCache = null
+        }.let(AdminOperatorCatalogResponse::of)
     }
 
     /**

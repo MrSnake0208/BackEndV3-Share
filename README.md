@@ -422,6 +422,9 @@ PUT    /v1/admin/operator-catalog/{operatorId}    # 更新（path/body id 必须
 DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 ```
 
+新增密探和目录改名会在同一事务中同步到库存对象目录；YuanHub 心纸页从公共密探目录动态生成清单，
+因此不需要重新生成前端静态目录。新密探首次显示为 0 张，不会为任何用户补写库存或历史流水。
+
 以上端点需要 JWT 登录和 `operator_catalog:write` 权限，否则 403；失败统一返回 `OperatorErrorResponse`
 （`operator_conflict` / `operator_not_found` / `schema_validation_failed` 等）。
 设计见 [docs/operator-subaccounts-implementation-plan.md](docs/operator-subaccounts-implementation-plan.md) §6.5。
