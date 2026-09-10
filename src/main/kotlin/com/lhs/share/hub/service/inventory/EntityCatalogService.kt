@@ -73,6 +73,26 @@ class EntityCatalogService(
     }
 
     /**
+     * 把管理员维护的公共密探同步到库存对象目录。
+     *
+     * 心纸库存只保存稳定 id 与数量；这里同步的是目录事实，不会为任何用户创建库存记录。
+     */
+    fun upsertAgent(entityId: String, name: String, version: String) {
+        ensureSeeded()
+        val existing = repository.findByEntityTypeAndEntityId("agent", entityId)
+        repository.save(
+            existing?.copy(name = name, catalogVersion = version)
+                ?: EntityCatalogEntity(
+                    entityType = "agent",
+                    entityId = entityId,
+                    name = name,
+                    catalogVersion = version,
+                ),
+        )
+        catalogVersion = version
+    }
+
+    /**
      * 惰性播种:首次访问时补齐 classpath 中存在、collection 中缺失的对象。
      */
     private fun ensureSeeded() {
