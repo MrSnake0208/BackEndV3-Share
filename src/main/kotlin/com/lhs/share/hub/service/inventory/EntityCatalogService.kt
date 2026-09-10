@@ -53,6 +53,7 @@ class EntityCatalogService(
                         entityType = e.entityType,
                         id = e.entityId,
                         name = e.name,
+                        category = e.category,
                     ),
                 )
             }
@@ -108,7 +109,7 @@ class EntityCatalogService(
 
     /**
      * 解析单个 classpath 资源为目录实体列表。
-     * 资源格式为 JSON 数组:[{ "id": "...", "name": "..." }, ...]。
+     * 资源格式为 JSON 数组:[{ "id": "...", "name": "...", "category": "..."? }, ...]。
      */
     private fun parseCatalog(resource: Resource, entityType: String): List<EntityCatalogEntity> {
         val root: JsonNode = objectMapper.readTree(resource.inputStream)
@@ -124,10 +125,12 @@ class EntityCatalogService(
             }
             val name = node.get("name")?.asText()?.takeIf { it.isNotBlank() }
                 ?: throw IllegalStateException("Catalog entry name is required: $id")
+            val category = node.get("category")?.asText()?.takeIf { it.isNotBlank() }
             EntityCatalogEntity(
                 entityType = entityType,
                 entityId = id,
                 name = name,
+                category = category,
                 catalogVersion = version,
             )
         }
@@ -139,13 +142,17 @@ class EntityCatalogService(
     }
 
     /**
-     * 逐条 upsert:已存在(按 (entity_type, entity_id))则跳过,保留既有记录;
-     * 不存在则插入,依靠唯一索引保证幂等。
+     * 逐条 upsert:不存在则插入；已存在时只补齐新增的可选分类元数据，
+     * 不覆盖运维维护过的名称或已有分类。依靠唯一索引保证幂等。
      */
     private fun upsertAll(entities: List<EntityCatalogEntity>) {
         entities.forEach { entity ->
-            if (repository.findByEntityTypeAndEntityId(entity.entityType, entity.entityId) == null) {
-                repository.save(entity)
+            val existing = repository.findByEntityTypeAndEntityId(entity.entityType, entity.entityId)
+            when {
+                existing == null -> repository.save(entity)
+                existing.category == null && entity.category != null -> repository.save(
+                    existing.copy(category = entity.category, catalogVersion = entity.catalogVersion),
+                )
             }
         }
     }
