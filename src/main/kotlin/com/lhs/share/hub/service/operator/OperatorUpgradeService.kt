@@ -196,7 +196,7 @@ class OperatorUpgradeService(
             if (request.target > allowed) invalid("invalid_upgrade_target", "elite target exceeds the current level limit")
         }
         val baseCost = when (request.dimension) {
-            LEVEL -> OperatorRequirementRules.level(from, request.target, catalog)
+            LEVEL -> OperatorRequirementRules.level(from, request.target, catalog, request.skipBreakthroughMaterials)
             ELITE -> OperatorRequirementRules.elite(from, request.target, catalog)
             else -> OperatorRequirementRules.huaji(from, request.target)
         }
@@ -308,7 +308,7 @@ class OperatorUpgradeService(
         request.expectedOperatorRevision,
         request.expectedInventoryRevision,
         request.previewToken,
-    ).joinToString("|")
+    ).joinToString("|") + if (request.skipBreakthroughMaterials) "|skip_breakthrough_materials" else ""
 
     private fun staleOperator(): Nothing = conflict("operator_state_stale", "Operator state has changed")
     private fun staleInventory(): Nothing = conflict("inventory_state_stale", "Inventory state has changed")
