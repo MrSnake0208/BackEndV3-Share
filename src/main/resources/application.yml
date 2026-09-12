@@ -6,7 +6,7 @@ spring:
       # multipart 请求封套上限;业务文件上限由 share.media.max-size 控制为 10 MiB
       max-file-size: 12MB
       # 请求总大小上限,为 multipart 边界和字段预留空间
-      max-request-size: 12MB
+      max-request-size: 50MB
   jackson:
     property-naming-strategy: SNAKE_CASE
     date-format: yyyy-MM-dd'T'HH:mm:ss'Z'
