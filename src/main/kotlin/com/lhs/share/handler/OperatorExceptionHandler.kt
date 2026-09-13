@@ -2,6 +2,7 @@ package com.lhs.share.handler
 
 import com.lhs.share.hub.controller.operator.AdminOperatorCatalogController
 import com.lhs.share.hub.controller.operator.OperatorController
+import com.lhs.share.hub.controller.operator.OperatorPlannerController
 import com.lhs.share.hub.controller.operator.response.OperatorError
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -18,7 +19,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
-    assignableTypes = [OperatorController::class, OpenApiOperatorController::class, AdminOperatorCatalogController::class],
+    assignableTypes = [
+        OperatorController::class,
+        OperatorPlannerController::class,
+        OpenApiOperatorController::class,
+        AdminOperatorCatalogController::class,
+    ],
 )
 class OperatorExceptionHandler {
     @ExceptionHandler(OperatorApiException::class)

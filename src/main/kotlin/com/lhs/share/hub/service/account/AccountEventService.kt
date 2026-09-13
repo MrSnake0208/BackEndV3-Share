@@ -2,7 +2,10 @@ package com.lhs.share.hub.service.account
 
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
@@ -34,6 +37,18 @@ class AccountEventService {
             } catch (_: Exception) {
                 remove(key, emitter)
             }
+        }
+    }
+
+    /** Subscribers must never observe a write that its enclosing transaction rolls back. */
+    fun publishChange(userId: String, accountId: String, eventName: String, detail: Map<String, Any?> = emptyMap()) {
+        val send = { publish(userId, accountId, eventName, UUID.randomUUID().toString(), detail + ("account_id" to accountId)) }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCommit() = send()
+            })
+        } else {
+            send()
         }
     }
 
