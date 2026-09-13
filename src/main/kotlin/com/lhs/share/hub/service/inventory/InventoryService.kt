@@ -4,6 +4,8 @@ import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryItem
+import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportAccountDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportEntryDto
@@ -35,6 +37,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Base64
 import java.util.UUID
 
@@ -680,6 +684,55 @@ class InventoryService(
             to = to,
             acquired = result,
         )
+    }
+
+    /** Counts positive reward entries and distinct acquisition dates, independent of current stock. */
+    fun acquiredSummary(
+        userId: String,
+        accountId: String,
+        entityType: String,
+        fromDate: LocalDate,
+        toDate: LocalDate,
+        timezone: String,
+    ): InventoryAcquiredSummaryResponse {
+        requireAccount(userId, accountId)
+        validateEntityType(entityType)
+        val zone = runCatching { ZoneId.of(timezone) }.getOrElse {
+            throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_timezone", "Invalid timezone")
+        }
+        val from = fromDate.atStartOfDay(zone).toInstant()
+        val to = toDate.atStartOfDay(zone).toInstant()
+        validateRange(from, to)
+        val match = Document(
+            mapOf(
+                "userId" to userId,
+                "accountId" to accountId,
+                "entityType" to entityType,
+                "recordType" to REWARD_DELTA,
+                "effectiveAt" to Document(mapOf("\$gte" to from, "\$lt" to to)),
+            ),
+        )
+        val day = Document("\$dateToString", Document(mapOf("format" to "%Y-%m-%d", "date" to "\$effectiveAt", "timezone" to zone.id)))
+        val pipeline = listOf(
+            Document("\$match", match),
+            Document("\$unwind", "\$entries"),
+            Document("\$match", Document("entries.count", Document("\$gt", 0))),
+            Document(
+                "\$group",
+                Document(
+                    mapOf(
+                        "_id" to "\$entries.id",
+                        "count" to Document("\$sum", "\$entries.count"),
+                        "days" to Document("\$addToSet", day),
+                    ),
+                ),
+            ),
+        )
+        val items = mutableMapOf<String, InventoryAcquiredSummaryItem>()
+        hubMongoTemplate.getCollection("inventory_records").aggregate(pipeline).forEach { doc ->
+            items[doc.getString("_id")] = InventoryAcquiredSummaryItem((doc["count"] as Number).toLong(), (doc["days"] as List<*>).size)
+        }
+        return InventoryAcquiredSummaryResponse(accountId, entityType, from, to, zone.id, items)
     }
 
     /**

@@ -11,6 +11,7 @@ import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
@@ -36,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.LocalDate
 import java.time.OffsetDateTime
 
 /**
@@ -124,6 +126,20 @@ class InventoryController(
         @RequestParam(name = "to") to: OffsetDateTime,
     ): ApiResult<InventoryAcquiredResponse> =
         success(inventoryService.acquired(helper.requireUserId(), accountId, entityType, from.toInstant(), to.toInstant()))
+
+    @Operation(summary = "按当地日期统计获得量与获得天数")
+    @InventoryReadResponses
+    @RequireJwt
+    @GetMapping("/acquired-summary")
+    fun acquiredSummary(
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestParam(name = "entity_type") entityType: String,
+        @RequestParam(name = "from_date") fromDate: LocalDate,
+        @RequestParam(name = "to_date") toDate: LocalDate,
+        @RequestParam(name = "timezone") timezone: String,
+    ): ApiResult<InventoryAcquiredSummaryResponse> = success(
+        inventoryService.acquiredSummary(helper.requireUserId(), accountId, entityType, fromDate, toDate, timezone),
+    )
 
     /**
      * 导出(需登录;默认仅当前状态 full 快照,include=rewards 时附带区间奖励流水)。

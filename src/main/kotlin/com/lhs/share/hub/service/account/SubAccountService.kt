@@ -9,11 +9,14 @@ import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
+import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
+import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
-import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.openapi.OpenApiTokenService
@@ -48,6 +51,9 @@ class SubAccountService(
     private val operatorUpgradeTransactionRepository: OperatorUpgradeTransactionRepository? = null,
     private val inventoryRevisionRepository: InventoryRevisionRepository? = null,
     private val starInventoryCurrentRepository: StarInventoryCurrentRepository? = null,
+    private val trainingWorkspaceRepository: OperatorTrainingWorkspaceRepository? = null,
+    private val staminaScheduleRepository: OperatorStaminaScheduleRepository? = null,
+    private val plannerImportRepository: OperatorPlannerImportRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -131,6 +137,9 @@ class SubAccountService(
             operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
             starInventoryCurrentRepository?.deleteByUserIdAndAccountId(userId, accountId)
+            trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }

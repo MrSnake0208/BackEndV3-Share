@@ -8,6 +8,8 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.InventoryExceptionHandler
 import com.lhs.share.hub.controller.account.AccountController
 import com.lhs.share.hub.controller.inventory.InventoryController
+import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryItem
+import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryImportEvent
@@ -38,6 +40,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
+import java.time.Instant
+import java.time.LocalDate
 
 class InventoryControllerContractTest {
     private val inventoryService = mockk<InventoryService>()
@@ -67,6 +71,35 @@ class InventoryControllerContractTest {
             .setValidator(validator)
             .build()
         every { eventService.publish(any(), any(), any(), any(), any()) } just runs
+    }
+
+    @Test
+    fun `summary binds ISO local dates timezone and authenticated owner and returns active days`() {
+        every { helper.requireUserId() } returns "owner"
+        every {
+            inventoryService.acquiredSummary(
+                "owner",
+                "main",
+                "agent",
+                LocalDate.parse("2026-09-01"),
+                LocalDate.parse("2026-09-14"),
+                "Asia/Shanghai",
+            )
+        } returns InventoryAcquiredSummaryResponse(
+            "main",
+            "agent",
+            Instant.parse("2026-08-31T16:00:00Z"),
+            Instant.parse("2026-09-13T16:00:00Z"),
+            "Asia/Shanghai",
+            mapOf("char_001_yangxiu" to InventoryAcquiredSummaryItem(18, 3)),
+        )
+        mockMvc.perform(
+            get("/v1/inventory/acquired-summary")
+                .param("account_id", "main").param("entity_type", "agent")
+                .param("from_date", "2026-09-01").param("to_date", "2026-09-14").param("timezone", "Asia/Shanghai"),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items.char_001_yangxiu.acquired").value(18))
+            .andExpect(jsonPath("$.data.items.char_001_yangxiu.active_days").value(3))
     }
 
     @Test
