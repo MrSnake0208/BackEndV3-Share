@@ -13,6 +13,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import com.lhs.share.hub.service.operator.OperatorSubjectiveService
+import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
 import java.time.Instant
 
 class OpenApiOperatorControllerContractTest {
@@ -20,6 +23,28 @@ class OpenApiOperatorControllerContractTest {
     private val service = mockk<OperatorService>()
     private val accountService = mockk<SubAccountService>()
     private val controller = OpenApiOperatorController(tokenService, service, accountService)
+
+    @Test
+    fun `annotations use read permission and token bound account`() {
+        val subjective = mockk<OperatorSubjectiveService>()
+        val api = OpenApiOperatorController(tokenService, service, accountService, subjectiveService = subjective)
+        every { tokenService.validateAuthorization("Bearer read", OpenApiPermission.OPERATOR_READ) } returns
+            OpenApiPrincipal("u1", "acc1")
+        val expected = OperatorAnnotationListResponse("acc1", emptyList())
+        every { subjective.annotations("u1", "acc1") } returns expected
+        assertEquals(expected, api.annotations("Bearer read").data)
+        verify(exactly = 1) { subjective.annotations("u1", "acc1") }
+    }
+
+    @Test
+    fun `annotations reject missing read permission before querying state`() {
+        val subjective = mockk<OperatorSubjectiveService>()
+        val api = OpenApiOperatorController(tokenService, service, accountService, subjectiveService = subjective)
+        every { tokenService.validateAuthorization("Bearer scan", OpenApiPermission.OPERATOR_READ) } throws
+            IllegalArgumentException("missing read scope")
+        assertThrows<IllegalArgumentException> { api.annotations("Bearer scan") }
+        verify(exactly = 0) { subjective.annotations(any(), any()) }
+    }
 
     @Test
     fun `operator read scope receives extended current response without a PATCH endpoint`() {
