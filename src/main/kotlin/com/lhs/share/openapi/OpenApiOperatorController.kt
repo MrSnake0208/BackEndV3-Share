@@ -14,6 +14,8 @@ import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
+import com.lhs.share.hub.service.operator.OperatorSubjectiveService
 import com.lhs.share.hub.service.operator.OperatorService
 import com.lhs.share.hub.service.operator.OperatorV3ImportService
 import io.swagger.v3.oas.annotations.Operation
@@ -40,11 +42,22 @@ class OpenApiOperatorController(
     private val service: OperatorService,
     private val accountService: SubAccountService,
     private val v3ImportService: OperatorV3ImportService? = null,
+    private val subjectiveService: OperatorSubjectiveService? = null,
 ) {
     @GetMapping("/account")
     fun account(@RequestHeader(value = "Authorization", required = false) authorization: String?): ApiResult<SubAccountResponse> {
         val principal = tokenService.authenticateAuthorization(authorization)
         return success(SubAccountResponse.of(accountService.requireAccount(principal.userId, principal.accountId)))
+    }
+
+    @Operation(summary = "Read operator growth annotations", description = "Requires operator:read. Uses the token-bound account; absent operators default to growth_state=active.")
+    @RequireOpenApiToken
+    @GetMapping("/annotations")
+    fun annotations(
+        @RequestHeader(value = "Authorization", required = false) authorization: String?,
+    ): ApiResult<OperatorAnnotationListResponse> {
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_READ)
+        return success(requireNotNull(subjectiveService).annotations(principal.userId, principal.accountId))
     }
 
     @GetMapping("/current")
