@@ -7,6 +7,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.Test
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 class AccountEventServiceTest {
@@ -27,6 +28,31 @@ class AccountEventServiceTest {
         verify(exactly = 1) { matching.send(any<SseEmitter.SseEventBuilder>()) }
         verify(exactly = 0) { otherAccount.send(any<SseEmitter.SseEventBuilder>()) }
         verify(exactly = 0) { otherUser.send(any<SseEmitter.SseEventBuilder>()) }
+    }
+
+    @Test
+    fun `change notifications wait for commit and do not publish on rollback`() {
+        val matching = emitter()
+        service.register("u1", "acc1", matching)
+        clearMocks(matching, answers = false)
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            service.publishChange("u1", "acc1", "operator_growth_target")
+            verify(exactly = 0) { matching.send(any<SseEmitter.SseEventBuilder>()) }
+            TransactionSynchronizationManager.getSynchronizations().forEach { it.afterCommit() }
+            verify(exactly = 1) { matching.send(any<SseEmitter.SseEventBuilder>()) }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
+        clearMocks(matching, answers = false)
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            service.publishChange("u1", "acc1", "operator_annotation")
+            TransactionSynchronizationManager.getSynchronizations().forEach { it.afterCompletion(1) }
+            verify(exactly = 0) { matching.send(any<SseEmitter.SseEventBuilder>()) }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
     }
 
     private fun emitter() = mockk<SseEmitter>(relaxed = true).also {

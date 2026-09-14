@@ -13,6 +13,7 @@ import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryAgentFavorite
 import com.lhs.share.hub.repository.entity.OperatorAnnotation
 import com.lhs.share.hub.repository.entity.OperatorGrowthTarget
+import com.lhs.share.hub.service.account.AccountEventService
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -25,6 +26,7 @@ class OperatorSubjectiveService(
     private val annotationRepository: OperatorAnnotationRepository,
     private val targetRepository: OperatorGrowthTargetRepository,
     private val favoriteRepository: InventoryAgentFavoriteRepository,
+    private val accountEvents: AccountEventService? = null,
 ) {
     fun annotations(userId: String, accountId: String): OperatorAnnotationListResponse {
         requireAccount(userId, accountId)
@@ -68,6 +70,15 @@ class OperatorSubjectiveService(
             annotationRepository.compareAndSet(userId, accountId, operatorId, expected, growth, note, now)
                 ?: conflict("annotation_revision_conflict")
         }
+        accountEvents?.publishChange(
+            userId,
+            accountId,
+            "operator_annotation",
+            mapOf(
+                "operator_id" to operatorId,
+                "revision" to saved.revision,
+            ),
+        )
         return OperatorAnnotationResponse.of(saved)
     }
 
@@ -124,6 +135,15 @@ class OperatorSubjectiveService(
             targetRepository.compareAndSet(userId, accountId, operatorId, expected, level, elite, star, heart, now)
                 ?: conflict("growth_target_revision_conflict")
         }
+        accountEvents?.publishChange(
+            userId,
+            accountId,
+            "operator_growth_target",
+            mapOf(
+                "operator_id" to operatorId,
+                "revision" to saved.revision,
+            ),
+        )
         return OperatorGrowthTargetResponse.of(saved)
     }
 
@@ -172,6 +192,9 @@ class OperatorSubjectiveService(
             }
         }
         if (entry.has("targets")) applyImportedTarget(userId, accountId, operatorId, entry.get("targets"))
+        listOf("operator_annotation", "operator_growth_target", "operator_favorites").forEach {
+            accountEvents?.publishChange(userId, accountId, it, mapOf("operator_id" to operatorId))
+        }
         return annotationRepository.findByUserIdAndAccountIdAndOperatorId(userId, accountId, operatorId)?.revision ?: 0L
     }
 
@@ -191,6 +214,9 @@ class OperatorSubjectiveService(
         }
         targetRepository.deleteAllByUserIdAndAccountId(userId, accountId)
         favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+        listOf("operator_annotation", "operator_growth_target", "operator_favorites").forEach {
+            accountEvents?.publishChange(userId, accountId, it)
+        }
     }
 
     fun subjectiveState(userId: String, accountId: String, operatorId: String): Map<String, Any?> {
@@ -270,6 +296,7 @@ class OperatorSubjectiveService(
         if (!targetRepository.deleteIfRevision(userId, accountId, operatorId, expected)) {
             conflict("growth_target_revision_conflict")
         }
+        accountEvents?.publishChange(userId, accountId, "operator_growth_target", mapOf("operator_id" to operatorId))
         return null
     }
 

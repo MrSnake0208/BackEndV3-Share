@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -30,6 +31,10 @@ class EntityCatalogServiceTest {
             rows[entity.entityType to entity.entityId] = entity
             entity
         }
+        every { repository.findByEntityTypeOrderByEntityIdAsc(any()) } answers {
+            val entityType = firstArg<String>()
+            rows.values.filter { it.entityType == entityType }.sortedBy { it.entityId }
+        }
     }
 
     @Test
@@ -43,6 +48,64 @@ class EntityCatalogServiceTest {
         assertEquals(agentIds.size, agentIds.toSet().size)
         assertTrue("char_102_jianyong" in agentIds)
         assertTrue("char_125_zhaoyun" in agentIds)
+
+        val fuchuan = rows.getValue("item" to "fuchuan")
+        val tianji = rows.getValue("item" to "tianjifuchuan")
+        val baijinbi = rows.getValue("item" to "baijinbi")
+        assertEquals("符传", fuchuan.name)
+        assertEquals("招募道具", fuchuan.category)
+        assertEquals("天机符传", tianji.name)
+        assertEquals("招募道具", tianji.category)
+        assertEquals("货币", baijinbi.category)
+
+        val responseById = service.catalog().entities.associateBy { it.id }
+        assertEquals("招募道具", responseById.getValue("fuchuan").category)
+        assertEquals("货币", responseById.getValue("baijinbi").category)
+    }
+
+    @Test
+    fun `catalog seeding fills missing category without overriding maintained metadata`() {
+        rows["item" to "baijinbi"] = EntityCatalogEntity(
+            entityType = "item",
+            entityId = "baijinbi",
+            name = "白金币",
+            catalogVersion = "previous",
+        )
+        rows["item" to "fuchuan"] = EntityCatalogEntity(
+            entityType = "item",
+            entityId = "fuchuan",
+            name = "运维名称",
+            category = "运维分类",
+            catalogVersion = "previous",
+        )
+
+        service.seedFromResources(
+            resource(
+                """
+                [
+                    {"id":"baijinbi","name":"白金币","category":"货币"},
+                    {"id":"fuchuan","name":"符传","category":"招募道具"},
+                    {"id":"mazi","name":"麻籽"}
+                ]""".trimIndent(),
+            ),
+            null,
+        )
+
+        assertEquals("货币", rows.getValue("item" to "baijinbi").category)
+        assertEquals("运维名称", rows.getValue("item" to "fuchuan").name)
+        assertEquals("运维分类", rows.getValue("item" to "fuchuan").category)
+        assertNull(rows.getValue("item" to "mazi").category)
+    }
+
+    @Test
+    fun `admin operator upsert becomes available to inventory immediately`() {
+        service.upsertAgent("char_126_new", "新密探", "2026-09-10T10:00:00Z")
+
+        assertTrue(service.exists("agent", "char_126_new"))
+        val agent = service.catalog().entities.single { it.id == "char_126_new" }
+        assertEquals("agent", agent.entityType)
+        assertEquals("新密探", agent.name)
+        assertEquals("2026-09-10T10:00:00Z", service.catalog().catalogVersion)
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteLis
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.entity.InventoryAgentFavorite
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.mongodb.MongoException
 import org.springframework.dao.DataAccessException
@@ -18,6 +19,7 @@ class InventoryAgentFavoriteService(
     private val accountService: SubAccountService,
     private val catalogService: EntityCatalogService,
     private val transactionTemplate: TransactionTemplate,
+    private val accountEvents: AccountEventService? = null,
 ) {
     fun list(userId: String, accountId: String): InventoryAgentFavoriteListResponse {
         accountService.requireAccount(userId, accountId)
@@ -46,6 +48,7 @@ class InventoryAgentFavoriteService(
                         ),
                     )
                 }
+                accountEvents?.publishChange(userId, accountId, "operator_favorites")
                 return response
             } catch (_: DuplicateKeyException) {
                 return response
@@ -63,6 +66,7 @@ class InventoryAgentFavoriteService(
         transactionTemplate.executeWithoutResult {
             repository.deleteByUserIdAndAccountIdAndAgentId(userId, accountId, agentId)
         }
+        accountEvents?.publishChange(userId, accountId, "operator_favorites")
         return InventoryAgentFavoriteResponse(accountId, agentId, favorite = false)
     }
 

@@ -239,6 +239,38 @@ class OperatorUpgradeServiceTest {
         assertTrue(result.consumed.none { it.id == "wuzhuqian" })
     }
 
+    @Test
+    fun `already broken through preview and execute only consume experience books`() {
+        operatorCurrent = current(starLevel = 21).copy(
+            entries = mapOf("op1" to OperatorEntry(elite = 0, starLevel = 21, level = 9, revision = 7)),
+        )
+        inventoryCurrent["item"] = stock("item", mapOf("bingshucanjuan" to 2, "jianjia" to 1))
+        val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 11, 7, skipBreakthroughMaterials = true)
+        assertFalse(service.preview("u1", request.copy(skipBreakthroughMaterials = false)).available)
+        val preview = service.preview("u1", request)
+        assertTrue(preview.available)
+        assertEquals(0, preview.moneyRequired)
+        assertEquals(listOf("bingshucanjuan"), preview.requirements.map { it.id })
+        val execute = OperatorUpgradeExecuteRequest(
+            "a1", "如鸢", "op1", "level", 11, 7, 42, preview.previewToken, skipBreakthroughMaterials = true,
+        )
+        val mismatch = assertThrows(OperatorApiException::class.java) {
+            service.execute("u1", "wrong-option", execute.copy(skipBreakthroughMaterials = false))
+        }
+        assertEquals("preview_expired", mismatch.code)
+        val result = service.execute("u1", "books-only", execute)
+        assertEquals(11, result.operator.level)
+        assertEquals(listOf("bingshucanjuan"), result.consumed.map { it.id })
+        assertEquals(0, inventoryCurrent.getValue("item").entries.getValue("bingshucanjuan").count)
+        assertEquals(1, inventoryCurrent.getValue("item").entries.getValue("jianjia").count)
+        assertEquals(result, service.execute("u1", "books-only", execute))
+        val conflict = assertThrows(OperatorApiException::class.java) {
+            service.execute("u1", "books-only", execute.copy(skipBreakthroughMaterials = false))
+        }
+        assertEquals("idempotency_conflict", conflict.code)
+        assertTrue(storedRecords.all { record -> record.entries.all { it.id == "bingshucanjuan" } })
+    }
+
     private fun request(target: Int) = OperatorUpgradeRequest("a1", "如鸢", "op1", "huaji", target, 7)
 
     private fun executeRequest(token: String, target: Int) = OperatorUpgradeExecuteRequest("a1", "如鸢", "op1", "huaji", target, 7, 42, token)
