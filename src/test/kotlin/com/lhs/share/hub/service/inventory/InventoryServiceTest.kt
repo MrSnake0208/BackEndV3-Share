@@ -203,6 +203,158 @@ class InventoryServiceTest {
     }
 
     @Test
+    fun `MaaY bag item sample overwrites listed stock and round trips through current export`() {
+        accounts["u1" to "acc_demo"] = SubAccount(
+            id = "a-demo",
+            userId = "u1",
+            accountId = "acc_demo",
+            name = "联调账号",
+        )
+        service.import(
+            "u1",
+            document(
+                snapshotForAccount(
+                    "before-bag-items",
+                    "2026-09-10T03:00:00Z",
+                    "full",
+                    "acc_demo",
+                    entry("fuchuan", 100),
+                    entry("tianjifuchuan", 80),
+                    entry("baijinbi", 9000),
+                    entry("mazi", 1),
+                    entry("jizhi", 1),
+                    entry("sherou", 1),
+                    entry("zhuyu", 1),
+                    entry("baimozhijiu", 44),
+                ),
+            ),
+        )
+        val mapper = jacksonObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+        val sample = mapper.readValue(
+            checkNotNull(javaClass.getResourceAsStream("/bag-items-stock-snapshot-v2.json")),
+            InventoryImportRequest::class.java,
+        )
+
+        val imported = service.import("u1", sample)
+        val duplicate = service.import("u1", sample)
+        val current = service.current("u1", "acc_demo", "item").single()
+        val exported = service.export(
+            "u1",
+            accountId = "acc_demo",
+            scope = null,
+            includeRewards = false,
+            from = null,
+            to = null,
+        ).records.single { it.entityType == "item" }
+
+        assertEquals(1, imported.accepted)
+        assertEquals(1, duplicate.duplicates)
+        assertEquals(
+            mapOf(
+                "fuchuan" to 2L,
+                "tianjifuchuan" to 19L,
+                "baijinbi" to 3177L,
+                "mazi" to 29L,
+                "jizhi" to 566L,
+                "sherou" to 18L,
+                "zhuyu" to 18L,
+            ),
+            BAG_ITEM_IDS.associateWith { current.entries.getValue(it).count },
+        )
+        assertEquals(44, current.entries.getValue("baimozhijiu").count)
+        assertEquals("listed", records.getValue(Triple("u1", "acc_demo", BAG_SAMPLE_RECORD_ID)).snapshotScope)
+        assertEquals("背包-物品", records.getValue(Triple("u1", "acc_demo", BAG_SAMPLE_RECORD_ID)).acquisitionChannel)
+        assertTrue(records.values.none { it.accountId == "acc_demo" && it.recordType == "reward_delta" })
+        assertEquals(
+            BAG_ITEM_IDS.associateWith { current.entries.getValue(it).count },
+            exported.entries.filter { it.id in BAG_ITEM_IDS }.associate { it.id to it.count },
+        )
+    }
+
+    @Test
+    fun `six item listed snapshot preserves omitted baijinbi count and baseline`() {
+        service.import(
+            "u1",
+            document(
+                snapshot(
+                    "initial-items",
+                    "2026-09-10T02:00:00Z",
+                    "listed",
+                    entry("fuchuan", 100),
+                    entry("tianjifuchuan", 80),
+                    entry("baijinbi", 9000),
+                ),
+            ),
+        )
+        val baijinbiBefore = currents.getValue(Triple("u1", "main", "item")).entries.getValue("baijinbi")
+        val sixItems = snapshot(
+            "bag-items-without-currency",
+            "2026-09-10T04:00:00Z",
+            "listed",
+            entry("fuchuan", 2),
+            entry("tianjifuchuan", 19),
+            entry("mazi", 29),
+            entry("jizhi", 566),
+            entry("sherou", 18),
+            entry("zhuyu", 18),
+        ).copy(acquisitionChannel = "背包-物品")
+
+        service.import("u1", document(sixItems))
+
+        val current = currents.getValue(Triple("u1", "main", "item"))
+        assertEquals(baijinbiBefore, current.entries.getValue("baijinbi"))
+        assertEquals(2, current.entries.getValue("fuchuan").count)
+        assertEquals(19, current.entries.getValue("tianjifuchuan").count)
+    }
+
+    @Test
+    fun `explicit zero applies and legacy bag bird food channel remains valid`() {
+        service.import(
+            "u1",
+            document(
+                snapshot(
+                    "initial-items",
+                    "2026-09-10T02:00:00Z",
+                    "listed",
+                    entry("fuchuan", 9),
+                    entry("tianjifuchuan", 8),
+                    entry("baijinbi", 7),
+                ),
+            ),
+        )
+        service.import(
+            "u1",
+            document(
+                snapshot(
+                    "zero-items",
+                    "2026-09-10T03:00:00Z",
+                    "listed",
+                    entry("fuchuan", 0),
+                    entry("baijinbi", 0),
+                ).copy(acquisitionChannel = "背包-物品"),
+                snapshot(
+                    "legacy-bird-food",
+                    "2026-09-10T04:00:00Z",
+                    "listed",
+                    entry("mazi", 29),
+                    entry("jizhi", 566),
+                    entry("sherou", 18),
+                    entry("zhuyu", 18),
+                ).copy(acquisitionChannel = "背包-鸟食"),
+            ),
+        )
+
+        val current = currents.getValue(Triple("u1", "main", "item"))
+        assertTrue(current.entries.containsKey("fuchuan"))
+        assertTrue(current.entries.containsKey("baijinbi"))
+        assertEquals(0, current.entries.getValue("fuchuan").count)
+        assertEquals(0, current.entries.getValue("baijinbi").count)
+        assertEquals(8, current.entries.getValue("tianjifuchuan").count)
+        assertEquals(29, current.entries.getValue("mazi").count)
+        assertEquals("背包-鸟食", records.getValue(Triple("u1", "main", "legacy-bird-food")).acquisitionChannel)
+    }
+
+    @Test
     fun `inventory revision advances only when an import changes current stock`() {
         service.import("u1", document(snapshot("full", "2026-08-16T11:00:00Z", "full", entry("baijinbi", 10))))
         service.import("u1", document(reward("history", "2026-08-16T10:00:00Z", "baijinbi", 2)))
@@ -456,7 +608,19 @@ class InventoryServiceTest {
     }
 
     @Test
-    fun `acquired aggregation is scoped to one account`() {
+    fun `acquired aggregation excludes bag snapshots and is scoped to one account`() {
+        service.import(
+            "u1",
+            document(
+                snapshotForAccount(
+                    "bag-items",
+                    "2026-08-16T10:00:00Z",
+                    "listed",
+                    "alt",
+                    entry("fuchuan", 2),
+                ).copy(acquisitionChannel = "背包-物品"),
+            ),
+        )
         val collection = mockk<MongoCollection<Document>>()
         val aggregate = mockk<AggregateIterable<Document>>()
         val cursor = mockk<MongoCursor<Document>>()
@@ -479,6 +643,8 @@ class InventoryServiceTest {
         assertEquals("u1", match.getString("userId"))
         assertEquals("alt", match.getString("accountId"))
         assertEquals("reward_delta", match.getString("recordType"))
+        assertEquals("stock_snapshot", records.getValue(Triple("u1", "alt", "bag-items")).recordType)
+        assertTrue(response.acquired.isEmpty())
     }
 
     @Test
@@ -632,6 +798,8 @@ class InventoryServiceTest {
         val schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(schemaDocument)
 
         assertTrue(schema.validate(example).isEmpty())
+        val bagItemSample = mapper.readTree(checkNotNull(javaClass.getResourceAsStream("/bag-items-stock-snapshot-v2.json")))
+        assertTrue(schema.validate(bagItemSample).isEmpty())
         val automaticReport = example.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply { remove("accounts") }
         val idOnlyDirectory = example.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
             (this["accounts"][0] as com.fasterxml.jackson.databind.node.ObjectNode).remove("name")
@@ -766,4 +934,9 @@ class InventoryServiceTest {
         producer = ProducerInfo("test"),
         entries = listOf(RecordEntry("baijinbi", count = 1)),
     )
+
+    companion object {
+        private const val BAG_SAMPLE_RECORD_ID = "myshare:73e8a2f249bb493c8a34d51e5c72d109"
+        private val BAG_ITEM_IDS = listOf("fuchuan", "tianjifuchuan", "baijinbi", "mazi", "jizhi", "sherou", "zhuyu")
+    }
 }

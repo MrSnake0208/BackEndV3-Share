@@ -8,7 +8,10 @@ import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
+import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
+import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
@@ -49,6 +52,9 @@ class SubAccountServiceTest {
     private val upgradeRepository = mockk<OperatorUpgradeTransactionRepository>()
     private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val starInventoryRepository = mockk<StarInventoryCurrentRepository>()
+    private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
+    private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
+    private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
             override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
@@ -72,6 +78,9 @@ class SubAccountServiceTest {
         upgradeRepository,
         revisionRepository,
         starInventoryRepository,
+        trainingWorkspaceRepository,
+        staminaScheduleRepository,
+        plannerImportRepository,
     )
 
     @Test
@@ -194,6 +203,10 @@ class SubAccountServiceTest {
         every { accountRepository.deleteById("mongo-id") } just runs
 
         service.delete("u1", "main")
+
+        verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
 
         verify(exactly = 1) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }

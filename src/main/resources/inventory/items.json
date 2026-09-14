@@ -56,5 +56,7 @@
   { "id": "mazi", "name": "麻籽" },
   { "id": "sherou", "name": "蛇肉" },
   { "id": "zhuyu", "name": "茱萸" },
-  { "id": "baijinbi", "name": "白金币" }
+  { "id": "fuchuan", "name": "符传", "category": "招募道具" },
+  { "id": "tianjifuchuan", "name": "天机符传", "category": "招募道具" },
+  { "id": "baijinbi", "name": "白金币", "category": "货币" }
 ]
