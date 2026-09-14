@@ -8,7 +8,10 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.UUID
+
+private const val BUSINESS_DAY_START_HOUR = 5
 
 /** Validates persistence, not a second simulator. Infeasible user drafts remain saveable. */
 @Component
@@ -94,13 +97,16 @@ class OperatorPlannerValidator(
         if (previous == null || previous.path("schedule").isNull) return
         if (previous.path("timezone") != next.path("timezone")) invalid("A saved schedule keeps its timezone", "timezone")
         if (next.path("schedule").isNull) invalid("A fixed schedule cannot be silently cleared", "schedule")
-        val today = LocalDate.now(zone(previous.path("timezone")))
+        val today = businessDate(ZonedDateTime.now(zone(previous.path("timezone"))))
         val before = days(previous.path("schedule"))
         val after = days(next.path("schedule")).associateBy { it.path("date").asText() }
         before.filter { date(it.path("date").asText()) < today }.forEach { day ->
             if (after[day.path("date").asText()] != day) invalid("Saved past days must remain unchanged", "schedule.history")
         }
     }
+
+    internal fun businessDate(now: ZonedDateTime): LocalDate =
+        now.toLocalDate().let { if (now.hour < BUSINESS_DAY_START_HOUR) it.minusDays(1) else it }
 
     fun revision(request: JsonNode, field: String = "expected_revision"): Long = integer(request.path(field), field, 0, Long.MAX_VALUE - 1)
 

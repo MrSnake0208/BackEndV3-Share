@@ -30,6 +30,8 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.LocalDate
+import java.time.ZonedDateTime
 
 class OperatorPlannerServiceTest {
     private val mapper = jacksonObjectMapper().findAndRegisterModules().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
@@ -133,6 +135,18 @@ class OperatorPlannerServiceTest {
         val foreign = assertThrows(OperatorApiException::class.java) { service.putWorkspace("u2", "a1", workspace()) }
         assertEquals(HttpStatus.NOT_FOUND, foreign.status)
         assertThrows(OperatorApiException::class.java) { service.schedule("u2", "a1", "favorites") }
+    }
+
+    @Test
+    fun `planner business date changes at five in the saved timezone`() {
+        assertEquals(
+            LocalDate.of(2026, 9, 12),
+            validator.businessDate(ZonedDateTime.parse("2026-09-13T04:59:59+08:00")),
+        )
+        assertEquals(
+            LocalDate.of(2026, 9, 13),
+            validator.businessDate(ZonedDateTime.parse("2026-09-13T05:00:00+08:00")),
+        )
     }
 
     @Test
