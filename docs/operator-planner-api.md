@@ -65,7 +65,7 @@ GET/PUT 响应额外含 `account_id,plan_id,revision,updated_at`。strategy 为 
 
 用户编辑中的次数小数、超支等不可执行安排可以保存为草稿，不静默截断。预测状态为 invalid/paused 的日子必须 end=start 且实际 yield/used/surplus 为零；planned_yield 可用于展示原拟产出。后端验证结构与此持久化约束，不替代前端重算固定渠道掉落。
 
-GET 不因日期、当前库存、练度或规则变化重算。PUT 不允许清空已有固定快照、不允许更改固定快照时区，过去日期（按保存时区）必须完整保持。前端显式更新可从当前库存重新生成今天及以后；历史预测及未来自定义安排由前端完整提交。允许保留周期以外的自定义日期。
+GET 不因日期、当前库存、练度或规则变化重算。PUT 不允许清空已有固定快照、不允许更改固定快照时区；按保存时区计算业务日，并以当地 05:00 为切换点，过去业务日必须完整保持。前端显式更新可从当前库存重新生成今天及以后；历史预测及未来自定义安排由前端完整提交。允许保留周期以外的自定义日期。
 
 过期 revision 返回 409 `stamina_schedule_revision_conflict`。结构错误返回 422 `invalid_training_workspace` 和 `field_path`；不支持的外层版本返回 422 `unsupported_training_workspace_version`。
 
