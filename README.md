@@ -188,7 +188,7 @@ PUT /v1/star-inventory/current?account_id=acc_xxx
 
 PUT 必须提交 `effective_at` 和 `entries`，每次是完整替换；服务端只保存
 `instance_id`、`kind`、`name`、`quality`、`level` 五个条目字段，名称会去除首尾空白，最多 1000 条。
-相同规范化快照重复提交幂等且不增加 revision；更早时间或同一时间的不同内容返回 409。
+相同规范化 entries 无论 `effective_at` 早晚都幂等返回当前记录且不增加 revision；仅业务 entries 不同且时间更早时返回 stale 409，同一时间但业务 entries 不同时返回 revision conflict 409。
 没有已保存快照时 GET 仍返回 HTTP 200，`data` 含 `account_id`、空 `entries` 和 null 元数据。
 
 ### 密探公共图鉴与管理员管理

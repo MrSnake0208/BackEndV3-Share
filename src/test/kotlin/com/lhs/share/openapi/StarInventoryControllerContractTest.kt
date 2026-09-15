@@ -120,6 +120,15 @@ class StarInventoryControllerContractTest {
             .andExpect(status().isUnprocessableEntity)
             .andExpect(jsonPath("$.error.code").value("star_inventory_invalid_snapshot"))
 
+        mockMvc.perform(
+            put("/v1/star-inventory/current")
+                .param("account_id", "acc_a")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validBody.replace("\"level\": 60", "\"level\": 0")),
+        )
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("star_inventory_invalid_snapshot"))
+
         verify(exactly = 0) { service.putCurrent(any(), any(), any()) }
     }
 

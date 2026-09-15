@@ -56,9 +56,9 @@ data class StarInventoryEntryRequest(
     @field:JsonSetter(nulls = Nulls.FAIL)
     val quality: String,
     @field:NotNull(message = "level 不能为空")
-    @field:Min(value = 0, message = "level 不能为负")
+    @field:Min(value = 1, message = "level 最小为 1")
     @field:Max(value = 60, message = "level 不能超过 60")
-    @field:Schema(minimum = "0", maximum = "60")
+    @field:Schema(minimum = "1", maximum = "60")
     @field:JsonSetter(nulls = Nulls.FAIL)
     val level: Int?,
 ) {
