@@ -16,6 +16,8 @@ import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
+import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
+import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -54,6 +56,8 @@ class SubAccountService(
     private val trainingWorkspaceRepository: OperatorTrainingWorkspaceRepository? = null,
     private val staminaScheduleRepository: OperatorStaminaScheduleRepository? = null,
     private val plannerImportRepository: OperatorPlannerImportRepository? = null,
+    private val starWorkspaceCurrentRepository: StarWorkspaceCurrentRepository? = null,
+    private val starLoadoutCurrentRepository: StarLoadoutCurrentRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -140,6 +144,8 @@ class SubAccountService(
             trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            starWorkspaceCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+            starLoadoutCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             tokenService.revokeByAccount(userId, accountId)
             accountRepository.deleteById(checkNotNull(account.id))
         }

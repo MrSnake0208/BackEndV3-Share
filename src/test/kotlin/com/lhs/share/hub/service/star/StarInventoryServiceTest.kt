@@ -91,7 +91,7 @@ class StarInventoryServiceTest {
     }
 
     @Test
-    fun `same normalized snapshot is idempotent across order and equivalent offsets`() {
+    fun `same entries are idempotent even when effective time changes`() {
         val first = service.putCurrent(
             "u1",
             "acc_a",
@@ -104,7 +104,7 @@ class StarInventoryServiceTest {
             "u1",
             "acc_a",
             request(
-                effectiveAt = "2026-08-31T18:00:00+08:00",
+                effectiveAt = "2026-08-31T11:00:00Z",
                 entries = listOf(entry("main-1", "天府", "main", "orange", 60)),
             ),
         )
@@ -123,6 +123,85 @@ class StarInventoryServiceTest {
                 any(),
             )
         }
+    }
+
+    @Test
+    fun `same entries with earlier effective time are still idempotent`() {
+        val first = service.putCurrent("u1", "acc_a", request())
+        val repeated = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(
+                effectiveAt = "2026-08-31T09:00:00Z",
+                entries = listOf(entry("main-1", "天府", "main", "orange", 60)),
+            ),
+        )
+
+        assertEquals(first, repeated)
+        verify(exactly = 1) {
+            repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `legacy content hash with same entries at an earlier time is idempotent without replacing`() {
+        storeLegacyCurrent()
+
+        val response = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(effectiveAt = "2026-08-31T09:00:00Z"),
+        )
+
+        assertEquals(7L, response.revision)
+        verify(exactly = 0) { repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `legacy content hash with same entries at the same time is idempotent without replacing`() {
+        storeLegacyCurrent()
+
+        val response = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(effectiveAt = "2026-08-31T10:00:00Z"),
+        )
+
+        assertEquals(7L, response.revision)
+        verify(exactly = 0) { repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `legacy content hash with same entries at a later time is idempotent without replacing`() {
+        storeLegacyCurrent()
+
+        val response = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(effectiveAt = "2026-08-31T11:00:00Z"),
+        )
+
+        assertEquals(7L, response.revision)
+        verify(exactly = 0) { repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `legacy content hash with different earlier entries remains stale`() {
+        storeLegacyCurrent()
+
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.putCurrent(
+                "u1",
+                "acc_a",
+                request(
+                    effectiveAt = "2026-08-31T09:00:00Z",
+                    entries = listOf(entry("main-2", "武曲", "main", "purple", 20)),
+                ),
+            )
+        }
+
+        assertEquals("star_inventory_stale_snapshot", error.code)
+        verify(exactly = 0) { repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -205,6 +284,7 @@ class StarInventoryServiceTest {
             request(entries = listOf(entry("main-1", "天府", "other", "orange", 1))),
             request(entries = listOf(entry("main-1", "天府", "main", "red", 1))),
             request(entries = listOf(entry("main-1", "天府", "main", "orange", 61))),
+            request(entries = listOf(entry("main-1", "天府", "main", "orange", 0))),
             request(entries = listOf(entry("main-1", "天府", "main", "orange", 1), entry("main-1", "天府", "main", "orange", 1))),
         )
 
@@ -217,6 +297,27 @@ class StarInventoryServiceTest {
         verify(exactly = 0) { repository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `level boundaries one and sixty are accepted`() {
+        val saved = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(entries = listOf(entry("main-1", "天府", "main", "orange", 1))),
+        )
+        val replaced = service.putCurrent(
+            "u1",
+            "acc_a",
+            request(
+                effectiveAt = "2026-08-31T11:00:00Z",
+                entries = listOf(entry("main-1", "天府", "main", "orange", 60)),
+            ),
+        )
+
+        assertEquals(1, saved.entries.single().level)
+        assertEquals(60, replaced.entries.single().level)
+        assertEquals(2L, replaced.revision)
+    }
+
     private fun request(
         effectiveAt: String = "2026-08-31T10:00:00Z",
         entries: List<StarInventoryEntryRequest> = listOf(entry("main-1", "天府", "main", "orange", 60)),
@@ -224,4 +325,18 @@ class StarInventoryServiceTest {
 
     private fun entry(instanceId: String, name: String, kind: String, quality: String, level: Int) =
         StarInventoryEntryRequest(instanceId, kind, name, quality, level)
+
+    private fun storeLegacyCurrent() {
+        stored["u1" to "acc_a"] = StarInventoryCurrent(
+            id = "u1:acc_a",
+            userId = "u1",
+            accountId = "acc_a",
+            effectiveAt = Instant.parse("2026-08-31T10:00:00Z"),
+            entries = listOf(StarInventoryEntry("main-1", "main", "天府", "orange", 60)),
+            revision = 7,
+            contentHash = "legacy-hash-including-effective-at",
+            updatedAt = Instant.parse("2026-08-31T10:00:00Z"),
+            receivedAt = Instant.parse("2026-08-31T10:00:00Z"),
+        )
+    }
 }

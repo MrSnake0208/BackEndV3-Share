@@ -36,12 +36,12 @@ class StarInventoryService(
     ): StarInventorySnapshotResponse {
         validateAccount(userId, accountId)
         val normalized = normalize(request)
-        val contentHash = hash(normalized)
+        val contentHash = hashEntries(normalized.entries)
         var current = repository.findByUserIdAndAccountId(userId, accountId)
 
         repeat(MAX_WRITE_ATTEMPTS) {
             current?.let {
-                if (it.contentHash == contentHash) return StarInventorySnapshotResponse.of(it)
+                if (hashEntries(it.entries) == contentHash) return StarInventorySnapshotResponse.of(it)
                 rejectIfNotNewer(it, normalized.effectiveAt)
             }
 
@@ -66,7 +66,7 @@ class StarInventoryService(
 
         val latest = current ?: repository.findByUserIdAndAccountId(userId, accountId)
         if (latest != null) {
-            if (latest.contentHash == contentHash) return StarInventorySnapshotResponse.of(latest)
+            if (hashEntries(latest.entries) == contentHash) return StarInventorySnapshotResponse.of(latest)
             rejectIfNotNewer(latest, normalized.effectiveAt)
         }
         throw conflict("Concurrent star inventory update could not be applied")
@@ -108,15 +108,14 @@ class StarInventoryService(
         if (name.isEmpty() || name.length > MAX_NAME_LENGTH) throw invalid("name 去除首尾空白后不能为空且不能超过 256")
         if (entry.quality !in QUALITIES) throw invalid("quality 仅支持 orange、purple、blue、green、white")
         val level = entry.level ?: throw invalid("level 不能为空")
-        if (level !in 0..MAX_LEVEL) throw invalid("level 必须在 0..$MAX_LEVEL")
+        if (level !in MIN_LEVEL..MAX_LEVEL) throw invalid("level 必须在 $MIN_LEVEL..$MAX_LEVEL")
         return StarInventoryEntry(entry.instanceId, entry.kind, name, entry.quality, level)
     }
 
-    private fun hash(snapshot: NormalizedSnapshot): String {
+    private fun hashEntries(entries: List<StarInventoryEntry>): String {
         val values = buildList {
             add("yuanstar-star-inventory-v1")
-            add(snapshot.effectiveAt.toString())
-            snapshot.entries.forEach { entry ->
+            entries.sortedBy { it.instanceId }.forEach { entry ->
                 add(entry.instanceId)
                 add(entry.kind)
                 add(entry.name)
@@ -163,6 +162,7 @@ class StarInventoryService(
 
     companion object {
         const val MAX_ENTRIES = 1000
+        const val MIN_LEVEL = 1
         const val MAX_LEVEL = 60
         private const val MAX_NAME_LENGTH = 256
         private const val MAX_WRITE_ATTEMPTS = 3
