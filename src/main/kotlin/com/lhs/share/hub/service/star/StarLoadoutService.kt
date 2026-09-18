@@ -19,6 +19,14 @@ class StarLoadoutService(
     private val inventoryRepository: StarInventoryCurrentRepository,
     private val accountService: SubAccountService,
 ) {
+    internal fun clearForReplacement(userId: String, accountId: String, now: Instant): StarLoadoutCurrentResponse {
+        val expectedRevision = repository.findByUserIdAndAccountId(userId, accountId)?.revision ?: 0
+        val saved = starCasConflictBoundary({ throw conflict() }) {
+            repository.replace(userId, accountId, expectedRevision, emptyList(), now) ?: throw conflict()
+        }
+        return StarLoadoutCurrentResponse.of(saved)
+    }
+
     fun current(userId: String, accountId: String): StarLoadoutCurrentResponse {
         accountService.requireAccount(userId, accountId)
         return repository.findByUserIdAndAccountId(userId, accountId)

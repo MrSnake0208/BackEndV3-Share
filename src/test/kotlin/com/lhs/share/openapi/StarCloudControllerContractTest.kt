@@ -7,11 +7,16 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.InventoryExceptionHandler
 import com.lhs.share.hub.controller.star.StarLoadoutController
+import com.lhs.share.hub.controller.star.StarLoadoutPresetController
 import com.lhs.share.hub.controller.star.StarWorkspaceController
 import com.lhs.share.hub.controller.star.response.StarLoadoutCurrentResponse
+import com.lhs.share.hub.controller.star.response.StarLoadoutPresetCurrentResponse
 import com.lhs.share.hub.controller.star.response.StarWorkspaceBagResponse
 import com.lhs.share.hub.controller.star.response.StarWorkspaceCurrentResponse
 import com.lhs.share.hub.controller.star.response.StarWorkspaceExperienceResponse
+import com.lhs.share.hub.repository.entity.StarLoadoutPreset
+import com.lhs.share.hub.service.inventory.InventoryApiException
+import com.lhs.share.hub.service.star.StarLoadoutPresetService
 import com.lhs.share.hub.service.star.StarLoadoutService
 import com.lhs.share.hub.service.star.StarWorkspaceService
 import io.mockk.every
@@ -19,6 +24,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
@@ -32,6 +38,7 @@ import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
 class StarCloudControllerContractTest {
     private val workspaceService = mockk<StarWorkspaceService>()
     private val loadoutService = mockk<StarLoadoutService>()
+    private val presetService = mockk<StarLoadoutPresetService>()
     private val helper = mockk<AuthenticationHelper>()
     private lateinit var mockMvc: MockMvc
 
@@ -44,6 +51,7 @@ class StarCloudControllerContractTest {
         mockMvc = MockMvcBuilders.standaloneSetup(
             StarWorkspaceController(workspaceService, helper),
             StarLoadoutController(loadoutService, helper),
+            StarLoadoutPresetController(presetService, helper),
         ).setControllerAdvice(InventoryExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
@@ -114,6 +122,45 @@ class StarCloudControllerContractTest {
     }
 
     @Test
+    fun `preset GET and PUT use user-global snake case contract without account id`() {
+        every { presetService.current("jwt-user") } returns StarLoadoutPresetCurrentResponse.empty()
+        every { presetService.putCurrent("jwt-user", any()) } returns StarLoadoutPresetCurrentResponse(
+            1,
+            listOf(StarLoadoutPreset("main-1", "预设1", listOf("天府", "武曲"))),
+            listOf(StarLoadoutPreset("support-1", "预设1", listOf("文曲"))),
+            java.time.Instant.parse("2026-09-01T00:00:00Z"),
+        )
+
+        mockMvc.perform(get("/v1/star-loadout-presets/current"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.revision").value(0))
+            .andExpect(jsonPath("$.data.main_presets").isEmpty)
+            .andExpect(jsonPath("$.data.updated_at").value(null as String?))
+        mockMvc.perform(
+            put("/v1/star-loadout-presets/current")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expected_revision":0,"main_presets":[{"id":"main-1","name":"预设1","star_names":["天府","武曲"]}],"support_presets":[{"id":"support-1","name":"预设1","star_names":["文曲"]}]}
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.revision").value(1))
+            .andExpect(jsonPath("$.data.main_presets[0].star_names[1]").value("武曲"))
+            .andExpect(jsonPath("$.data.account_id").doesNotExist())
+
+        verify {
+            presetService.putCurrent(
+                "jwt-user",
+                match { request ->
+                    request.expectedRevision == 0L && request.mainPresets?.single()?.starNames == listOf("天府", "武曲")
+                },
+            )
+        }
+    }
+
+    @Test
     fun `malformed cloud payloads return each endpoint's stable validation code`() {
         mockMvc.perform(
             put("/v1/star-workspace/current")
@@ -131,6 +178,41 @@ class StarCloudControllerContractTest {
         )
             .andExpect(status().isUnprocessableEntity)
             .andExpect(jsonPath("$.error.code").value("star_loadout_invalid_snapshot"))
+        mockMvc.perform(
+            put("/v1/star-loadout-presets/current")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"),
+        )
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("star_loadout_preset_invalid_snapshot"))
+        mockMvc.perform(
+            put("/v1/star-loadout-presets/current")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expected_revision":0,"account_id":"acc_a","main_presets":[],"support_presets":[]}
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("star_loadout_preset_invalid_snapshot"))
+    }
+
+    @Test
+    fun `preset endpoint preserves its runtime conflict code`() {
+        every { presetService.putCurrent("jwt-user", any()) } throws InventoryApiException(
+            HttpStatus.CONFLICT,
+            "star_loadout_preset_revision_conflict",
+            "Star loadout preset changed; reload before saving",
+        )
+
+        mockMvc.perform(
+            put("/v1/star-loadout-presets/current")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expected_revision\":0,\"main_presets\":[],\"support_presets\":[]}"),
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("star_loadout_preset_revision_conflict"))
     }
 
     private fun workspaceResponse() = StarWorkspaceCurrentResponse(

@@ -1,12 +1,16 @@
 package com.lhs.share.hub.service.star
 
 import com.lhs.share.hub.controller.star.request.StarLoadoutCurrentRequest
+import com.lhs.share.hub.controller.star.request.StarLoadoutPresetCurrentRequest
+import com.lhs.share.hub.controller.star.request.StarLoadoutPresetRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceBagRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceCurrentRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceExperienceRequest
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepositoryImpl
+import com.lhs.share.hub.repository.StarLoadoutPresetCurrentRepository
+import com.lhs.share.hub.repository.StarLoadoutPresetCurrentRepositoryImpl
 import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
 import com.lhs.share.hub.repository.StarWorkspaceCurrentRepositoryImpl
 import com.lhs.share.hub.repository.entity.StarInventoryCurrent
@@ -51,10 +55,15 @@ class StarCurrentMongoTest {
         StarLoadoutCurrentRepository::class.java,
         RepositoryFragments.just(StarLoadoutCurrentRepositoryImpl(template)),
     )
+    private val presetRepository = factory.getRepository(
+        StarLoadoutPresetCurrentRepository::class.java,
+        RepositoryFragments.just(StarLoadoutPresetCurrentRepositoryImpl(template)),
+    )
     private val accounts = mockk<SubAccountService>()
     private val inventoryRepository = mockk<StarInventoryCurrentRepository>()
-    private val workspaceService = StarWorkspaceService(workspaceRepository, accounts)
+    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts)
     private val loadoutService = StarLoadoutService(loadoutRepository, inventoryRepository, accounts)
+    private val presetService = StarLoadoutPresetService(presetRepository)
 
     @BeforeEach
     fun setUp() {
@@ -139,6 +148,20 @@ class StarCurrentMongoTest {
             },
             expectedCode = "star_loadout_revision_conflict",
             count = { template.getCollection("star_loadout_current").countDocuments() },
+        )
+        assertConcurrentFirstCreate(
+            action = {
+                presetService.putCurrent(
+                    "owner",
+                    StarLoadoutPresetCurrentRequest(
+                        0,
+                        listOf(StarLoadoutPresetRequest("main-1", "预设1", listOf("天府"))),
+                        emptyList(),
+                    ),
+                )
+            },
+            expectedCode = "star_loadout_preset_revision_conflict",
+            count = { template.getCollection("star_loadout_preset_current").countDocuments() },
         )
     }
 

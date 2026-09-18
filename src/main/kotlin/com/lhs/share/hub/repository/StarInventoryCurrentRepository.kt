@@ -22,6 +22,21 @@ interface StarInventoryCurrentRepository : MongoRepository<StarInventoryCurrent,
 
 interface StarInventoryCurrentRepositoryCustom {
     /**
+     * Replacement-import CAS. Unlike ordinary snapshot PUT, this intentionally does not compare
+     * effectiveAt: an exchange replacement is explicitly authorized by expectedRevision.
+     */
+    fun replace(
+        userId: String,
+        accountId: String,
+        effectiveAt: Instant,
+        entries: List<StarInventoryEntry>,
+        contentHash: String,
+        expectedRevision: Long,
+        updatedAt: Instant,
+        receivedAt: Instant,
+    ): StarInventoryCurrent?
+
+    /**
      * 只有当前版本仍是 expectedRevision 且旧快照时间早于新时间时才替换。
      * 无记录时借助 upsert 创建 revision=1，竞争插入由服务层重读并重试。
      */
@@ -40,6 +55,27 @@ interface StarInventoryCurrentRepositoryCustom {
 class StarInventoryCurrentRepositoryImpl(
     @param:Qualifier("hubMongoTemplate") private val mongoTemplate: MongoTemplate,
 ) : StarInventoryCurrentRepositoryCustom {
+    override fun replace(
+        userId: String,
+        accountId: String,
+        effectiveAt: Instant,
+        entries: List<StarInventoryEntry>,
+        contentHash: String,
+        expectedRevision: Long,
+        updatedAt: Instant,
+        receivedAt: Instant,
+    ): StarInventoryCurrent? = mongoTemplate.findAndModify(
+        Query.query(
+            Criteria.where("_id").`is`("$userId:$accountId").and("userId").`is`(userId)
+                .and("accountId").`is`(accountId).and("revision").`is`(expectedRevision),
+        ),
+        Update().set("userId", userId).set("accountId", accountId).set("effectiveAt", effectiveAt)
+            .set("entries", entries).set("contentHash", contentHash).set("revision", expectedRevision + 1)
+            .set("updatedAt", updatedAt).set("receivedAt", receivedAt),
+        FindAndModifyOptions.options().upsert(expectedRevision == 0L).returnNew(true),
+        StarInventoryCurrent::class.java,
+    )
+
     override fun replaceIfEffectiveAtAfterCurrent(
         userId: String,
         accountId: String,
