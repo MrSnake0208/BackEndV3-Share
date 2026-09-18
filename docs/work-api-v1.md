@@ -16,7 +16,23 @@ YuanHub Work 第一阶段从 `MaaBackend.maa_copilot` 实时只读转换公开�
 
 ### `GET /v1/works/{id}/compatibility?to=MAAYUAN|YUANASSIST`
 
-MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。YUANASSIST 第一阶段只返回逐动作兼容性分析，不返回伪可执行文档。
+MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。YUANASSIST 同样只在全部语义 `exact` 时返回原生 `target_document`：
+
+```json
+{
+  "scriptContent": "1回合\t1A\t\t\t\t",
+  "instructions": [
+    { "turn": 1, "step": 1, "type": "PAUSE", "value": 0 }
+  ],
+  "config": {
+    "intervalAttack": 5000,
+    "intervalSkill": 5000,
+    "waitTurn": 7800
+  }
+}
+```
+
+`target_document` 内保留 YuanAssist 原生 camelCase 字段；API 外层仍使用 snake_case。
 
 所有成功响应使用项目统一 `ApiResult`，字段按 snake_case 输出。非法分页或目标返回 HTTP 400。
 
@@ -56,11 +72,15 @@ MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。Y
 
 ### YUANASSIST Adapter
 
-- 当前只实现兼容性分析和接口骨架，不生成 `scriptContent + instructions + config`，也不返回 `target_document`。
-- 基础槽位动作、等待、暂停和切换目标只完成语义可表达性判断，尚未编译为 YuanAssist 原生指令。
+- 基础槽位动作编译为 `A / ↑ / ↓ / 圈`，动作序号按每回合的 Work 动作顺序跨槽位递增；缺失的中间回合会生成空物理行。
+- 等待、暂停、左右切换目标及位于回合首动作的全灭检测编译为 YuanAssist 原生 instruction。非首位全灭检测无法保留动作位置，不导出。
+- 编译器保持同一 `turn + step` 的指令数组顺序；但 YuanAssist 尚未确认该执行顺序，因此当前遇到同位置多指令时返回 `unconfirmed_instruction_order`，不生成目标文档。
+- 仅 `exact` 时返回 `scriptContent + instructions + config`；`partial` 或 `unsupported` 始终省略 `target_document`。
+- `intervalAttack`、`intervalSkill`、`waitTurn` 分别必须有可靠的 `exec.delays_ms.attack`、`exec.delays_ms.ultimate`、`exec.extensions.yuanassist.enemy_turn_wait_ms` 来源；缺失时报告 `missing_yuanassist_config`，不会猜默认值。
+- 防御延时与普攻不同时，通过动作 step 上的 `DELAY_ADD` / `DELAY_SUBTRACT` 保留差值。YuanAssist 的圈/SP 基础延时尚未确认；作业包含圈动作且显式指定 `delays_ms.sp` 时保持 `partial`。
 - 自动战斗开关、关卡互动、吕布切形态、立即重开和退场检测暂无等价指令。
-- 带槽位的龙气检测和蓝星检测不支持；橙星、紫星及其他检测即使语义可表达，也尚未实现失败后的自动导航。
-- 未可靠关联 Level Catalog 时，任何依赖失败后重新进入关卡的检测都会报告 `restart_navigation_unavailable`。
+- 带槽位的龙气检测和蓝星检测不支持。无槽位龙气可将 `> N` 无损规范化为 `>= N+1`、`<= N` 规范化为 `< N+1`，再按 YuanAssist 编码。
+- 阵亡、庞统复制、暴击、橙/紫星、无槽位龙气虽然有原生检测指令，但失败后重进关卡仍依赖可靠的 `STAGE_AUTO_NAV` 编码；当前 Level Catalog 未提供该稳定映射，因此继续报告 `restart_navigation_unavailable` 且不导出。
 
 ## 后续补充原则
 

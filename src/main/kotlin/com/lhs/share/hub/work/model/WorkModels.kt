@@ -1,6 +1,7 @@
 package com.lhs.share.hub.work.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonValue
 import java.time.LocalDateTime
 
@@ -174,6 +175,25 @@ data class MaaYuanTargetDocument(
     val roundActions: Map<String, List<List<String>>>,
     val delaysMs: WorkDelays? = null,
     val extensions: MaaYuanExtension? = null,
+)
+
+data class YuanAssistTargetDocument(
+    @get:JsonProperty("scriptContent") val scriptContent: String,
+    val instructions: List<YuanAssistInstruction>,
+    val config: YuanAssistConfig,
+)
+
+data class YuanAssistInstruction(
+    val turn: Int,
+    val step: Int,
+    val type: String,
+    val value: Int,
+)
+
+data class YuanAssistConfig(
+    @get:JsonProperty("intervalAttack") val intervalAttack: Int,
+    @get:JsonProperty("intervalSkill") val intervalSkill: Int,
+    @get:JsonProperty("waitTurn") val waitTurn: Int,
 )
 
 fun statusOf(issues: List<CompatibilityIssue>): CompatibilityStatus = when {
