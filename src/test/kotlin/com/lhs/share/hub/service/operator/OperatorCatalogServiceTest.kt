@@ -9,7 +9,6 @@ import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorDiscCatalog
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
-import com.lhs.share.hub.service.inventory.EntityCatalogService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -30,8 +29,7 @@ import java.time.Instant
 class OperatorCatalogServiceTest {
     private val repository = mockk<OperatorCatalogRepository>()
     private val avatarStorage = mockk<AvatarStorage>(relaxed = true)
-    private val entityCatalogService = mockk<EntityCatalogService>(relaxed = true)
-    private val service = OperatorCatalogService(repository, ObjectMapper(), avatarStorage, entityCatalogService)
+    private val service = OperatorCatalogService(repository, ObjectMapper(), avatarStorage)
 
     private fun seed(existing: List<OperatorCatalogEntity> = emptyList()) {
         every { repository.count() } returns 1L // 跳过资源文件整体播种，走"老库回填"路径
@@ -70,13 +68,7 @@ class OperatorCatalogServiceTest {
         assertEquals(emptyList<String>(), entity.incompleteFields)
         assertEquals(saved.captured.catalogVersion, entity.catalogVersion)
         assertNotEquals("", entity.catalogVersion)
-        verify {
-            entityCatalogService.upsertAgent(
-                saved.captured.operatorId,
-                saved.captured.name,
-                saved.captured.catalogVersion,
-            )
-        }
+
     }
 
     @Test

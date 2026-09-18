@@ -87,6 +87,15 @@ class InventoryAgentFavoriteServiceTest {
     }
 
     @Test
+    fun `retired agent favorite can be removed without allowing a new favorite`() {
+        service.add("u1", "acc_a", "char_130_zhoutai")
+        every { catalogService.exists("agent", "char_130_zhoutai") } returns false
+        assertEquals(false, service.remove("u1", "acc_a", "char_130_zhoutai").favorite)
+        assertTrue(rows.isEmpty())
+        assertThrows(InventoryApiException::class.java) { service.add("u1", "acc_a", "char_130_zhoutai") }
+    }
+
+    @Test
     fun `favorites are isolated between accounts of the same user`() {
         service.add("u1", "acc_a", "char_102_jianyong")
         service.add("u1", "acc_b", "char_038_luxun")

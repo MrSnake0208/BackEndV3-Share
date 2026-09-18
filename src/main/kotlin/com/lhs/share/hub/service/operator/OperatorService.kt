@@ -386,6 +386,40 @@ class OperatorService(
         return listOf(OperatorCurrentResponse.of(specific.copy(entries = genericEntries + specific.entries)))
     }
 
+    /** 清理公共图鉴已删除的密探，保留导入历史并记录清理事件供重放使用。 */
+    fun removeOrphanCurrent(userId: String, accountId: String, operatorId: String) {
+        accountRepository.findByUserIdAndAccountId(userId, accountId)
+            ?: throw apiError(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
+        transactionTemplate.executeWithoutResult {
+            if (catalogService.getOperator(operatorId) != null) {
+                throw apiError(HttpStatus.CONFLICT, "operator_still_in_catalog", "Operator is still in the public catalog")
+            }
+            // 同时清理旧 universal / * 文档，避免当前版本删除后又从通用养成中继承。
+            currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId).forEach { current ->
+                val entry = current.entries[operatorId] ?: return@forEach
+                val now = Instant.now()
+                currentRepository.save(current.copy(entries = current.entries - operatorId, updatedAt = now))
+                correctionRepository.save(
+                    OperatorCorrectionRecord(
+                        userId = userId,
+                        accountId = accountId,
+                        game = current.game,
+                        operatorId = operatorId,
+                        reason = "catalog_removed",
+                        fields = emptySet(),
+                        level = entry.level,
+                        elite = entry.elite,
+                        starLevel = entry.starLevel,
+                        discLoadouts = entry.normalized().discLoadouts,
+                        starStones = entry.starStones,
+                        combatStats = entry.combatStats,
+                        createdAt = now,
+                    ),
+                )
+            }
+        }
+    }
+
     fun previewCurrentPatch(
         userId: String,
         accountId: String,
@@ -1099,6 +1133,10 @@ class OperatorService(
             correction.accountId,
             correction.game,
         ) ?: return
+        if (correction.reason == "catalog_removed") {
+            currentRepository.save(current.copy(entries = current.entries - correction.operatorId, updatedAt = correction.createdAt))
+            return
+        }
         val existing = current.entries[correction.operatorId]?.normalized() ?: return
         var merged = existing
         if ("level" in correction.fields) merged = merged.copy(level = checkNotNull(correction.level))
