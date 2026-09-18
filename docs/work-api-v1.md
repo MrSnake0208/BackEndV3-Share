@@ -1,16 +1,18 @@
 # Work API v1
 
-YuanHub Work 第一阶段从 `MaaBackend.maa_copilot` 实时只读转换公开且未删除的 MaaYuan 作业，不复制或修改源数据。执行语义只读取 `content` 原始 JSON；数据库中的简化动作字段不参与转换。
+YuanHub Work 以 `yuanhub-work@1` 为原生创作事实源，同时从 `MaaBackend.maa_copilot` 实时只读转换旧公开作业。原生作业存入 `HubBackend.hub_works`；Legacy 数据不复制、不回写。
 
 ## 接口
 
 ### `GET /v1/works?page=1&limit=20`
 
-返回 1-based 分页结果：`page`、`limit`、`total`、`has_next`、`items`。`limit` 范围为 `1..100`。
+返回 1-based 分页结果：`page`、`limit`、`total`、`has_next`、`items`。`limit` 范围为 `1..100`。列表按发布时间倒序有限合并 Legacy 与原生 PUBLIC Work；旧 ID 是数字字符串，新 ID 是 `w_<ObjectId>`。
 
 ### `GET /v1/works/{id}`
 
-返回社区元数据、可靠匹配时的 Level 摘要、`conversion`、可形成合法协议时的 `work`，以及未经改写的 `source.raw_content`。不存在、非公开或已删除的作业统一返回 HTTP 404。
+返回社区元数据、可靠匹配时的 Level 摘要、`conversion` 和 `work`。Legacy 详情保留未经改写的 `source.raw_content`；原生详情使用 `source.type=native`，不伪造 raw source。不存在、不可见或已删除的作业统一返回 HTTP 404。
+
+原生详情的所有权与并发字段位于 `data.metadata`：`owner_id`、`status`、`revision`、`created_at`、`updated_at`、`published_at`。我的作业列表则在每个 `data.items[]` 上提供 `owner_id`、`status`、`revision`、`updated_at`。
 
 `conversion.status` 为 `exact`、`partial` 或 `unsupported`。无法确定的 Pipeline 节点会出现在 `conversion.issues`，并携带原 JSON path；不会被静默丢弃。
 
@@ -34,6 +36,40 @@ MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。Y
 
 `target_document` 内保留 YuanAssist 原生 camelCase 字段；API 外层仍使用 snake_case。
 
+### 原生创作接口
+
+```text
+POST   /v1/works
+GET    /v1/works/mine?page=1&limit=20
+PUT    /v1/works/{w_id}
+POST   /v1/works/{w_id}/publish
+POST   /v1/works/{w_id}/unpublish
+DELETE /v1/works/{w_id}
+```
+
+- 创建请求为 `{ "document": <yuanhub-work@1> }`，创建状态固定为 `DRAFT`，owner 只取当前 JWT。
+- 整体替换请求为 `{ "expected_revision": 1, "document": <yuanhub-work@1> }`。
+- 发布、取消发布、删除请求为 `{ "expected_revision": 1 }`。
+- 更新、状态变更和软删除每次成功都令 revision 加一。revision 冲突返回 HTTP 409，`data.current_revision` 给出服务端当前值。
+- 非 owner 与不存在统一返回 HTTP 404；删除是软删除，删除后不出现在公开列表或“我的作业”中。
+- 发布门禁只校验基础协议，不要求 MaaYuan 或 YuanAssist Adapter 达到 `exact`。
+
+### `POST /v1/works/compatibility?to=MAAYUAN|YUANASSIST`
+
+请求为 `{ "document": <yuanhub-work@1> }`，用于未保存文档预览并复用与保存后 GET compatibility 相同的 Adapter。该接口不写数据，可匿名调用。
+
+输入结构或语义错误返回 HTTP 400，`data` 是 `{path, code, message}` 数组，例如：
+
+```json
+{
+  "status_code": 400,
+  "message": "WorkDocument 校验失败",
+  "data": [
+    { "path": "$.rounds[0].actions[1].slot", "code": "out_of_range", "message": "数值必须在 1..5" }
+  ]
+}
+```
+
 所有成功响应使用项目统一 `ApiResult`，字段按 snake_case 输出。非法分页或目标返回 HTTP 400。
 
 ## 第一阶段未实现或未完整支持
@@ -42,7 +78,7 @@ MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。Y
 
 ### 通用能力
 
-- 未实现 Work 的上传、编辑、删除、审核、持久化或独立索引；当前只实时读取 Legacy Source。
+- 未实现审核工作流、多人协作、自动保存、恢复软删除或独立搜索索引。
 - 未实现作业搜索、标签筛选、游戏筛选、关卡筛选和自定义排序；列表目前只有基础分页。
 - 未提供通用导出接口。兼容性接口只负责分析，并在满足当前 Adapter 的无损条件时返回阶段性目标文档。
 - 未使用 JSON Schema 对每次响应做运行时二次校验；合法性目前由类型模型、Parser 边界检查和契约测试保证。

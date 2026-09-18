@@ -224,6 +224,8 @@ class WorkAdaptersTest {
     }
 
     private fun configuredWork(vararg rounds: WorkRound) = WorkDocument(
+        format = "yuanhub-work",
+        version = 1,
         game = "如鸢",
         stageName = "测试关卡",
         doc = WorkDoc("测试", ""),
@@ -236,6 +238,8 @@ class WorkAdaptersTest {
     )
 
     private fun work(vararg extra: com.lhs.share.hub.work.model.WorkAction) = WorkDocument(
+        format = "yuanhub-work",
+        version = 1,
         game = "如鸢",
         stageName = "测试关卡",
         doc = WorkDoc("测试", ""),

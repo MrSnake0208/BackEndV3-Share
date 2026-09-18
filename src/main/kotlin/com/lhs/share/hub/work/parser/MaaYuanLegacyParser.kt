@@ -207,7 +207,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
             val prefix = mutableListOf<WorkAction>()
             node.stringList("next").forEach { target ->
                 when {
-                    target == FULL_RESTART -> prefix += CheckAction(condition = PartySurvivesCondition())
+                    target == FULL_RESTART -> prefix += CheckAction(condition = PartySurvivesCondition(), onFail = "restart")
                     target == MANUAL_RESTART -> prefix += RestartAction()
                     OLD_STAR_NODE.matches(target) -> prefix += starAction(OLD_STAR_NODE.matchEntire(target)!!.groupValues[2])
                 }
@@ -237,7 +237,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
         }
         val params = node.first("custom_action_param", "customActionParam")
         when (customAction) {
-            "AllDownRestart" -> return CheckAction(condition = PartySurvivesCondition())
+            "AllDownRestart" -> return CheckAction(condition = PartySurvivesCondition(), onFail = "restart")
             "DownRestart" -> return slotCheck(params, path, issues) { OperatorAliveCondition(slot = it) }
             "RetreatRestart" -> return slotCheck(params, path, issues) { OperatorPresentCondition(slot = it) }
             "BirdRestart" -> return slotCheck(params, path, issues) { OperatorCopiedCondition(slot = it) }
@@ -293,7 +293,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
             issues += issue("invalid_detection_slot", path, "check", "检测节点缺少合法槽位")
             return null
         }
-        return CheckAction(condition = factory(slot!!))
+        return CheckAction(condition = factory(slot!!), onFail = "restart")
     }
 
     private fun parseToken(
@@ -324,13 +324,15 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
             "额外:右侧目标" -> SwitchTargetAction(direction = "right")
             "额外:开自动" -> AutoBattleAction(enabled = true)
             "额外:关卡内互动" -> InteractionAction()
-            "重开:全灭" -> CheckAction(condition = PartySurvivesCondition())
+            "重开:全灭" -> CheckAction(condition = PartySurvivesCondition(), onFail = "restart")
             "重开:左上角" -> RestartAction()
             "重开:无橙星" -> starAction("orange")
             "重开:无紫星" -> starAction("purple")
             "重开:无蓝星" -> starAction("blue")
             "额外:史子眇sp" -> operatorSlot("史子眇", operators, path, issues)?.let { SlotAction(it, "sp") }
-            "额外:吕布" -> operatorSlot("吕布", operators, path, issues)?.let { OperatorAction(slot = it) }
+            "额外:吕布" -> operatorSlot("吕布", operators, path, issues)?.let {
+                OperatorAction(slot = it, action = "switch_form")
+            }
             else -> parseDetectionToken(token) ?: run {
                 issues += issue("unsupported_source_node", path, "source_action:$token", "未知 SiMing 动作 token")
                 null
@@ -347,7 +349,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
             "鹦鹉" -> OperatorCopiedCondition(slot = slot)
             else -> DragonQiCondition(slot = slot, operator = ">=", value = 2)
         }
-        return CheckAction(condition = condition)
+        return CheckAction(condition = condition, onFail = "restart")
     }
 
     private fun operatorSlot(name: String, operators: List<String?>, path: String, issues: MutableList<CompatibilityIssue>): Int? {
@@ -359,7 +361,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
 
     private fun appendLegacyNextActions(node: JsonNode, target: MutableList<WorkAction>) {
         val next = node.stringList("next")
-        if (FULL_RESTART in next) target += CheckAction(condition = PartySurvivesCondition())
+        if (FULL_RESTART in next) target += CheckAction(condition = PartySurvivesCondition(), onFail = "restart")
         if (MANUAL_RESTART in next) target += RestartAction()
     }
 
@@ -449,6 +451,7 @@ class MaaYuanLegacyParser(private val objectMapper: ObjectMapper) {
 
     private fun starAction(color: String) = CheckAction(
         condition = StarCountCondition(color = starColor(color) ?: color, operator = ">=", value = 1),
+        onFail = "restart",
     )
 
     private fun starColor(value: String): String? = when (value) {
