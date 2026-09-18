@@ -76,7 +76,7 @@ MAAYUAN 仅在全部语义 `exact` 时返回 `target_document.round_actions`。Y
 - 等待、暂停、左右切换目标及位于回合首动作的全灭检测编译为 YuanAssist 原生 instruction。非首位全灭检测无法保留动作位置，不导出。
 - 编译器保持同一 `turn + step` 的指令数组顺序；但 YuanAssist 尚未确认该执行顺序，因此当前遇到同位置多指令时返回 `unconfirmed_instruction_order`，不生成目标文档。
 - 仅 `exact` 时返回 `scriptContent + instructions + config`；`partial` 或 `unsupported` 始终省略 `target_document`。
-- `intervalAttack`、`intervalSkill`、`waitTurn` 分别必须有可靠的 `exec.delays_ms.attack`、`exec.delays_ms.ultimate`、`exec.extensions.yuanassist.enemy_turn_wait_ms` 来源；缺失时报告 `missing_yuanassist_config`，不会猜默认值。
+- `intervalAttack` 是攻击和防御延迟，`intervalSkill` 是技能（上拉）延迟，`waitTurn` 是回合延迟。三者分别必须有可靠的 `exec.delays_ms.attack`、`exec.delays_ms.ultimate`、`exec.extensions.yuanassist.enemy_turn_wait_ms` 来源；缺失时报告 `missing_yuanassist_config`，不会猜默认值。
 - 防御延时与普攻不同时，通过动作 step 上的 `DELAY_ADD` / `DELAY_SUBTRACT` 保留差值。YuanAssist 的圈/SP 基础延时尚未确认；作业包含圈动作且显式指定 `delays_ms.sp` 时保持 `partial`。
 - 自动战斗开关、关卡互动、吕布切形态、立即重开和退场检测暂无等价指令。
 - 带槽位的龙气检测和蓝星检测不支持。无槽位龙气可将 `> N` 无损规范化为 `>= N+1`、`<= N` 规范化为 `< N+1`，再按 YuanAssist 编码。
