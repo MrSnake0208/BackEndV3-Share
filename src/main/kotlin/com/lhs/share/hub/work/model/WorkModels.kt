@@ -2,7 +2,15 @@ package com.lhs.share.hub.work.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
 import com.fasterxml.jackson.annotation.JsonValue
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import java.time.LocalDateTime
 
 enum class CompatibilityStatus(@get:JsonValue val value: String) {
@@ -21,8 +29,8 @@ data class CompatibilityIssue(
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkDocument(
-    val format: String = "yuanhub-work",
-    val version: Int = 1,
+    val format: String,
+    val version: Int,
     val game: String,
     val levelId: String? = null,
     val stageName: String,
@@ -69,6 +77,21 @@ data class YuanAssistExtension(val enemyTurnWaitMs: Int? = null)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkRound(val round: Int, val remark: String? = null, val actions: List<WorkAction>)
 
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "type", visible = true)
+@JsonSubTypes(
+    JsonSubTypes.Type(value = SlotAction::class, name = "attack"),
+    JsonSubTypes.Type(value = SlotAction::class, name = "ultimate"),
+    JsonSubTypes.Type(value = SlotAction::class, name = "defense"),
+    JsonSubTypes.Type(value = SlotAction::class, name = "sp"),
+    JsonSubTypes.Type(value = WaitAction::class, name = "wait"),
+    JsonSubTypes.Type(value = PauseAction::class, name = "pause"),
+    JsonSubTypes.Type(value = SwitchTargetAction::class, name = "switch_target"),
+    JsonSubTypes.Type(value = AutoBattleAction::class, name = "auto_battle"),
+    JsonSubTypes.Type(value = InteractionAction::class, name = "interaction"),
+    JsonSubTypes.Type(value = OperatorAction::class, name = "operator_action"),
+    JsonSubTypes.Type(value = CheckAction::class, name = "check"),
+    JsonSubTypes.Type(value = RestartAction::class, name = "restart"),
+)
 sealed interface WorkAction
 
 data class SlotAction(val slot: Int, val type: String) : WorkAction
@@ -79,10 +102,33 @@ data class PauseAction(val type: String = "pause") : WorkAction
 data class SwitchTargetAction(val type: String = "switch_target", val direction: String, val count: Int? = null) : WorkAction
 data class AutoBattleAction(val type: String = "auto_battle", val enabled: Boolean) : WorkAction
 data class InteractionAction(val type: String = "interaction") : WorkAction
-data class OperatorAction(val type: String = "operator_action", val slot: Int, val action: String = "switch_form") : WorkAction
-data class CheckAction(val type: String = "check", val condition: WorkCondition, val onFail: String = "restart") : WorkAction
+data class OperatorAction(
+    val type: String = "operator_action",
+    val slot: Int,
+    val action: String,
+) : WorkAction {
+    constructor(slot: Int) : this(slot = slot, action = "switch_form")
+}
+
+data class CheckAction(
+    val type: String = "check",
+    val condition: WorkCondition,
+    val onFail: String,
+) : WorkAction {
+    constructor(condition: WorkCondition) : this(condition = condition, onFail = "restart")
+}
 data class RestartAction(val type: String = "restart") : WorkAction
 
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "type", visible = true)
+@JsonSubTypes(
+    JsonSubTypes.Type(value = PartySurvivesCondition::class, name = "party_survives"),
+    JsonSubTypes.Type(value = OperatorAliveCondition::class, name = "operator_alive"),
+    JsonSubTypes.Type(value = OperatorPresentCondition::class, name = "operator_present"),
+    JsonSubTypes.Type(value = OperatorCopiedCondition::class, name = "operator_copied"),
+    JsonSubTypes.Type(value = DragonQiCondition::class, name = "dragon_qi"),
+    JsonSubTypes.Type(value = StarCountCondition::class, name = "star_count"),
+    JsonSubTypes.Type(value = CritCondition::class, name = "crit"),
+)
 sealed interface WorkCondition
 
 data class PartySurvivesCondition(val type: String = "party_survives") : WorkCondition
@@ -115,19 +161,26 @@ data class WorkLevelSummary(
     val stageId: String,
 )
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkMetadata(
-    val id: Long,
+    val id: String,
     val title: String,
     val uploaderId: String?,
     val uploadTime: LocalDateTime?,
     val views: Long,
     val hotScore: Double,
     val likeCount: Long,
+    val ownerId: String? = null,
+    val status: WorkStatus? = null,
+    val revision: Long? = null,
+    val createdAt: LocalDateTime? = null,
+    val updatedAt: LocalDateTime? = null,
+    val publishedAt: LocalDateTime? = null,
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkListItem(
-    val id: Long,
+    val id: String,
     val title: String,
     val stageName: String?,
     val game: String?,
@@ -138,6 +191,10 @@ data class WorkListItem(
     val hotScore: Double,
     val conversionStatus: CompatibilityStatus,
     val issueCount: Int,
+    val ownerId: String? = null,
+    val status: WorkStatus? = null,
+    val revision: Long? = null,
+    val updatedAt: LocalDateTime? = null,
 )
 
 data class WorkPageResponse(
@@ -149,7 +206,8 @@ data class WorkPageResponse(
 )
 
 data class WorkConversion(val status: CompatibilityStatus, val issues: List<CompatibilityIssue>)
-data class WorkSource(val type: String = "maayuan_legacy", val id: Long, val rawContent: String)
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class WorkSource(val type: String = "maayuan_legacy", val id: String, val rawContent: String? = null)
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkDetailResponse(
@@ -161,6 +219,28 @@ data class WorkDetailResponse(
 )
 
 enum class WorkTarget { MAAYUAN, YUANASSIST }
+
+enum class WorkStatus { DRAFT, PUBLIC }
+
+data class WorkValidationIssue(val path: String, val code: String, val message: String)
+
+data class WorkDocumentRequest(@param:JsonDeserialize(using = StrictWorkDocumentDeserializer::class) val document: WorkDocument)
+
+data class WorkReplaceRequest(
+    val expectedRevision: Long,
+    @param:JsonDeserialize(using = StrictWorkDocumentDeserializer::class) val document: WorkDocument,
+)
+
+data class WorkRevisionRequest(val expectedRevision: Long)
+
+data class WorkRevisionConflict(val currentRevision: Long)
+
+class StrictWorkDocumentDeserializer : StdDeserializer<WorkDocument>(WorkDocument::class.java) {
+    override fun deserialize(parser: JsonParser, context: DeserializationContext): WorkDocument {
+        val mapper = (parser.codec as ObjectMapper).copy().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        return mapper.treeToValue(parser.codec.readTree(parser), WorkDocument::class.java)
+    }
+}
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class WorkCompatibilityResponse(

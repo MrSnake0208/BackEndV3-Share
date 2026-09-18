@@ -59,6 +59,12 @@ class SecurityConfig(
                 .anonymous()
                 .requestMatchers(*URL_PERMIT_ALL)
                 .permitAll()
+                .requestMatchers(HttpMethod.GET, "/v1/works/mine")
+                .authenticated()
+                .requestMatchers(HttpMethod.GET, "/v1/works", "/v1/works/**")
+                .permitAll()
+                .requestMatchers(HttpMethod.POST, "/v1/works/compatibility")
+                .permitAll()
                 // Hub 库业务:查询公开,写操作需登录(未放行的方法默认 authenticated)
                 .requestMatchers(HttpMethod.GET, "/hub/post/**")
                 .permitAll()
@@ -113,8 +119,6 @@ class SecurityConfig(
                 "/v1/level/catalog",
                 "/v1/level/catalog/**",
                 "/v1/changelog/**",
-                "/v1/works",
-                "/v1/works/**",
                 "/v1/operator/share/view/**",
                 "/avatar/**",
                 "/media/**",
