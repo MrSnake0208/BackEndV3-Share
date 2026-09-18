@@ -16,6 +16,9 @@ import com.lhs.share.hub.work.model.WorkPageResponse
 import com.lhs.share.hub.work.model.WorkRound
 import com.lhs.share.hub.work.model.WorkSource
 import com.lhs.share.hub.work.model.WorkTarget
+import com.lhs.share.hub.work.model.YuanAssistConfig
+import com.lhs.share.hub.work.model.YuanAssistInstruction
+import com.lhs.share.hub.work.model.YuanAssistTargetDocument
 import com.lhs.share.hub.work.service.WorkApiException
 import com.lhs.share.hub.work.service.WorkService
 import io.mockk.every
@@ -82,6 +85,29 @@ class WorkControllerContractTest {
             .andExpect(jsonPath("$.data.target").value("MAAYUAN"))
             .andExpect(jsonPath("$.data.status").value("exact"))
             .andExpect(jsonPath("$.data.target_document.round_actions['1'][0][0]").value("1普"))
+    }
+
+    @Test
+    fun `YUANASSIST target document preserves native camel case inside snake case envelope`() {
+        every { service.compatibility(7, "YUANASSIST") } returns WorkCompatibilityResponse(
+            target = WorkTarget.YUANASSIST,
+            status = CompatibilityStatus.EXACT,
+            issues = emptyList(),
+            targetDocument = YuanAssistTargetDocument(
+                scriptContent = "1回合\t1A\t\t\t\t",
+                instructions = listOf(YuanAssistInstruction(1, 1, "PAUSE", 0)),
+                config = YuanAssistConfig(1000, 2000, 8000),
+            ),
+        )
+
+        mockMvc.perform(get("/v1/works/7/compatibility?to=YUANASSIST"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.target_document.scriptContent").value("1回合\t1A\t\t\t\t"))
+            .andExpect(jsonPath("$.data.target_document.script_content").doesNotExist())
+            .andExpect(jsonPath("$.data.target_document.config.intervalAttack").value(1000))
+            .andExpect(jsonPath("$.data.target_document.config.intervalSkill").value(2000))
+            .andExpect(jsonPath("$.data.target_document.config.waitTurn").value(8000))
+            .andExpect(jsonPath("$.data.target_document.instructions[0].type").value("PAUSE"))
     }
 
     @Test
