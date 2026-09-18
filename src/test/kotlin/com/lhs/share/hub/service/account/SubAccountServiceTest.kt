@@ -27,6 +27,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -88,6 +89,15 @@ class SubAccountServiceTest {
         starWorkspaceRepository,
         starLoadoutRepository,
     )
+
+    @Test
+    fun `subaccount deletion cannot cascade user global star loadout presets`() {
+        assertFalse(
+            SubAccountService::class.java.declaredFields.any {
+                it.type.simpleName == "StarLoadoutPresetCurrentRepository"
+            },
+        )
+    }
 
     @Test
     fun `create list and partial updates preserve account identity and fields`() {

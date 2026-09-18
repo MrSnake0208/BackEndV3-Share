@@ -4,13 +4,18 @@ import com.lhs.share.hub.controller.star.request.StarInventoryEntryRequest
 import com.lhs.share.hub.controller.star.request.StarInventorySnapshotRequest
 import com.lhs.share.hub.controller.star.response.StarInventorySnapshotResponse
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
+import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
+import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
 import com.lhs.share.hub.repository.entity.StarInventoryCurrent
 import com.lhs.share.hub.repository.entity.StarInventoryEntry
+import com.lhs.share.hub.repository.entity.StarLoadoutSlots
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionTemplate
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
@@ -20,8 +25,20 @@ import java.time.format.DateTimeFormatter
 @Service
 class StarInventoryService(
     private val repository: StarInventoryCurrentRepository,
+    private val workspaceRepository: StarWorkspaceCurrentRepository,
+    private val loadoutRepository: StarLoadoutCurrentRepository,
     private val accountService: SubAccountService,
+    @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionTemplate,
 ) {
+    internal fun prepareReplacement(request: StarInventorySnapshotRequest): StarInventoryReplacementSnapshot {
+        val normalized = normalize(request)
+        return StarInventoryReplacementSnapshot(
+            effectiveAt = normalized.effectiveAt,
+            entries = normalized.entries,
+            contentHash = hashEntries(normalized.entries),
+        )
+    }
+
     fun current(userId: String, accountId: String): StarInventorySnapshotResponse {
         validateAccount(userId, accountId)
         return repository.findByUserIdAndAccountId(userId, accountId)
@@ -46,16 +63,25 @@ class StarInventoryService(
             }
 
             try {
-                val saved = repository.replaceIfEffectiveAtAfterCurrent(
-                    userId = userId,
-                    accountId = accountId,
-                    effectiveAt = normalized.effectiveAt,
-                    entries = normalized.entries,
-                    contentHash = contentHash,
-                    expectedRevision = current?.revision ?: 0,
-                    updatedAt = Instant.now(),
-                    receivedAt = Instant.now(),
-                )
+                val saved = transactions.execute {
+                    val now = Instant.now()
+                    val replacement = repository.replaceIfEffectiveAtAfterCurrent(
+                        userId = userId,
+                        accountId = accountId,
+                        effectiveAt = normalized.effectiveAt,
+                        entries = normalized.entries,
+                        contentHash = contentHash,
+                        expectedRevision = current?.revision ?: 0,
+                        updatedAt = now,
+                        receivedAt = now,
+                    ) ?: return@execute null
+                    val removedInstanceIds = current.orEmptyEntries() - normalized.entries.mapTo(HashSet()) { it.instanceId }
+                    if (removedInstanceIds.isNotEmpty()) {
+                        pruneWorkspaceReferences(userId, accountId, removedInstanceIds, now)
+                        pruneLoadoutReferences(userId, accountId, removedInstanceIds, now)
+                    }
+                    replacement
+                }
                 if (saved != null) return StarInventorySnapshotResponse.of(saved)
             } catch (_: DuplicateKeyException) {
                 // A concurrent first write won the owner unique index; classify it below.
@@ -71,6 +97,57 @@ class StarInventoryService(
         }
         throw conflict("Concurrent star inventory update could not be applied")
     }
+
+    private fun pruneWorkspaceReferences(
+        userId: String,
+        accountId: String,
+        removedInstanceIds: Set<String>,
+        now: Instant,
+    ) {
+        val current = workspaceRepository.findByUserIdAndAccountId(userId, accountId) ?: return
+        val prunedTargets = current.planTargets.filterNot { it.instanceId in removedInstanceIds }
+        if (prunedTargets == current.planTargets) return
+        starCasConflictBoundary({ throw workspaceConflict() }) {
+            workspaceRepository.replace(
+                userId,
+                accountId,
+                current.revision,
+                prunedTargets,
+                current.bag,
+                current.experience,
+                now,
+            ) ?: throw workspaceConflict()
+        }
+    }
+
+    private fun pruneLoadoutReferences(
+        userId: String,
+        accountId: String,
+        removedInstanceIds: Set<String>,
+        now: Instant,
+    ) {
+        val current = loadoutRepository.findByUserIdAndAccountId(userId, accountId) ?: return
+        val prunedLoadouts = current.loadouts.map { loadout ->
+            loadout.copy(slots = loadout.slots.pruned(removedInstanceIds))
+        }
+        if (prunedLoadouts == current.loadouts) return
+        starCasConflictBoundary({ throw loadoutConflict() }) {
+            loadoutRepository.replace(userId, accountId, current.revision, prunedLoadouts, now)
+                ?: throw loadoutConflict()
+        }
+    }
+
+    private fun StarInventoryCurrent?.orEmptyEntries(): Set<String> =
+        this?.entries?.mapTo(HashSet()) { it.instanceId } ?: emptySet()
+
+    private fun StarLoadoutSlots.pruned(removedInstanceIds: Set<String>) = copy(
+        main1 = main1.takeUnless { it in removedInstanceIds },
+        main2 = main2.takeUnless { it in removedInstanceIds },
+        main3 = main3.takeUnless { it in removedInstanceIds },
+        support1 = support1.takeUnless { it in removedInstanceIds },
+        support2 = support2.takeUnless { it in removedInstanceIds },
+        support3 = support3.takeUnless { it in removedInstanceIds },
+    )
 
     private fun validateAccount(userId: String, accountId: String) {
         if (!ACCOUNT_ID.matches(accountId)) {
@@ -155,6 +232,18 @@ class StarInventoryService(
         message,
     )
 
+    private fun workspaceConflict() = InventoryApiException(
+        HttpStatus.CONFLICT,
+        "star_workspace_revision_conflict",
+        "Star workspace changed while pruning removed inventory references",
+    )
+
+    private fun loadoutConflict() = InventoryApiException(
+        HttpStatus.CONFLICT,
+        "star_loadout_revision_conflict",
+        "Star loadout changed while pruning removed inventory references",
+    )
+
     private data class NormalizedSnapshot(
         val effectiveAt: Instant,
         val entries: List<StarInventoryEntry>,
@@ -172,3 +261,9 @@ class StarInventoryService(
         private val QUALITIES = setOf("orange", "purple", "blue", "green", "white")
     }
 }
+
+internal data class StarInventoryReplacementSnapshot(
+    val effectiveAt: Instant,
+    val entries: List<StarInventoryEntry>,
+    val contentHash: String,
+)

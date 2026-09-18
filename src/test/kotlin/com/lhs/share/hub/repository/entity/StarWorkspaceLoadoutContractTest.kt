@@ -1,9 +1,11 @@
 package com.lhs.share.hub.repository.entity
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.data.mongodb.core.index.CompoundIndexes
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 
 class StarWorkspaceLoadoutContractTest {
@@ -19,6 +21,21 @@ class StarWorkspaceLoadoutContractTest {
             assertTrue(indexes.any { it.unique && it.def.contains("userId") && it.def.contains("accountId") })
             assertTrue(indexes.any { it.def.contains("userId") && it.def.contains("updatedAt") })
         }
+    }
+
+    @Test
+    fun `loadout presets are user-global canonical-name values`() {
+        assertEquals(
+            "star_loadout_preset_current",
+            StarLoadoutPresetCurrent::class.java.getAnnotation(Document::class.java).value,
+        )
+        assertFalse(StarLoadoutPresetCurrent::class.java.declaredFields.any { it.name == "accountId" })
+        assertTrue(
+            StarLoadoutPresetCurrent::class.java.getDeclaredField("userId").getAnnotation(Indexed::class.java).unique,
+        )
+        assertEquals(List::class.java, StarLoadoutPresetCurrent::class.java.getDeclaredField("mainPresets").type)
+        assertEquals(List::class.java, StarLoadoutPreset::class.java.getDeclaredField("starNames").type)
+        assertFalse(StarLoadoutPreset::class.java.declaredFields.any { it.name == "instanceId" })
     }
 
     @Test

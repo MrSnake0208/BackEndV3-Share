@@ -3,7 +3,10 @@ package com.lhs.share.hub.service.star
 import com.lhs.share.hub.controller.star.request.StarWorkspaceBagRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceCurrentRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceExperienceRequest
+import com.lhs.share.hub.repository.StarInventoryCurrentRepository
 import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
+import com.lhs.share.hub.repository.entity.StarInventoryCurrent
+import com.lhs.share.hub.repository.entity.StarInventoryEntry
 import com.lhs.share.hub.repository.entity.StarWorkspaceCurrent
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -19,16 +22,23 @@ import java.time.Instant
 
 class StarWorkspaceServiceTest {
     private val repository = mockk<StarWorkspaceCurrentRepository>()
+    private val inventoryRepository = mockk<StarInventoryCurrentRepository>()
     private val accountService = mockk<SubAccountService>()
     private val stored = mutableMapOf<Pair<String, String>, StarWorkspaceCurrent>()
-    private val service = StarWorkspaceService(repository, accountService)
+    private val inventories = mutableMapOf<Pair<String, String>, StarInventoryCurrent>()
+    private val service = StarWorkspaceService(repository, inventoryRepository, accountService)
 
     @BeforeEach
     fun setUp() {
         stored.clear()
+        inventories.clear()
+        inventories["u1" to "acc_a"] = inventory("u1", "acc_a", listOf(StarInventoryEntry("star_1", "main", "天府", "orange", 1)))
         every { accountService.requireAccount(any(), any()) } returns mockk()
         every { repository.findByUserIdAndAccountId(any(), any()) } answers {
             stored[firstArg<String>() to secondArg<String>()]
+        }
+        every { inventoryRepository.findByUserIdAndAccountId(any(), any()) } answers {
+            inventories[firstArg<String>() to secondArg<String>()]
         }
         every { repository.replace(any(), any(), any(), any(), any(), any(), any()) } answers {
             val userId = firstArg<String>()
@@ -141,10 +151,41 @@ class StarWorkspaceServiceTest {
 
     @Test
     fun `dotted instance ID remains valid through the persistence-shaped service model`() {
+        inventories["u1" to "acc_a"] = inventory("u1", "acc_a", listOf(StarInventoryEntry("star.001", "main", "天府", "orange", 1)))
         val response = service.putCurrent("u1", "acc_a", request(0, mapOf("star.001" to 60)))
 
         assertEquals(60, response.planTargets["star.001"])
         assertEquals("star.001", stored["u1" to "acc_a"]!!.planTargets.single().instanceId)
+    }
+
+    @Test
+    fun `missing or other account inventory targets are rejected without changing workspace`() {
+        val original = service.putCurrent("u1", "acc_a", request(0, mapOf("star_1" to 60)))
+        inventories["u1" to "acc_b"] = inventory("u1", "acc_b", listOf(StarInventoryEntry("other-only", "main", "武曲", "purple", 1)))
+
+        val missing = assertThrows(InventoryApiException::class.java) {
+            service.putCurrent("u1", "acc_a", request(1, mapOf("missing" to 60)))
+        }
+        val otherAccount = assertThrows(InventoryApiException::class.java) {
+            service.putCurrent("u1", "acc_a", request(1, mapOf("other-only" to 60)))
+        }
+
+        assertEquals("star_workspace_invalid_reference", missing.code)
+        assertEquals("star_workspace_invalid_reference", otherAccount.code)
+        assertEquals(original, service.current("u1", "acc_a"))
+    }
+
+    @Test
+    fun `current account inventory targets are accepted`() {
+        inventories["u1" to "acc_a"] = inventory(
+            "u1",
+            "acc_a",
+            listOf(StarInventoryEntry("main-1", "main", "天府", "orange", 1), StarInventoryEntry("support-1", "support", "文曲", "white", 1)),
+        )
+
+        val response = service.putCurrent("u1", "acc_a", request(0, mapOf("main-1" to 60, "support-1" to 40)))
+
+        assertEquals(mapOf("main-1" to 60, "support-1" to 40), response.planTargets)
     }
 
     private fun request(
@@ -153,4 +194,13 @@ class StarWorkspaceServiceTest {
         bag: StarWorkspaceBagRequest = StarWorkspaceBagRequest(1, 2),
         experience: StarWorkspaceExperienceRequest = StarWorkspaceExperienceRequest(1, 2, 3),
     ) = StarWorkspaceCurrentRequest(expected, targets, bag, experience)
+
+    private fun inventory(userId: String, accountId: String, entries: List<StarInventoryEntry>) = StarInventoryCurrent(
+        id = "$userId:$accountId",
+        userId = userId,
+        accountId = accountId,
+        effectiveAt = Instant.parse("2026-08-31T10:00:00Z"),
+        entries = entries,
+        contentHash = "hash",
+    )
 }

@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.star
 
 import com.lhs.share.hub.controller.star.request.StarWorkspaceCurrentRequest
 import com.lhs.share.hub.controller.star.response.StarWorkspaceCurrentResponse
+import com.lhs.share.hub.repository.StarInventoryCurrentRepository
 import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
 import com.lhs.share.hub.repository.entity.StarPlanTarget
 import com.lhs.share.hub.repository.entity.StarWorkspaceBag
@@ -15,8 +16,19 @@ import java.time.Instant
 @Service
 class StarWorkspaceService(
     private val repository: StarWorkspaceCurrentRepository,
+    private val inventoryRepository: StarInventoryCurrentRepository,
     private val accountService: SubAccountService,
 ) {
+    internal fun prepareReplacement(request: StarWorkspaceCurrentRequest): StarWorkspaceReplacementSnapshot {
+        val normalized = normalize(request)
+        return StarWorkspaceReplacementSnapshot(
+            expectedRevision = normalized.expectedRevision,
+            planTargets = normalized.planTargets,
+            bag = normalized.bag,
+            experience = normalized.experience,
+        )
+    }
+
     fun current(userId: String, accountId: String): StarWorkspaceCurrentResponse {
         accountService.requireAccount(userId, accountId)
         return repository.findByUserIdAndAccountId(userId, accountId)
@@ -27,6 +39,7 @@ class StarWorkspaceService(
     fun putCurrent(userId: String, accountId: String, request: StarWorkspaceCurrentRequest): StarWorkspaceCurrentResponse {
         accountService.requireAccount(userId, accountId)
         val normalized = normalize(request)
+        validateReferences(userId, accountId, normalized.planTargets)
         val saved = starCasConflictBoundary({ throw conflict() }) {
             repository.replace(
                 userId,
@@ -39,6 +52,23 @@ class StarWorkspaceService(
             ) ?: throw conflict()
         }
         return StarWorkspaceCurrentResponse.of(saved)
+    }
+
+    private fun validateReferences(userId: String, accountId: String, planTargets: List<StarPlanTarget>) {
+        if (planTargets.isEmpty()) return
+        val inventoryIds = inventoryRepository.findByUserIdAndAccountId(userId, accountId)
+            ?.entries
+            ?.asSequence()
+            ?.map { it.instanceId }
+            ?.toHashSet()
+            ?: emptySet()
+        if (planTargets.any { it.instanceId !in inventoryIds }) {
+            throw InventoryApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "star_workspace_invalid_reference",
+                "plan_targets must reference an instance_id from the current star inventory",
+            )
+        }
     }
 
     private fun normalize(request: StarWorkspaceCurrentRequest): NormalizedWorkspace {
@@ -102,3 +132,10 @@ class StarWorkspaceService(
         private val INSTANCE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
     }
 }
+
+internal data class StarWorkspaceReplacementSnapshot(
+    val expectedRevision: Long,
+    val planTargets: List<StarPlanTarget>,
+    val bag: StarWorkspaceBag,
+    val experience: StarWorkspaceExperience,
+)
