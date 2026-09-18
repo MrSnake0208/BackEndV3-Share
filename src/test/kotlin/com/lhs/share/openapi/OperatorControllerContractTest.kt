@@ -28,6 +28,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -54,6 +55,17 @@ class OperatorControllerContractTest {
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .build()
         every { helper.requireUserId() } returns "u1"
+    }
+
+    @Test
+    fun `DELETE orphan current takes owner from authentication and requires account`() {
+        every { service.removeOrphanCurrent("u1", "acc1", "char_130_zhoutai") } returns Unit
+        mockMvc.perform(delete("/v1/operator/current/char_130_zhoutai").param("account_id", "acc1"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").value(true))
+        verify(exactly = 1) { service.removeOrphanCurrent("u1", "acc1", "char_130_zhoutai") }
+        mockMvc.perform(delete("/v1/operator/current/char_130_zhoutai"))
+            .andExpect(status().isBadRequest)
     }
 
     @Test
