@@ -15,6 +15,8 @@ import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.StarInventoryCurrentRepository
+import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
+import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -25,6 +27,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -55,6 +58,8 @@ class SubAccountServiceTest {
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
+    private val starWorkspaceRepository = mockk<StarWorkspaceCurrentRepository>(relaxed = true)
+    private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
             override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
@@ -81,7 +86,18 @@ class SubAccountServiceTest {
         trainingWorkspaceRepository,
         staminaScheduleRepository,
         plannerImportRepository,
+        starWorkspaceRepository,
+        starLoadoutRepository,
     )
+
+    @Test
+    fun `subaccount deletion cannot cascade user global star loadout presets`() {
+        assertFalse(
+            SubAccountService::class.java.declaredFields.any {
+                it.type.simpleName == "StarLoadoutPresetCurrentRepository"
+            },
+        )
+    }
 
     @Test
     fun `create list and partial updates preserve account identity and fields`() {
@@ -207,6 +223,8 @@ class SubAccountServiceTest {
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { starWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { starLoadoutRepository.deleteAllByUserIdAndAccountId("u1", "main") }
 
         verify(exactly = 1) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }

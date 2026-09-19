@@ -57,6 +57,54 @@ annotation class InventoryWriteResponses
 @ApiResponses(
     value = [
         ApiResponse(responseCode = "200", description = "OK", useReturnTypeSchema = true),
+        ApiResponse(responseCode = "400", description = "invalid_json", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "401", description = "unauthorized", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "403", description = "forbidden", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "404", description = "account_not_found", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(
+            responseCode = "409",
+            description = "star_inventory_revision_conflict or star_workspace_revision_conflict",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(
+            responseCode = "422",
+            description = "schema_validation_failed, star_inventory_invalid_snapshot, star_workspace_invalid_snapshot, or star_exchange_invalid_workspace_reference",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(responseCode = "500", description = "Unexpected server error", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+    ],
+)
+annotation class StarExchangeReplaceResponses
+
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+@ApiResponses(
+    value = [
+        ApiResponse(responseCode = "200", description = "OK", useReturnTypeSchema = true),
+        ApiResponse(responseCode = "400", description = "invalid_json", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "401", description = "unauthorized", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "403", description = "forbidden", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(responseCode = "404", description = "account_not_found", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+        ApiResponse(
+            responseCode = "409",
+            description = "star_loadout_preset_revision_conflict",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(
+            responseCode = "422",
+            description = "schema_validation_failed or star_loadout_preset_invalid_snapshot",
+            content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))],
+        ),
+        ApiResponse(responseCode = "500", description = "Unexpected server error", content = [Content(mediaType = JSON, schema = Schema(implementation = InventoryErrorResponse::class))]),
+    ],
+)
+annotation class StarLoadoutPresetWriteResponses
+
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+@ApiResponses(
+    value = [
+        ApiResponse(responseCode = "200", description = "OK", useReturnTypeSchema = true),
         ApiResponse(
             responseCode = "401",
             description = "unauthorized",
