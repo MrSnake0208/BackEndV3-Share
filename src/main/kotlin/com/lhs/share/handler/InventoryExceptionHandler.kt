@@ -6,7 +6,11 @@ import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryError
 import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
 import com.lhs.share.hub.controller.star.StarCaptureController
+import com.lhs.share.hub.controller.star.StarExchangeController
 import com.lhs.share.hub.controller.star.StarInventoryController
+import com.lhs.share.hub.controller.star.StarLoadoutController
+import com.lhs.share.hub.controller.star.StarLoadoutPresetController
+import com.lhs.share.hub.controller.star.StarWorkspaceController
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.openapi.OpenApiInventoryController
 import com.lhs.share.openapi.OpenApiStarCaptureController
@@ -32,7 +36,11 @@ private val inventoryLog = KotlinLogging.logger { }
     assignableTypes = [
         AccountController::class,
         InventoryController::class,
+        StarExchangeController::class,
         StarInventoryController::class,
+        StarLoadoutController::class,
+        StarLoadoutPresetController::class,
+        StarWorkspaceController::class,
         StarCaptureController::class,
         OpenApiInventoryController::class,
         OpenApiStarCaptureController::class,
@@ -95,6 +103,13 @@ class InventoryExceptionHandler {
         InventoryErrorResponse(InventoryError(code, message, recordId, entryId)),
     )
 
-    private fun HttpServletRequest.snapshotValidationCode(): String =
-        if (requestURI.startsWith("/v1/star-inventory")) "star_inventory_invalid_snapshot" else "schema_validation_failed"
+    private fun HttpServletRequest.snapshotValidationCode(): String {
+        return when {
+            requestURI.startsWith("/v1/star-inventory") -> "star_inventory_invalid_snapshot"
+            requestURI.startsWith("/v1/star-workspace") -> "star_workspace_invalid_snapshot"
+            requestURI.startsWith("/v1/star-loadout-presets") -> "star_loadout_preset_invalid_snapshot"
+            requestURI.startsWith("/v1/star-loadout") -> "star_loadout_invalid_snapshot"
+            else -> "schema_validation_failed"
+        }
+    }
 }
