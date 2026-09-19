@@ -62,7 +62,7 @@ class InventoryAgentFavoriteService(
     }
 
     fun remove(userId: String, accountId: String, agentId: String): InventoryAgentFavoriteResponse {
-        validate(userId, accountId, agentId)
+        validate(userId, accountId, agentId, requireCatalog = false)
         transactionTemplate.executeWithoutResult {
             repository.deleteByUserIdAndAccountIdAndAgentId(userId, accountId, agentId)
         }
@@ -70,7 +70,7 @@ class InventoryAgentFavoriteService(
         return InventoryAgentFavoriteResponse(accountId, agentId, favorite = false)
     }
 
-    private fun validate(userId: String, accountId: String, agentId: String) {
+    private fun validate(userId: String, accountId: String, agentId: String, requireCatalog: Boolean = true) {
         accountService.requireAccount(userId, accountId)
         if (!AGENT_ID.matches(agentId)) {
             throw InventoryApiException(
@@ -80,7 +80,7 @@ class InventoryAgentFavoriteService(
                 entryId = agentId,
             )
         }
-        if (!catalogService.exists("agent", agentId)) {
+        if (requireCatalog && !catalogService.exists("agent", agentId)) {
             throw InventoryApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "unknown_agent",

@@ -32,6 +32,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -107,6 +108,43 @@ class OperatorCurrentFoundationServiceTest {
         }
         every { catalogService.getOperator("op1") } answers { catalog("op1", rarity, spOf) }
         every { catalogService.spFormsOf(any()) } returns emptyList()
+    }
+
+    @Test
+    fun `orphan cleanup removes only the requested id in all account versions and is repeatable`() {
+        val oldId = "char_130_zhoutai"
+        val newId = "char_129_zhoutai"
+        val original = baseEntry()
+        val documents = mutableMapOf(
+            "代号鸢" to stored.copy(entries = mapOf(oldId to original, newId to original)),
+            "universal" to stored.copy(id = "generic", game = "universal", entries = mapOf(oldId to original)),
+        )
+        val corrections = mutableListOf<OperatorCorrectionRecord>()
+        every { catalogService.getOperator(oldId) } returns null
+        every { currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "acc1") } answers { documents.values.toList() }
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { documents[it.game] = it } }
+        every { correctionRepository.save(any()) } answers { firstArg<OperatorCorrectionRecord>().also(corrections::add) }
+
+        service.removeOrphanCurrent("u1", "acc1", oldId)
+        service.removeOrphanCurrent("u1", "acc1", oldId)
+
+        assertEquals(mapOf(newId to original), documents.getValue("代号鸢").entries)
+        assertEquals(emptyMap<String, OperatorEntry>(), documents.getValue("universal").entries)
+        assertEquals(2, corrections.size)
+        assertEquals(setOf("catalog_removed"), corrections.map { it.reason }.toSet())
+        assertEquals(original.level, corrections.first().level)
+        verify(exactly = 0) { recordRepository.delete(any()) }
+    }
+
+    @Test
+    fun `orphan cleanup rejects active catalog ids and foreign accounts before changing current`() {
+        val active = assertThrows(OperatorApiException::class.java) { service.removeOrphanCurrent("u1", "acc1", "op1") }
+        assertEquals("operator_still_in_catalog", active.code)
+        every { accountRepository.findByUserIdAndAccountId("u2", "acc1") } returns null
+        val foreign = assertThrows(OperatorApiException::class.java) { service.removeOrphanCurrent("u2", "acc1", "op1") }
+        assertEquals("account_not_found", foreign.code)
+        verify(exactly = 0) { currentRepository.save(any()) }
+        verify(exactly = 0) { correctionRepository.save(any()) }
     }
 
     @Test
@@ -777,6 +815,30 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals("main1", entry.starStones.single().type)
         assertEquals(1000, entry.combatStats?.observedAttack)
         assertEquals(1, entry.revision)
+    }
+
+    @Test
+    fun `history replay preserves orphan removal instead of restoring a deleted catalog entry`() {
+        val target = history("remove", "2026-08-21T00:00:00Z", "2026-08-21T00:00:01Z")
+        val remaining = history("keep", "2026-08-21T00:01:00Z", "2026-08-21T00:01:01Z")
+        val correction = OperatorCorrectionRecord(
+            userId = "u1", accountId = "acc1", game = "代号鸢", operatorId = "op1",
+            reason = "catalog_removed", fields = emptySet(), createdAt = Instant.parse("2026-08-21T00:02:00Z"),
+        )
+        var replayed: OperatorCurrent? = stored
+        every { catalogService.getOperator("op1") } returns null
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "remove") } returns target
+        every { recordRepository.delete(target) } just runs
+        every { currentRepository.deleteByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } answers { replayed = null }
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } answers { replayed }
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { replayed = it } }
+        every { recordRepository.findByUserIdAndAccountIdAndGameOrderByEffectiveAtAsc("u1", "acc1", "代号鸢") } returns listOf(remaining)
+        every { correctionRepository.findByUserIdAndAccountIdAndGameOrderByCreatedAtAsc("u1", "acc1", "代号鸢") } returns listOf(correction)
+        every { recordRepository.save(any()) } answers { firstArg<OperatorRecord>() }
+
+        service.deleteRecord("u1", "acc1", "remove")
+
+        assertEquals(emptyMap<String, OperatorEntry>(), replayed!!.entries)
     }
 
     private fun patch(

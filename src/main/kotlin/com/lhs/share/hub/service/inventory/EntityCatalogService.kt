@@ -6,6 +6,7 @@ import com.lhs.share.hub.controller.inventory.response.EntityCatalogItemDto
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.repository.EntityCatalogRepository
 import com.lhs.share.hub.repository.entity.EntityCatalogEntity
+import com.lhs.share.hub.service.operator.OperatorCatalogService
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.core.io.Resource
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
@@ -18,15 +19,14 @@ private val log = KotlinLogging.logger { }
  * 对象目录服务(HubBackend.entity_catalog)
  *
  * 目录为全局只读字典,向后端校验 (entity_type, id) 与向前端展示统一对象名称。
- * 加载策略:首次访问时从 classpath 资源 inventory/items.json、inventory/operators.json
- * 解析全部对象,只补齐 collection 中缺失的对象,之后走只读路径。
- *
- * 该 service 绝不覆盖或删除既有数据,避免影响运维手工维护的目录。
+ * 道具首次访问时从 classpath inventory/items.json 补齐，保留已维护的元数据。
+ * 密探直接读取公共图鉴；entity_catalog 中遗留的 agent 行不再作为可写目录。
  */
 @Service
 class EntityCatalogService(
     private val repository: EntityCatalogRepository,
     private val objectMapper: ObjectMapper,
+    private val operatorCatalogService: OperatorCatalogService,
 ) {
     /**
      * 目录版本(默认取当次播种日期;部署方可转储后覆盖)。
@@ -45,51 +45,24 @@ class EntityCatalogService(
      */
     fun catalog(): InventoryCatalogResponse {
         ensureSeeded()
-        val entities = mutableListOf<EntityCatalogItemDto>()
-        ENTITY_TYPES.forEach { type ->
-            repository.findByEntityTypeOrderByEntityIdAsc(type).forEach { e ->
-                entities.add(
-                    EntityCatalogItemDto(
-                        entityType = e.entityType,
-                        id = e.entityId,
-                        name = e.name,
-                        category = e.category,
-                    ),
-                )
-            }
+        val operators = operatorCatalogService.catalog()
+        val items = repository.findByEntityTypeOrderByEntityIdAsc("item").map { entity ->
+            EntityCatalogItemDto("item", entity.entityId, entity.name, entity.category)
+        }
+        val agents = operators.operators.map { operator ->
+            EntityCatalogItemDto("agent", operator.id, operator.name)
         }
         return InventoryCatalogResponse(
-            catalogVersion = currentCatalogVersion(),
-            entities = entities,
+            catalogVersion = maxOf(currentCatalogVersion(), operators.catalogVersion),
+            entities = items + agents,
         )
     }
 
-    /**
-     * 校验 (entity_type, entity_id) 是否存在于目录(导入校验用)
-     */
+    /** 新导入与新增关注只接受当前公共目录的 ID。 */
     fun exists(entityType: String, entityId: String): Boolean {
+        if (entityType == "agent") return operatorCatalogService.exists(entityId)
         ensureSeeded()
-        return repository.findByEntityTypeAndEntityId(entityType, entityId) != null
-    }
-
-    /**
-     * 把管理员维护的公共密探同步到库存对象目录。
-     *
-     * 心纸库存只保存稳定 id 与数量；这里同步的是目录事实，不会为任何用户创建库存记录。
-     */
-    fun upsertAgent(entityId: String, name: String, version: String) {
-        ensureSeeded()
-        val existing = repository.findByEntityTypeAndEntityId("agent", entityId)
-        repository.save(
-            existing?.copy(name = name, catalogVersion = version)
-                ?: EntityCatalogEntity(
-                    entityType = "agent",
-                    entityId = entityId,
-                    name = name,
-                    catalogVersion = version,
-                ),
-        )
-        catalogVersion = version
+        return entityType == "item" && repository.findByEntityTypeAndEntityId(entityType, entityId) != null
     }
 
     /**
@@ -105,19 +78,17 @@ class EntityCatalogService(
     }
 
     private fun seed() {
-        seedFromResources(itemsResource(), operatorsResource())
+        seedFromResources(itemsResource())
         catalogVersion = resolveCatalogVersion()
         log.info { "对象目录播种完成,版本: $catalogVersion" }
     }
 
     /**
-     * 两份资源均完整通过校验后才开始写入，失败时保留数据库中的上一份有效目录。
+     * 资源完整通过校验后才开始写入，失败时保留数据库中的上一份有效目录。
      */
-    internal fun seedFromResources(itemResource: Resource?, agentResource: Resource?) {
+    internal fun seedFromResources(itemResource: Resource?) {
         val items = itemResource?.let { parseCatalog(it, "item") }.orEmpty()
-        val agents = agentResource?.let { parseCatalog(it, "agent") }.orEmpty()
         upsertAll(items)
-        upsertAll(agents)
     }
 
     private fun currentCatalogVersion(): String = catalogVersion.ifEmpty { resolveCatalogVersion() }
@@ -179,8 +150,6 @@ class EntityCatalogService(
 
     private fun itemsResource(): Resource? = loadResource("classpath:inventory/items.json")
 
-    private fun operatorsResource(): Resource? = loadResource("classpath:inventory/operators.json")
-
     private fun loadResource(location: String): Resource? {
         return try {
             val resolver: ResourcePatternResolver = PathMatchingResourcePatternResolver()
@@ -192,7 +161,6 @@ class EntityCatalogService(
     }
 
     companion object {
-        private val ENTITY_TYPES = listOf("item", "agent")
         private val ITEM_ID = Regex("^[a-z0-9_]+$")
         private val AGENT_ID = Regex("^char_[0-9]+_[a-z0-9_]+$")
 

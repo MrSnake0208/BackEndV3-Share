@@ -54,17 +54,18 @@ class OperatorPlannerValidator(
             targets.fields().forEach { (operatorId, target) ->
                 operator(operatorId)
                 fields(target, setOf("level", "elite", "star_level"))
-                integer(target.path("level"), "level", 0, 100)
-                integer(target.path("elite"), "elite", 0, 17)
+                val level = integer(target.path("level"), "level", 0, 100)
+                val elite = integer(target.path("elite"), "elite", 0, 17)
                 integer(target.path("star_level"), "star_level", 0, 31)
-                // Existing current entries can exceed the displayed level/elite relation.
-                // Keep their saved targets intact; the client derives effective display limits.
+                val maxElite = minOf(17, maxOf(0, level / 5 - 3))
+                if (elite > maxElite) invalid("Elite target exceeds the level limit $maxElite", "plans.targets.elite")
             }
         }
-        if ("favorites" !in ids ||
-            request.path("active_plan_id").asText() !in ids
-        ) {
-            invalid("Missing default or active plan", "active_plan_id")
+        val activePlan = request.path("active_plan_id")
+        if (plans.isEmpty) {
+            if (!activePlan.isNull) invalid("Empty workspace must not have an active plan", "active_plan_id")
+        } else if (!activePlan.isTextual || activePlan.asText() !in ids) {
+            invalid("Active plan must reference an existing plan", "active_plan_id")
         }
         return request.deepCopy().also { it.remove("expected_revision") }
     }
