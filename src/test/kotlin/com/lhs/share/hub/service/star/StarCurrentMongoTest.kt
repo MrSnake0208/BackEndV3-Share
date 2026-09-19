@@ -34,6 +34,7 @@ import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory
 import org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -61,14 +62,24 @@ class StarCurrentMongoTest {
     )
     private val accounts = mockk<SubAccountService>()
     private val inventoryRepository = mockk<StarInventoryCurrentRepository>()
-    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts)
-    private val loadoutService = StarLoadoutService(loadoutRepository, inventoryRepository, accounts)
+    private val workspaceService = StarWorkspaceService(
+        workspaceRepository,
+        inventoryRepository,
+        accounts,
+        TransactionOperations.withoutTransaction(),
+    )
+    private val loadoutService = StarLoadoutService(
+        loadoutRepository,
+        inventoryRepository,
+        accounts,
+        TransactionOperations.withoutTransaction(),
+    )
     private val presetService = StarLoadoutPresetService(presetRepository)
 
     @BeforeEach
     fun setUp() {
         every { accounts.requireAccount(any(), any()) } returns mockk()
-        every { inventoryRepository.findByUserIdAndAccountId("owner", "account") } returns StarInventoryCurrent(
+        val inventory = StarInventoryCurrent(
             id = "owner:account",
             userId = "owner",
             accountId = "account",
@@ -76,6 +87,8 @@ class StarCurrentMongoTest {
             entries = listOf(StarInventoryEntry("star.001", "main", "天府", "orange", 60)),
             contentHash = "test",
         )
+        every { inventoryRepository.findByUserIdAndAccountId("owner", any()) } returns inventory
+        every { inventoryRepository.touchReferenceBarrier("owner", any()) } returns inventory
     }
 
     @AfterEach

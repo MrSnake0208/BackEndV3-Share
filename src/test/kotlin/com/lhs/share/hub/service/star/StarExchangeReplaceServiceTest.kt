@@ -40,7 +40,7 @@ class StarExchangeReplaceServiceTest {
     private val loadoutService = mockk<StarLoadoutService>()
     private val transactions = mockk<TransactionTemplate>()
     private val inventoryService = StarInventoryService(inventoryRepository, workspaceRepository, loadoutRepository, accounts, transactions)
-    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts)
+    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts, transactions)
     private val service = StarExchangeReplaceService(
         accounts,
         inventoryService,

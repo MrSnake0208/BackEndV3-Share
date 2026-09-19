@@ -9,8 +9,10 @@ import com.lhs.share.hub.repository.entity.StarLoadoutSlots
 import com.lhs.share.hub.repository.entity.StarOperatorLoadout
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 
 @Service
@@ -18,6 +20,7 @@ class StarLoadoutService(
     private val repository: StarLoadoutCurrentRepository,
     private val inventoryRepository: StarInventoryCurrentRepository,
     private val accountService: SubAccountService,
+    @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionOperations,
 ) {
     internal fun clearForReplacement(userId: String, accountId: String, now: Instant): StarLoadoutCurrentResponse {
         val expectedRevision = repository.findByUserIdAndAccountId(userId, accountId)?.revision ?: 0
@@ -37,10 +40,14 @@ class StarLoadoutService(
     fun putCurrent(userId: String, accountId: String, request: StarLoadoutCurrentRequest): StarLoadoutCurrentResponse {
         accountService.requireAccount(userId, accountId)
         val normalized = normalize(request)
-        validateReferences(userId, accountId, normalized.loadouts)
         val saved = starCasConflictBoundary({ throw conflict() }) {
-            repository.replace(userId, accountId, normalized.expectedRevision, normalized.loadouts, Instant.now())
-                ?: throw conflict()
+            requireNotNull(
+                transactions.execute {
+                    validateReferences(userId, accountId, normalized.loadouts)
+                    repository.replace(userId, accountId, normalized.expectedRevision, normalized.loadouts, Instant.now())
+                        ?: throw conflict()
+                },
+            )
         }
         return StarLoadoutCurrentResponse.of(saved)
     }
@@ -79,7 +86,7 @@ class StarLoadoutService(
             }
         }
         if (assignments.isEmpty()) return
-        val inventory = inventoryRepository.findByUserIdAndAccountId(userId, accountId)
+        val inventory = inventoryRepository.touchReferenceBarrier(userId, accountId)
             ?: throw InventoryApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "star_loadout_inventory_required",

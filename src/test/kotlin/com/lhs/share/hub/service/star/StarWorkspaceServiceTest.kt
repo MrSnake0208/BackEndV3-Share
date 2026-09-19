@@ -12,12 +12,14 @@ import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 
 class StarWorkspaceServiceTest {
@@ -26,7 +28,12 @@ class StarWorkspaceServiceTest {
     private val accountService = mockk<SubAccountService>()
     private val stored = mutableMapOf<Pair<String, String>, StarWorkspaceCurrent>()
     private val inventories = mutableMapOf<Pair<String, String>, StarInventoryCurrent>()
-    private val service = StarWorkspaceService(repository, inventoryRepository, accountService)
+    private val service = StarWorkspaceService(
+        repository,
+        inventoryRepository,
+        accountService,
+        TransactionOperations.withoutTransaction(),
+    )
 
     @BeforeEach
     fun setUp() {
@@ -38,6 +45,9 @@ class StarWorkspaceServiceTest {
             stored[firstArg<String>() to secondArg<String>()]
         }
         every { inventoryRepository.findByUserIdAndAccountId(any(), any()) } answers {
+            inventories[firstArg<String>() to secondArg<String>()]
+        }
+        every { inventoryRepository.touchReferenceBarrier(any(), any()) } answers {
             inventories[firstArg<String>() to secondArg<String>()]
         }
         every { repository.replace(any(), any(), any(), any(), any(), any(), any()) } answers {
@@ -186,6 +196,23 @@ class StarWorkspaceServiceTest {
         val response = service.putCurrent("u1", "acc_a", request(0, mapOf("main-1" to 60, "support-1" to 40)))
 
         assertEquals(mapOf("main-1" to 60, "support-1" to 40), response.planTargets)
+    }
+
+    @Test
+    fun `reference validation uses the serialized inventory snapshot`() {
+        every { inventoryRepository.touchReferenceBarrier("u1", "acc_a") } returns inventory(
+            "u1",
+            "acc_a",
+            emptyList(),
+        )
+
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.putCurrent("u1", "acc_a", request(0, mapOf("star_1" to 60)))
+        }
+
+        assertEquals("star_workspace_invalid_reference", error.code)
+        verify(exactly = 1) { inventoryRepository.touchReferenceBarrier("u1", "acc_a") }
+        verify(exactly = 0) { inventoryRepository.findByUserIdAndAccountId(any(), any()) }
     }
 
     private fun request(

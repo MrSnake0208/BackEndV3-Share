@@ -10,11 +10,13 @@ import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 
 class StarLoadoutServiceTest {
@@ -23,7 +25,12 @@ class StarLoadoutServiceTest {
     private val accountService = mockk<SubAccountService>()
     private val stored = mutableMapOf<Pair<String, String>, StarLoadoutCurrent>()
     private var inventory: StarInventoryCurrent? = inventory()
-    private val service = StarLoadoutService(repository, inventoryRepository, accountService)
+    private val service = StarLoadoutService(
+        repository,
+        inventoryRepository,
+        accountService,
+        TransactionOperations.withoutTransaction(),
+    )
 
     @BeforeEach
     fun setUp() {
@@ -31,6 +38,7 @@ class StarLoadoutServiceTest {
         inventory = inventory()
         every { accountService.requireAccount(any(), any()) } returns mockk()
         every { inventoryRepository.findByUserIdAndAccountId(any(), any()) } answers { inventory }
+        every { inventoryRepository.touchReferenceBarrier(any(), any()) } answers { inventory }
         every { repository.findByUserIdAndAccountId(any(), any()) } answers {
             stored[firstArg<String>() to secondArg<String>()]
         }
@@ -157,6 +165,19 @@ class StarLoadoutServiceTest {
 
         assertEquals("main.001", response.loadouts["operator.001"]?.get("main1"))
         assertEquals("operator.001", stored["u1" to "acc_a"]!!.loadouts.single().operatorId)
+    }
+
+    @Test
+    fun `reference validation uses the serialized inventory snapshot`() {
+        every { inventoryRepository.touchReferenceBarrier("u1", "acc_a") } returns inventory!!.copy(entries = emptyList())
+
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.putCurrent("u1", "acc_a", request(0, mapOf("operator_a" to slots(main1 = "main_1"))))
+        }
+
+        assertEquals("star_loadout_invalid_reference", error.code)
+        verify(exactly = 1) { inventoryRepository.touchReferenceBarrier("u1", "acc_a") }
+        verify(exactly = 0) { inventoryRepository.findByUserIdAndAccountId(any(), any()) }
     }
 
     private fun request(expected: Long, loadouts: Map<String, Map<String, String?>>): StarLoadoutCurrentRequest {

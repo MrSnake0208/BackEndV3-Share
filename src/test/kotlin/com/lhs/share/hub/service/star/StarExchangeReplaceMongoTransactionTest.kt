@@ -4,6 +4,7 @@ import com.lhs.share.hub.controller.star.request.StarExchangeReplaceInventoryReq
 import com.lhs.share.hub.controller.star.request.StarExchangeReplaceRequest
 import com.lhs.share.hub.controller.star.request.StarInventoryEntryRequest
 import com.lhs.share.hub.controller.star.request.StarInventorySnapshotRequest
+import com.lhs.share.hub.controller.star.request.StarLoadoutCurrentRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceBagRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceCurrentRequest
 import com.lhs.share.hub.controller.star.request.StarWorkspaceExperienceRequest
@@ -28,6 +29,7 @@ import org.bson.Document
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -39,6 +41,10 @@ import org.springframework.data.repository.core.support.RepositoryComposition.Re
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Requires a replica set or sharded MongoDB because replacement writes use a real transaction. */
 @EnabledIfEnvironmentVariable(named = "PLANNER_TEST_MONGO_URI", matches = ".+")
@@ -63,8 +69,8 @@ class StarExchangeReplaceMongoTransactionTest {
     private val accounts = mockk<SubAccountService>()
     private val transactions = TransactionTemplate(org.springframework.data.mongodb.MongoTransactionManager(databaseFactory))
     private val inventoryService = StarInventoryService(inventoryRepository, workspaceRepository, loadoutRepository, accounts, transactions)
-    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts)
-    private val loadoutService = StarLoadoutService(loadoutRepository, inventoryRepository, accounts)
+    private val workspaceService = StarWorkspaceService(workspaceRepository, inventoryRepository, accounts, transactions)
+    private val loadoutService = StarLoadoutService(loadoutRepository, inventoryRepository, accounts, transactions)
     private val service = replacementService(loadoutService)
 
     @BeforeEach
@@ -193,6 +199,140 @@ class StarExchangeReplaceMongoTransactionTest {
         assertEquals(before, state("target"))
     }
 
+    @Test
+    fun `inventory removal cannot race workspace or loadout references back into the account`() {
+        assertConcurrentReferenceRemoval(
+            "workspace-race",
+            writeReference = { barrierRepository ->
+                StarWorkspaceService(workspaceRepository, barrierRepository, accounts, transactions).putCurrent(
+                    "owner",
+                    "workspace-race",
+                    StarWorkspaceCurrentRequest(
+                        0,
+                        mapOf("old-main" to 60),
+                        StarWorkspaceBagRequest(1, 100),
+                        StarWorkspaceExperienceRequest(1, 2, 3),
+                    ),
+                )
+            },
+            references = {
+                workspaceRepository.findByUserIdAndAccountId("owner", "workspace-race")
+                    ?.planTargets
+                    ?.map { it.instanceId }
+                    .orEmpty()
+            },
+        )
+        assertConcurrentReferenceRemoval(
+            "loadout-race",
+            writeReference = { barrierRepository ->
+                StarLoadoutService(loadoutRepository, barrierRepository, accounts, transactions).putCurrent(
+                    "owner",
+                    "loadout-race",
+                    StarLoadoutCurrentRequest(
+                        0,
+                        mapOf(
+                            "operator" to mapOf(
+                                "main1" to "old-main",
+                                "main2" to null,
+                                "main3" to null,
+                                "support1" to null,
+                                "support2" to null,
+                                "support3" to null,
+                            ),
+                        ),
+                    ),
+                )
+            },
+            references = {
+                loadoutRepository.findByUserIdAndAccountId("owner", "loadout-race")
+                    ?.loadouts
+                    ?.flatMap { it.slots.values().mapNotNull { (_, instanceId) -> instanceId } }
+                    .orEmpty()
+            },
+        )
+    }
+
+    private fun assertConcurrentReferenceRemoval(
+        accountId: String,
+        writeReference: (StarInventoryCurrentRepository) -> Unit,
+        references: () -> List<String>,
+    ) {
+        seedInventory(accountId)
+        val barrierTouched = CountDownLatch(1)
+        val releaseReferenceWrite = CountDownLatch(1)
+        val inventoryWriteAttempted = CountDownLatch(1)
+        val barrierRepository = mockk<StarInventoryCurrentRepository>()
+        every { barrierRepository.touchReferenceBarrier("owner", accountId) } answers {
+            inventoryRepository.touchReferenceBarrier("owner", accountId).also {
+                barrierTouched.countDown()
+                check(releaseReferenceWrite.await(5, TimeUnit.SECONDS))
+            }
+        }
+        val signalingRepository = mockk<StarInventoryCurrentRepository>()
+        every { signalingRepository.findByUserIdAndAccountId("owner", accountId) } answers {
+            inventoryRepository.findByUserIdAndAccountId("owner", accountId)
+        }
+        every {
+            signalingRepository.replaceIfEffectiveAtAfterCurrent(any(), any(), any(), any(), any(), any(), any(), any())
+        } answers {
+            inventoryWriteAttempted.countDown()
+            inventoryRepository.replaceIfEffectiveAtAfterCurrent(
+                args[0] as String,
+                args[1] as String,
+                args[2] as Instant,
+                args[3] as List<StarInventoryEntry>,
+                args[4] as String,
+                args[5] as Long,
+                args[6] as Instant,
+                args[7] as Instant,
+            )
+        }
+        val racingInventoryService = StarInventoryService(
+            signalingRepository,
+            workspaceRepository,
+            loadoutRepository,
+            accounts,
+            transactions,
+        )
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val referenceResult = executor.submit(
+                Callable { runCatching { writeReference(barrierRepository) } },
+            )
+            assertTrue(barrierTouched.await(5, TimeUnit.SECONDS))
+            val inventoryResult = executor.submit(
+                Callable {
+                    runCatching {
+                        racingInventoryService.putCurrent(
+                            "owner",
+                            accountId,
+                            StarInventorySnapshotRequest("2026-09-17T01:00:00Z", emptyList()),
+                        )
+                    }
+                },
+            )
+            assertTrue(inventoryWriteAttempted.await(5, TimeUnit.SECONDS))
+            releaseReferenceWrite.countDown()
+            val referenceOutcome = referenceResult.get(10, TimeUnit.SECONDS)
+            val inventoryOutcome = inventoryResult.get(10, TimeUnit.SECONDS)
+            assertTrue(referenceOutcome.isSuccess || inventoryOutcome.isSuccess)
+            if (inventoryOutcome.isFailure) {
+                inventoryService.putCurrent(
+                    "owner",
+                    accountId,
+                    StarInventorySnapshotRequest("2026-09-17T02:00:00Z", emptyList()),
+                )
+            }
+        } finally {
+            releaseReferenceWrite.countDown()
+            executor.shutdownNow()
+        }
+        val inventoryIds = inventoryRepository.findByUserIdAndAccountId("owner", accountId)!!
+            .entries
+            .mapTo(HashSet()) { it.instanceId }
+        assertTrue(references().all { it in inventoryIds })
+    }
+
     private fun replacementService(loadout: StarLoadoutService) = StarExchangeReplaceService(
         accounts,
         inventoryService,
@@ -228,6 +368,19 @@ class StarExchangeReplaceMongoTransactionTest {
             accountId,
             0,
             listOf(StarOperatorLoadout("operator", StarLoadoutSlots(main1 = "old-main"))),
+            Instant.parse("2026-09-17T00:00:00Z"),
+        )
+    }
+
+    private fun seedInventory(accountId: String) {
+        inventoryRepository.replace(
+            "owner",
+            accountId,
+            Instant.parse("2026-09-17T00:00:00Z"),
+            listOf(StarInventoryEntry("old-main", "main", "旧天府", "orange", 60)),
+            "old-hash",
+            0,
+            Instant.parse("2026-09-17T00:00:00Z"),
             Instant.parse("2026-09-17T00:00:00Z"),
         )
     }

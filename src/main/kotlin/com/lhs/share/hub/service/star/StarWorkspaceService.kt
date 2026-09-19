@@ -9,8 +9,10 @@ import com.lhs.share.hub.repository.entity.StarWorkspaceBag
 import com.lhs.share.hub.repository.entity.StarWorkspaceExperience
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 
 @Service
@@ -18,6 +20,7 @@ class StarWorkspaceService(
     private val repository: StarWorkspaceCurrentRepository,
     private val inventoryRepository: StarInventoryCurrentRepository,
     private val accountService: SubAccountService,
+    @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionOperations,
 ) {
     internal fun prepareReplacement(request: StarWorkspaceCurrentRequest): StarWorkspaceReplacementSnapshot {
         val normalized = normalize(request)
@@ -39,24 +42,28 @@ class StarWorkspaceService(
     fun putCurrent(userId: String, accountId: String, request: StarWorkspaceCurrentRequest): StarWorkspaceCurrentResponse {
         accountService.requireAccount(userId, accountId)
         val normalized = normalize(request)
-        validateReferences(userId, accountId, normalized.planTargets)
         val saved = starCasConflictBoundary({ throw conflict() }) {
-            repository.replace(
-                userId,
-                accountId,
-                normalized.expectedRevision,
-                normalized.planTargets,
-                normalized.bag,
-                normalized.experience,
-                Instant.now(),
-            ) ?: throw conflict()
+            requireNotNull(
+                transactions.execute {
+                    validateReferences(userId, accountId, normalized.planTargets)
+                    repository.replace(
+                        userId,
+                        accountId,
+                        normalized.expectedRevision,
+                        normalized.planTargets,
+                        normalized.bag,
+                        normalized.experience,
+                        Instant.now(),
+                    ) ?: throw conflict()
+                },
+            )
         }
         return StarWorkspaceCurrentResponse.of(saved)
     }
 
     private fun validateReferences(userId: String, accountId: String, planTargets: List<StarPlanTarget>) {
         if (planTargets.isEmpty()) return
-        val inventoryIds = inventoryRepository.findByUserIdAndAccountId(userId, accountId)
+        val inventoryIds = inventoryRepository.touchReferenceBarrier(userId, accountId)
             ?.entries
             ?.asSequence()
             ?.map { it.instanceId }
