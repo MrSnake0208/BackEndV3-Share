@@ -694,6 +694,24 @@ class InventoryServiceTest {
     }
 
     @Test
+    fun `retired agent rejects new records but accepted originals still retry idempotently`() {
+        val oldId = "char_130_zhoutai"
+        val record = reward("old-agent", "2026-09-18T10:00:00Z", oldId, 2).copy(entityType = "agent")
+        service.import("u1", document(record))
+        every { catalogService.exists("agent", oldId) } returns false
+        assertEquals(1, service.import("u1", document(record)).duplicates)
+        val invalid = assertThrows(InventoryApiException::class.java) {
+            service.import("u1", document(record.copy(recordId = "new-agent")))
+        }
+        assertEquals("unknown_entity_id", invalid.code)
+        val conflict = assertThrows(InventoryApiException::class.java) {
+            service.import("u1", document(record.copy(entries = listOf(InventoryEntryRequest(oldId, count = 9)))))
+        }
+        assertEquals("record_conflict", conflict.code)
+        assertEquals(1, records.size)
+    }
+
+    @Test
     fun `entire document is validated before any write`() {
         every { catalogService.exists("item", "unknown") } returns false
         val error = assertThrows(InventoryApiException::class.java) {

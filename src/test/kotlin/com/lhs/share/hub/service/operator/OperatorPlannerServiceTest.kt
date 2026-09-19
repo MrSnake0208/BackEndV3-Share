@@ -31,6 +31,7 @@ import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZonedDateTime
 
 class OperatorPlannerServiceTest {
@@ -168,16 +169,61 @@ class OperatorPlannerServiceTest {
     }
 
     @Test
+    fun `all plans can be deleted and the complete empty workspace round trips`() {
+        val request = workspace().putNull("active_plan_id")
+        request.withArray("plans").removeAll()
+
+        val saved = service.putWorkspace("u1", "a1", request)
+
+        assertEquals(1, saved.path("revision").asInt())
+        assertTrue(saved.path("active_plan_id").isNull)
+        assertTrue(saved.path("plans").isEmpty)
+        assertEquals(saved, service.workspace("u1", "a1"))
+    }
+
+    @Test
+    fun `favorites is optional when a custom plan remains active`() {
+        val request = workspace().put("active_plan_id", PLAN)
+        request.withArray("plans").removeAll().add(
+            mapper.readTree(
+                """{"id":"$PLAN","name":"主队","source":"custom","operator_ids":["$OPERATOR"],"excluded_operator_ids":[],"targets":{"$OPERATOR":{"level":80,"elite":13,"star_level":19}}}""",
+            ),
+        )
+
+        val saved = service.putWorkspace("u1", "a1", request)
+
+        assertEquals(PLAN, saved.path("active_plan_id").asText())
+        assertEquals(1, saved.path("plans").size())
+        assertEquals(PLAN, saved.path("plans")[0].path("id").asText())
+    }
+
+    @Test
     fun `invalid structures never write a partial workspace`() {
         val invalidRequests = listOf(
             workspace().put("schema_version", 2),
             workspace().put("active_plan_id", PLAN),
+            workspace().putNull("active_plan_id"),
             workspace().also { it.withArray("plans").removeAll() },
             workspace().also { (it.path("plans")[0] as ObjectNode).put("source", "custom") },
             workspace().also { (it.path("training_levels") as ObjectNode).put("fh", 13) },
             workspace().also { (it.path("plans")[0] as ObjectNode).withArray("operator_ids").add("unknown") },
         )
         invalidRequests.forEach { assertThrows(OperatorApiException::class.java) { service.putWorkspace("u1", "a1", it) } }
+        assertTrue(workspaceData.isEmpty())
+    }
+
+    @Test
+    fun `an elite target above its level limit is rejected without rewriting the workspace`() {
+        val request = workspace()
+        request.withArray("plans").add(
+            mapper.readTree(
+                """{"id":"$PLAN","name":"非法目标","source":"custom","operator_ids":["$OPERATOR"],"excluded_operator_ids":[],"targets":{"$OPERATOR":{"level":80,"elite":14,"star_level":19}}}""",
+            ),
+        )
+
+        val error = assertThrows(OperatorApiException::class.java) { service.putWorkspace("u1", "a1", request) }
+
+        assertEquals("plans.targets.elite", error.fieldPath)
         assertTrue(workspaceData.isEmpty())
     }
 
@@ -192,6 +238,19 @@ class OperatorPlannerServiceTest {
         assertThrows(OperatorApiException::class.java) { service.putSchedule("u1", "a1", "favorites", changed) }
         assertEquals(1, service.schedule("u1", "a1", "favorites").path("revision").asInt())
         assertThrows(OperatorApiException::class.java) { service.putSchedule("u1", "a1", "favorites", request) }
+    }
+
+    @Test
+    fun `history preservation uses the same five o'clock business day as the frontend`() {
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        assertEquals(
+            LocalDate.of(2026, 9, 15),
+            validator.businessDate(ZonedDateTime.of(2026, 9, 16, 1, 0, 0, 0, shanghai)),
+        )
+        assertEquals(
+            LocalDate.of(2026, 9, 16),
+            validator.businessDate(ZonedDateTime.of(2026, 9, 16, 5, 0, 0, 0, shanghai)),
+        )
     }
 
     @Test
@@ -266,6 +325,22 @@ class OperatorPlannerServiceTest {
         conflict.withObject("workspace").put("expected_revision", 1)
         val error = assertThrows(OperatorApiException::class.java) { service.importLocal("u1", "a1", conflict) }
         assertEquals("training_workspace_migration_conflict", error.code)
+    }
+
+    @Test
+    fun `local import preserves an empty workspace`() {
+        val emptyWorkspace = workspace().putNull("active_plan_id")
+        emptyWorkspace.withArray("plans").removeAll()
+        val request = mapper.createObjectNode().put("migration_id", "migration-empty")
+        request.set<ObjectNode>("workspace", emptyWorkspace)
+        request.set<ObjectNode>("schedules", mapper.createObjectNode())
+
+        val result = service.importLocal("u1", "a1", request)
+
+        assertTrue(result.path("workspace").path("active_plan_id").isNull)
+        assertTrue(result.path("workspace").path("plans").isEmpty)
+        assertEquals(result.path("workspace"), service.workspace("u1", "a1"))
+        assertTrue(result.path("schedules").isEmpty)
     }
 
     @Test

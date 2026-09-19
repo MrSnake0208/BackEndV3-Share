@@ -36,7 +36,7 @@ MongoDB 新增 `operator_training_workspace`、`operator_stamina_schedule`、`op
 }
 ```
 
-默认清单固定 id/source=favorites、必须存在，targets 为空；有效成员由实时 favorites 加入 operator_ids、再扣除 excluded_operator_ids 得到。自建清单使用稳定 UUID、source=custom。移出成员的目标可保留以供重新加入。名称去首尾空白后 1..40 字，成员 ID 不可重复，目标与成员必须是已知密探。四类最高通关层数范围 1..12 / 1..8，目标范围 level=0..100、elite=0..17、star_level=0..31。前端现有“以实际练度为显示下限”的行为不通过后端强行改写历史目标实现。
+默认清单固定 id/source=favorites，在存在时必须唯一且 targets 为空；有效成员由实时 favorites 加入 operator_ids、再扣除 excluded_operator_ids 得到。自建清单使用稳定 UUID、source=custom。工作区可以不含任何清单，此时 `plans=[]` 且 `active_plan_id=null`；存在清单时 `active_plan_id` 必须指向其中一张。移出成员的目标可保留以供重新加入。名称去首尾空白后 1..40 字，成员 ID 不可重复，目标与成员必须是已知密探。四类最高通关层数范围 1..12 / 1..8，目标范围 level=0..100、elite=0..17、star_level=0..31，且 elite 不得超过 `min(17,max(0,floor(level/5)-3))`。非法组合直接拒绝，不截断或改写用户提交的数据；客户端仍以当前档案进度为显示下限。
 
 完整快照条件更新；成功 revision 加 1，过期版本返回 409 `training_workspace_revision_conflict`，不自动重试覆盖。删除清单通过工作区 PUT，关联日程暂留但不可从该清单 API 访问；当前页面撤销恢复原 UUID 后可恢复日程。子账号删除时一并清理工作区、所有日程和导入回执。
 

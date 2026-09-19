@@ -150,6 +150,7 @@ class InventoryService(
                 requestRecords[key] = validated
                 val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
                 if (existing != null && !sameBody(existing, record)) throw recordConflict(record.recordId)
+                if (existing == null) validateCatalogEntries(record)
                 PreparedRecord(validated, duplicate = existing != null)
             }
         }
@@ -276,6 +277,18 @@ class InventoryService(
             if (!seen.add(entry.id)) {
                 throw schemaError("Duplicate entry id: ${entry.id}", record.recordId, entry.id)
             }
+            if (record.recordType == REWARD_DELTA && entry.count < 1) {
+                throw schemaError("reward_delta count must be at least 1", record.recordId, entry.id)
+            }
+            if (entry.count < 0 || entry.count > MAX_COUNT) {
+                throw schemaError("entry count is outside the supported range", record.recordId, entry.id)
+            }
+        }
+    }
+
+    // 已接收的同正文记录仍需幂等成功，即使其密探后来被公共图鉴删除。
+    private fun validateCatalogEntries(record: InventoryRecordRequest) {
+        record.entries.forEach { entry ->
             if (!catalogService.exists(record.entityType, entry.id)) {
                 throw InventoryApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
@@ -284,12 +297,6 @@ class InventoryService(
                     record.recordId,
                     entry.id,
                 )
-            }
-            if (record.recordType == REWARD_DELTA && entry.count < 1) {
-                throw schemaError("reward_delta count must be at least 1", record.recordId, entry.id)
-            }
-            if (entry.count < 0 || entry.count > MAX_COUNT) {
-                throw schemaError("entry count is outside the supported range", record.recordId, entry.id)
             }
         }
     }

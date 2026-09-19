@@ -232,6 +232,14 @@ class OperatorController(
         service.patchCurrent(helper.requireUserId(), accountId, game, operatorId, request),
     )
 
+    @Operation(summary = "移除公共图鉴已删除的密探养成", description = "仅清理当前用户子账号下该旧 ID 的当前养成，保留历史记录；仍在公共图鉴中的 ID 返回 409。")
+    @RequireJwt
+    @DeleteMapping("/current/{operatorId}")
+    fun removeOrphanCurrent(@PathVariable operatorId: String, @RequestParam(name = "account_id") accountId: String): ApiResult<Boolean> {
+        service.removeOrphanCurrent(helper.requireUserId(), accountId, operatorId)
+        return success(true)
+    }
+
     @GetMapping("/records")
     fun records(
         @RequestParam(name = "account_id") accountId: String,

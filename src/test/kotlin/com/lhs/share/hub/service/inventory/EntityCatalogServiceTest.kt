@@ -3,6 +3,10 @@ package com.lhs.share.hub.service.inventory
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.repository.EntityCatalogRepository
 import com.lhs.share.hub.repository.entity.EntityCatalogEntity
+import com.lhs.share.hub.service.operator.OperatorCatalogService
+import com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse
+import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
+import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -18,11 +22,18 @@ import org.springframework.core.io.ClassPathResource
 class EntityCatalogServiceTest {
     private val repository = mockk<EntityCatalogRepository>()
     private val rows = linkedMapOf<Pair<String, String>, EntityCatalogEntity>()
-    private val service = EntityCatalogService(repository, jacksonObjectMapper())
+    private val operatorCatalog = mockk<OperatorCatalogService>()
+    private var operators = emptyList<OperatorCatalogEntity>()
+    private val service = EntityCatalogService(repository, jacksonObjectMapper(), operatorCatalog)
 
     @BeforeEach
     fun setUp() {
         rows.clear()
+        operators = emptyList()
+        every { operatorCatalog.catalog() } answers {
+            OperatorCatalogResponse(catalogVersion = "2026-09-19T10:00:00Z", operators = operators.map(OperatorCatalogEntryResponse::of))
+        }
+        every { operatorCatalog.exists(any()) } answers { operators.any { it.operatorId == firstArg<String>() } }
         every { repository.findByEntityTypeAndEntityId(any(), any()) } answers {
             rows[firstArg<String>() to secondArg<String>()]
         }
@@ -38,16 +49,8 @@ class EntityCatalogServiceTest {
     }
 
     @Test
-    fun `packaged agent catalog is valid unique and contains frontend agents`() {
-        service.seedFromResources(
-            ClassPathResource("inventory/items.json"),
-            ClassPathResource("inventory/operators.json"),
-        )
-
-        val agentIds = rows.values.filter { it.entityType == "agent" }.map { it.entityId }
-        assertEquals(agentIds.size, agentIds.toSet().size)
-        assertTrue("char_102_jianyong" in agentIds)
-        assertTrue("char_125_zhaoyun" in agentIds)
+    fun `packaged items preserve category metadata`() {
+        service.seedFromResources(ClassPathResource("inventory/items.json"))
 
         val fuchuan = rows.getValue("item" to "fuchuan")
         val tianji = rows.getValue("item" to "tianjifuchuan")
@@ -88,7 +91,6 @@ class EntityCatalogServiceTest {
                     {"id":"mazi","name":"麻籽"}
                 ]""".trimIndent(),
             ),
-            null,
         )
 
         assertEquals("货币", rows.getValue("item" to "baijinbi").category)
@@ -98,15 +100,30 @@ class EntityCatalogServiceTest {
     }
 
     @Test
-    fun `admin operator upsert becomes available to inventory immediately`() {
-        service.upsertAgent("char_126_new", "新密探", "2026-09-10T10:00:00Z")
+    fun `agent catalog and validation follow public operators despite stale entity rows`() {
+        listOf("char_130_zhoutai" to "周泰", "char_129_chenlin" to "陈琳").forEach { (id, name) ->
+            rows["agent" to id] = EntityCatalogEntity(entityType = "agent", entityId = id, name = name, catalogVersion = "old")
+        }
+        operators = listOf(operator("char_129_zhoutai", "周泰"), operator("char_130_chenlin", "陈琳"))
+        val catalog = service.catalog()
+        assertEquals(listOf("char_129_zhoutai", "char_130_chenlin"), catalog.entities.filter { it.entityType == "agent" }.map { it.id })
+        assertTrue(service.exists("agent", "char_129_zhoutai"))
+        assertEquals(false, service.exists("agent", "char_130_zhoutai"))
+        assertEquals("2026-09-19T10:00:00Z", catalog.catalogVersion)
 
-        assertTrue(service.exists("agent", "char_126_new"))
-        val agent = service.catalog().entities.single { it.id == "char_126_new" }
-        assertEquals("agent", agent.entityType)
-        assertEquals("新密探", agent.name)
-        assertEquals("2026-09-10T10:00:00Z", service.catalog().catalogVersion)
+        operators = listOf(operator("char_129_zhoutai", "改名"))
+        assertEquals("改名", service.catalog().entities.single { it.entityType == "agent" }.name)
+        operators = emptyList()
+        assertTrue(service.catalog().entities.none { it.entityType == "agent" })
+        assertEquals(false, service.exists("agent", "char_129_zhoutai"))
+        // 公开读取不删除用于历史排查的旧目录实体。
+        assertTrue(rows.containsKey("agent" to "char_130_zhoutai"))
     }
+
+    private fun operator(id: String, name: String) = OperatorCatalogEntity(
+        operatorId = id, name = name, rarity = 5, prof = emptyList(), subProf = emptyList(),
+        games = listOf("代号鸢"), discs = emptyList(), starStones = emptyList(), catalogVersion = "2026-09-19T10:00:00Z",
+    )
 
     @Test
     fun `failed catalog refresh preserves the previous valid catalog`() {
@@ -117,10 +134,10 @@ class EntityCatalogServiceTest {
             catalogVersion = "previous",
         )
         rows[existing.entityType to existing.entityId] = existing
-        val invalidAgents = resource("""[{"id":"bad-id","name":"伪造"}]""")
+        val invalidItems = resource("""[{"id":"new_item","name":"新物品"},{"id":"bad-id","name":"伪造"}]""")
 
         assertThrows(IllegalStateException::class.java) {
-            service.seedFromResources(resource("""[{"id":"new_item","name":"新物品"}]"""), invalidAgents)
+            service.seedFromResources(invalidItems)
         }
 
         assertEquals(existing, rows["agent" to "char_102_jianyong"])
@@ -129,21 +146,21 @@ class EntityCatalogServiceTest {
     }
 
     @Test
-    fun `duplicate agent ids reject the complete catalog batch`() {
-        val duplicateAgents = resource(
+    fun `duplicate item ids reject the complete catalog batch`() {
+        val duplicateItems = resource(
             """
             [
-              {"id":"char_102_jianyong","name":"简雍"},
-              {"id":"char_102_jianyong","name":"重复"}
+              {"id":"baijinbi","name":"白金币"},
+              {"id":"baijinbi","name":"重复"}
             ]
             """.trimIndent(),
         )
 
         val error = assertThrows(IllegalStateException::class.java) {
-            service.seedFromResources(null, duplicateAgents)
+            service.seedFromResources(duplicateItems)
         }
 
-        assertTrue(error.message.orEmpty().contains("Duplicate agent catalog id"))
+        assertTrue(error.message.orEmpty().contains("Duplicate item catalog id"))
         assertTrue(rows.isEmpty())
         verify(exactly = 0) { repository.save(any()) }
     }
