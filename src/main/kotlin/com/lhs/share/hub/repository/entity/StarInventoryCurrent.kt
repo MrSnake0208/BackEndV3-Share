@@ -33,6 +33,8 @@ data class StarInventoryCurrent(
     val effectiveAt: Instant,
     val entries: List<StarInventoryEntry> = emptyList(),
     val revision: Long = 1,
+    /** Serializes inventory replacement with writes that create inventory references. */
+    val referenceEpoch: Long = 0,
     /** 规范化快照的 SHA-256，仅用于重复 PUT 幂等判断。 */
     val contentHash: String,
     val updatedAt: Instant = Instant.now(),

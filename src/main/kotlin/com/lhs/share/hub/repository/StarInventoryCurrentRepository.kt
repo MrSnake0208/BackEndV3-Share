@@ -22,6 +22,12 @@ interface StarInventoryCurrentRepository : MongoRepository<StarInventoryCurrent,
 
 interface StarInventoryCurrentRepositoryCustom {
     /**
+     * Takes the account-scoped reference-write barrier and returns the inventory
+     * snapshot that must be used for validation in the same Mongo transaction.
+     */
+    fun touchReferenceBarrier(userId: String, accountId: String): StarInventoryCurrent?
+
+    /**
      * Replacement-import CAS. Unlike ordinary snapshot PUT, this intentionally does not compare
      * effectiveAt: an exchange replacement is explicitly authorized by expectedRevision.
      */
@@ -55,6 +61,16 @@ interface StarInventoryCurrentRepositoryCustom {
 class StarInventoryCurrentRepositoryImpl(
     @param:Qualifier("hubMongoTemplate") private val mongoTemplate: MongoTemplate,
 ) : StarInventoryCurrentRepositoryCustom {
+    override fun touchReferenceBarrier(userId: String, accountId: String): StarInventoryCurrent? = mongoTemplate.findAndModify(
+        Query.query(
+            Criteria.where("_id").`is`("$userId:$accountId").and("userId").`is`(userId)
+                .and("accountId").`is`(accountId),
+        ),
+        Update().inc("referenceEpoch", 1),
+        FindAndModifyOptions.options().returnNew(true),
+        StarInventoryCurrent::class.java,
+    )
+
     override fun replace(
         userId: String,
         accountId: String,
