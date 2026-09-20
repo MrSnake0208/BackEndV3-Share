@@ -46,8 +46,8 @@ class InventoryAgentFavoriteSecurityTest {
     }
 
     @Test
-    fun `star inventory requires login`() {
-        mockMvc.perform(get("/v1/star-inventory/current").param("account_id", "acc_a"))
+    fun `star state requires login`() {
+        mockMvc.perform(get("/v1/star-state/current").param("account_id", "acc_a"))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("unauthorized"))
     }

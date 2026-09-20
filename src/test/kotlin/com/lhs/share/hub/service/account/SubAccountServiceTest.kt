@@ -14,9 +14,9 @@ import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
-import com.lhs.share.hub.repository.StarInventoryCurrentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
-import com.lhs.share.hub.repository.StarWorkspaceCurrentRepository
+import com.lhs.share.hub.repository.StarStateCurrentRepository
+import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -54,11 +54,11 @@ class SubAccountServiceTest {
     private val targetRepository = mockk<OperatorGrowthTargetRepository>()
     private val upgradeRepository = mockk<OperatorUpgradeTransactionRepository>()
     private val revisionRepository = mockk<InventoryRevisionRepository>()
-    private val starInventoryRepository = mockk<StarInventoryCurrentRepository>()
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
-    private val starWorkspaceRepository = mockk<StarWorkspaceCurrentRepository>(relaxed = true)
+    private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
+    private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
     private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
@@ -82,12 +82,12 @@ class SubAccountServiceTest {
         targetRepository,
         upgradeRepository,
         revisionRepository,
-        starInventoryRepository,
         trainingWorkspaceRepository,
         staminaScheduleRepository,
         plannerImportRepository,
-        starWorkspaceRepository,
         starLoadoutRepository,
+        starStateRepository,
+        starRecoveryRepository,
     )
 
     @Test
@@ -144,7 +144,7 @@ class SubAccountServiceTest {
         verify(exactly = 0) { annotationRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { targetRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { upgradeRepository.deleteAllByUserIdAndAccountId(any(), any()) }
-        verify(exactly = 0) { starInventoryRepository.deleteByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { starStateRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 
     @Test
@@ -214,7 +214,6 @@ class SubAccountServiceTest {
         every { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { revisionRepository.deleteByUserIdAndAccountId("u1", "main") } returns 1
-        every { starInventoryRepository.deleteByUserIdAndAccountId("u1", "main") } returns 1
         every { tokenService.revokeByAccount("u1", "main") } just runs
         every { accountRepository.deleteById("mongo-id") } just runs
 
@@ -223,7 +222,8 @@ class SubAccountServiceTest {
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
-        verify(exactly = 1) { starWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { starStateRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { starRecoveryRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starLoadoutRepository.deleteAllByUserIdAndAccountId("u1", "main") }
 
         verify(exactly = 1) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
@@ -237,7 +237,6 @@ class SubAccountServiceTest {
         verify(exactly = 1) { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
-        verify(exactly = 1) { starInventoryRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
     }
