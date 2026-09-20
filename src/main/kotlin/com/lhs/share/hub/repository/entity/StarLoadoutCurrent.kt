@@ -27,6 +27,7 @@ data class StarLoadoutCurrent(
     val loadouts: List<StarOperatorLoadout> = emptyList(),
     val revision: Long = 1,
     val updatedAt: Instant = Instant.now(),
+    val generation: Long = 0,
 )
 
 data class StarOperatorLoadout(val operatorId: String, val slots: StarLoadoutSlots)

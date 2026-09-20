@@ -53,6 +53,7 @@ class OperatorServiceTest {
         catalogService,
         transactionTemplate,
         correctionRepository,
+        mockk<com.lhs.share.hub.service.star.StarStateService>(relaxed = true),
     )
 
     private fun catalog(spOf: String? = null) = OperatorCatalogEntity(

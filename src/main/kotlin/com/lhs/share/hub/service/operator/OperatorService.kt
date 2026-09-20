@@ -38,6 +38,7 @@ import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.normalized
+import com.lhs.share.hub.service.star.StarStateService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -58,6 +59,7 @@ class OperatorService(
     private val catalogService: OperatorCatalogService,
     private val transactionTemplate: TransactionTemplate,
     private val correctionRepository: OperatorCorrectionRecordRepository,
+    private val starStateService: StarStateService,
 ) {
     fun import(userId: String, request: OperatorImportRequest): OperatorImportResult = importInternal(userId, null, request)
 
@@ -108,6 +110,9 @@ class OperatorService(
                 recordRepository.save(item.toEntity(userId, request.producer, effect))
                 accepted++
                 if (effect == SUPERSEDED) superseded++
+            }
+            prepared.map { it.record.accountId }.distinct().forEach { accountId ->
+                starStateService.pruneForOperatorCurrentChange(userId, accountId)
             }
         }
         return OperatorImportResult(accepted, duplicates, superseded, warnings)
@@ -486,6 +491,7 @@ class OperatorService(
                 updatedAt = Instant.now(),
             ),
         )
+        starStateService.pruneForOperatorCurrentChange(userId, accountId)
     }
 
     private fun prepareCurrentPatch(
@@ -1124,6 +1130,7 @@ class OperatorService(
                 }
                 event.correction?.let(::applyCorrectionReplay)
             }
+            starStateService.pruneForOperatorCurrentChange(userId, accountId)
         }
     }
 

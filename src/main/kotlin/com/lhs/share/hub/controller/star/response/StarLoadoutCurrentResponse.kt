@@ -8,6 +8,7 @@ data class StarLoadoutCurrentResponse(
     val revision: Long,
     val loadouts: Map<String, Map<String, String?>>,
     val updatedAt: Instant?,
+    val generation: Long = 0,
 ) {
     companion object {
         fun empty(accountId: String) = StarLoadoutCurrentResponse(accountId, 0, emptyMap(), null)
@@ -17,6 +18,7 @@ data class StarLoadoutCurrentResponse(
             current.revision,
             current.loadouts.associate { it.operatorId to it.slots.asMap() },
             current.updatedAt,
+            current.generation,
         )
     }
 }
