@@ -15,6 +15,9 @@ data class StarLoadoutCurrentRequest(
     @field:Size(max = 500, message = "loadouts 数量不能超过 500")
     @field:JsonSetter(nulls = Nulls.FAIL)
     val loadouts: Map<String, Map<String, String?>>?,
+    @field:NotNull(message = "expected_generation 不能为空")
+    @field:JsonSetter(nulls = Nulls.FAIL)
+    val expectedGeneration: Long? = null,
 ) {
     @JsonAnySetter
     fun rejectUnknownField(name: String, value: Any?) {

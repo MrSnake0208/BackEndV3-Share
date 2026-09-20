@@ -70,6 +70,7 @@ class OperatorCurrentFoundationServiceTest {
         catalogService,
         transactionTemplate,
         correctionRepository,
+        mockk<com.lhs.share.hub.service.star.StarStateService>(relaxed = true),
     )
     private val mapper = jacksonObjectMapper()
     private lateinit var stored: OperatorCurrent

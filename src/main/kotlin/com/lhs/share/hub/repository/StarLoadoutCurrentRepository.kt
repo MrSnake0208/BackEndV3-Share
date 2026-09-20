@@ -17,10 +17,11 @@ interface StarLoadoutCurrentRepository : MongoRepository<StarLoadoutCurrent, Str
 }
 
 interface StarLoadoutCurrentRepositoryCustom {
-    fun replace(
+    fun replaceForGeneration(
         userId: String,
         accountId: String,
         expectedRevision: Long,
+        generation: Long,
         loadouts: List<StarOperatorLoadout>,
         now: Instant,
     ): StarLoadoutCurrent?
@@ -29,10 +30,11 @@ interface StarLoadoutCurrentRepositoryCustom {
 class StarLoadoutCurrentRepositoryImpl(
     @param:Qualifier("hubMongoTemplate") private val template: MongoTemplate,
 ) : StarLoadoutCurrentRepositoryCustom {
-    override fun replace(
+    override fun replaceForGeneration(
         userId: String,
         accountId: String,
         expectedRevision: Long,
+        generation: Long,
         loadouts: List<StarOperatorLoadout>,
         now: Instant,
     ): StarLoadoutCurrent? = template.findAndModify(
@@ -41,7 +43,7 @@ class StarLoadoutCurrentRepositoryImpl(
                 .and("accountId").`is`(accountId).and("revision").`is`(expectedRevision),
         ),
         Update().set("userId", userId).set("accountId", accountId).set("loadouts", loadouts)
-            .set("revision", expectedRevision + 1).set("updatedAt", now),
+            .set("generation", generation).set("revision", expectedRevision + 1).set("updatedAt", now),
         FindAndModifyOptions.options().upsert(expectedRevision == 0L).returnNew(true),
         StarLoadoutCurrent::class.java,
     )

@@ -174,6 +174,7 @@ class OperatorV3ImportServiceTest {
             catalogService,
             transactionTemplate,
             correctionRepository,
+            mockk<com.lhs.share.hub.service.star.StarStateService>(relaxed = true),
         )
         val realImportService = OperatorV3ImportService(
             mapper,
