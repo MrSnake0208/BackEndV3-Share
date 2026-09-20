@@ -1,7 +1,7 @@
 package com.lhs.share.hub.controller.star
 
 import com.lhs.share.config.doc.InventoryReadResponses
-import com.lhs.share.config.doc.InventoryWriteResponses
+import com.lhs.share.config.doc.StarLoadoutWriteResponses
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
@@ -36,7 +36,7 @@ class StarLoadoutController(
     )
 
     @Operation(summary = "整体替换当前星石佩戴", description = "一次 account 级 CAS 保存完整 loadouts；同一 instance 不能重复占用。")
-    @InventoryWriteResponses
+    @StarLoadoutWriteResponses
     @RequireJwt
     @PutMapping("/current", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun putCurrent(
