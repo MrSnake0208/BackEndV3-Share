@@ -153,9 +153,16 @@ fun isolatedSuite(taskName: String, tag: String) = tasks.register<Test>(taskName
     shouldRunAfter(tasks.test)
 }
 val integrationTest = isolatedSuite("integrationTest", "integration")
+val realisticTest = isolatedSuite("realisticTest", "realistic")
+val stressTest = isolatedSuite("stressTest", "stress").also { provider ->
+    provider.configure {
+        description = "Large disposable dataset: 2000 users x 2 accounts with inventory/operator/star history."
+        maxHeapSize = "2g"
+    }
+}
 val architectureTest = isolatedSuite("architectureTest", "architecture")
 val apiSchemaTest = isolatedSuite("apiSchemaTest", "api-schema")
-tasks.check { dependsOn(integrationTest, architectureTest, apiSchemaTest) }
+tasks.check { dependsOn(integrationTest, realisticTest, architectureTest, apiSchemaTest) }
 
 pitest {
     pitestVersion.set("1.19.6")
