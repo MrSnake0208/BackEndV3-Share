@@ -50,6 +50,7 @@ class FeedbackReportServiceTest {
     )
 
     init {
+        every { queryRepository.saveIfUnchanged(any(), any()) } answers { secondArg() }
         every { accessService.managerUserIds(any()) } returns emptySet()
     }
 
@@ -413,7 +414,8 @@ class FeedbackReportServiceTest {
         assertEquals(1, response.quota.pendingCount)
         assertTrue(response.quota.canAppend)
         verify {
-            ticketRepository.save(
+            queryRepository.saveIfUnchanged(
+                any(),
                 match {
                     it.lastMessageSender == "REPORTER" &&
                         !it.hasAdminReply &&
@@ -437,7 +439,8 @@ class FeedbackReportServiceTest {
 
         assertEquals("ADMIN", response.messages.last().senderKind)
         verify {
-            ticketRepository.save(
+            queryRepository.saveIfUnchanged(
+                any(),
                 match {
                     it.lastMessageSender == "ADMIN" &&
                         it.hasAdminReply &&
@@ -484,6 +487,7 @@ class FeedbackReportServiceTest {
         assertEquals(400, invalid.statusCode)
         assertEquals(400, ambiguous.statusCode)
         verify(exactly = 0) { ticketRepository.save(any()) }
+        verify(exactly = 0) { queryRepository.saveIfUnchanged(any(), any()) }
         verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -534,7 +538,8 @@ class FeedbackReportServiceTest {
         assertEquals("RESOLVED", response.status)
         assertNull(response.handler)
         verify {
-            ticketRepository.save(
+            queryRepository.saveIfUnchanged(
+                any(),
                 match {
                     it.status == "RESOLVED" && it.handlerUserId == null && it.handledAt == null
                 },
@@ -557,7 +562,8 @@ class FeedbackReportServiceTest {
         assertEquals("DISMISSED", response.status)
         assertEquals("user", response.handler?.id)
         verify {
-            ticketRepository.save(
+            queryRepository.saveIfUnchanged(
+                any(),
                 match {
                     it.status == "DISMISSED" && it.handlerUserId == "user" && it.handledAt != null
                 },
@@ -602,7 +608,8 @@ class FeedbackReportServiceTest {
         val resolved = ticket.copy(status = "RESOLVED")
         every { ticketRepository.findById("rpt_1") } returns Optional.of(resolved)
         service.updateStatus("admin", "rpt_1", FeedbackStatusUpdateRequest("RESOLVED", actorMode = "ADMIN"))
-        verify(exactly = 1) { ticketRepository.save(any()) }
+        verify(exactly = 1) { queryRepository.saveIfUnchanged(any(), any()) }
+        verify(exactly = 0) { ticketRepository.save(any()) }
         verify(exactly = 1) { notificationService.create(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -633,6 +640,7 @@ class FeedbackReportServiceTest {
         assertEquals(400, invalid.statusCode)
         assertEquals(400, ambiguous.statusCode)
         verify(exactly = 0) { ticketRepository.save(any()) }
+        verify(exactly = 0) { queryRepository.saveIfUnchanged(any(), any()) }
         verify(exactly = 0) { notificationService.create(any(), any(), any(), any(), any(), any()) }
     }
 

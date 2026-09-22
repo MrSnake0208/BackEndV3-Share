@@ -71,7 +71,7 @@ class FeedbackReportService(
         /** 允许的状态 */
         private val VALID_STATUSES = setOf("OPEN", "RESOLVED", "DISMISSED")
 
-        /** 每用户最多待处理工单数 */
+        /** 管理员回复前，提交人最多连续补充的消息数。 */
         private const val PENDING_LIMIT = 3
 
         /** 消息中最多附件数 */
@@ -389,7 +389,8 @@ class FeedbackReportService(
             adminReply = if (senderKind == "ADMIN") request.content.take(200) else ticket.adminReply,
         )
 
-        val saved = feedbackTicketRepository.save(updatedTicket)
+        val saved = feedbackTicketQueryRepository.saveIfUnchanged(ticket, updatedTicket)
+            ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已更新，请重新打开详情后重试")
         log.info { "反馈工单消息追加: ticketId=$ticketId, sender=$senderKind" }
 
         // 提交人追加后, 给有该模块管理权限的管理员逐个生成通知
@@ -469,7 +470,8 @@ class FeedbackReportService(
             updatedAt = now,
         )
 
-        val saved = feedbackTicketRepository.save(updatedTicket)
+        val saved = feedbackTicketQueryRepository.saveIfUnchanged(ticket, updatedTicket)
+            ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已更新，请重新打开详情后重试")
         log.info { "反馈工单状态更新: ticketId=$ticketId, ${ticket.status} → $newStatus, by=$currentUserId" }
 
         // 管理员改状态后, 给提交人生成通知 (状态有实际变化), 包括同账号场景
@@ -498,7 +500,8 @@ class FeedbackReportService(
     private fun lastReporterMessageBoundary(ticket: FeedbackTicket): ReporterMessageBoundary? {
         if (ticket.messages.any { message ->
                 message.senderKind.trim().uppercase() !in setOf("REPORTER", "ADMIN")
-            }) {
+            }
+        ) {
             return null
         }
         val entry = ticket.messages.withIndex()
@@ -572,20 +575,18 @@ class FeedbackReportService(
         return ticket
     }
 
-    private fun List<MediaAsset>.toMessageImages(): List<FeedbackMessageImage> =
-        filter { it.effectiveKind() == MediaKind.IMAGE }
-            .map { FeedbackMessageImage(id = checkNotNull(it.id), url = it.storagePath) }
+    private fun List<MediaAsset>.toMessageImages(): List<FeedbackMessageImage> = filter { it.effectiveKind() == MediaKind.IMAGE }
+        .map { FeedbackMessageImage(id = checkNotNull(it.id), url = it.storagePath) }
 
-    private fun List<MediaAsset>.toMessageFiles(): List<FeedbackMessageFile> =
-        filter { it.effectiveKind() == MediaKind.FILE }
-            .map {
-                FeedbackMessageFile(
-                    id = checkNotNull(it.id),
-                    name = it.originalName,
-                    mime = it.mime,
-                    size = it.size,
-                )
-            }
+    private fun List<MediaAsset>.toMessageFiles(): List<FeedbackMessageFile> = filter { it.effectiveKind() == MediaKind.FILE }
+        .map {
+            FeedbackMessageFile(
+                id = checkNotNull(it.id),
+                name = it.originalName,
+                mime = it.mime,
+                size = it.size,
+            )
+        }
 
     /**
      * 校验媒体 id 列表: 最多 3 个附件, 必须是当前用户自己的未删除媒体
