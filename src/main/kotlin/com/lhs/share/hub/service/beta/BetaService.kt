@@ -134,6 +134,7 @@ class BetaService(
             slotPool = entry?.slotPool, joinedAt = entry?.joinedAt, grantedAt = entry?.grantedAt,
             waitReason = if (isWaiting) status.publicState else null,
             nextAction = next, canUseBetaFeatures = canUse,
+            canResetLocalTest = localTestMode,
         )
     }
 
@@ -312,12 +313,31 @@ class BetaService(
 
     fun resetLocal(actor: String, reason: String): BetaAdminResponse = safely {
         authorization.requirePermission(actor, AdminPermission.BETA_MANAGE)
+        performLocalReset(actor, requireLocalResetReason(reason))
+        admin(actor)
+    }
+
+    /**
+     * Local test mode only. The isolated local campaign is a sandbox, so any activated tester
+     * account may wipe it and immediately re-test; the production campaign is never reachable here.
+     */
+    fun resetLocalSelf(userId: String): BetaMeResponse = safely {
+        requireActiveAccount(userId)
+        performLocalReset(userId, SELF_RESET_REASON)
+        me(userId)
+    }
+
+    private fun requireLocalResetReason(reason: String): String {
+        val normalized = reason.trim()
+        if (normalized.length !in 2..300) {
+            fail(HttpStatus.BAD_REQUEST, "beta_reason_required", "请填写 2～300 字的变更原因。")
+        }
+        return normalized
+    }
+
+    private fun performLocalReset(actor: String, reason: String) {
         if (!localTestMode) {
             fail(HttpStatus.NOT_FOUND, "beta_local_test_disabled", "当前后端未启用本地内测模式。")
-        }
-        val normalizedReason = reason.trim()
-        if (normalizedReason.length !in 2..300) {
-            fail(HttpStatus.BAD_REQUEST, "beta_reason_required", "请填写 2～300 字的变更原因。")
         }
         val now = clock.instant()
         checkNotNull(
@@ -346,14 +366,13 @@ class BetaService(
                         action = AdminAuditAction.BETA_UPDATED,
                         targetResource = "beta:${reset.id}",
                         before = auditSnapshot(before),
-                        after = auditSnapshot(reset, normalizedReason),
+                        after = auditSnapshot(reset, reason),
                         occurredAt = now,
                     ),
                 )
                 true
             },
         )
-        admin(actor)
     }
 
     private fun change(
@@ -508,5 +527,6 @@ class BetaService(
         const val LOCAL_CAMPAIGN_PREFIX = "yuanhub-beta-local"
         const val LOCAL_SNAPSHOT_ID = "local-all-active"
         val INTENT_TAGS = setOf("MAAYUAN_SYNC", "INVENTORY_REWARDS", "GROWTH_PLANNER", "BOX_SHARE", "MOBILE_VIEW")
+        const val SELF_RESET_REASON = "本地测试：账号自助重置"
     }
 }

@@ -43,6 +43,12 @@ class BetaController(private val service: BetaService, private val helper: Authe
     @Operation(summary = "取消候补", description = "只可取消WAITING，不回收ACTIVE；再次报名排到队尾")
     fun withdraw(): ResponseEntity<ApiResult<BetaMeResponse>> = reply(service.withdraw(helper.requireUserId()))
 
+    @RequireJwt
+    @PostMapping("/test-reset")
+    @AccessLimit(times = 10, second = 10)
+    @Operation(summary = "重置本地内测（自助）", description = "仅在本地测试模式生效；只清空隔离的本地活动并立即重新开放，不影响正式内测")
+    fun testReset(): ResponseEntity<ApiResult<BetaMeResponse>> = reply(service.resetLocalSelf(helper.requireUserId()))
+
     private fun <T> reply(data: T): ResponseEntity<ApiResult<T>> = ResponseEntity.ok()
         .cacheControl(CacheControl.noStore()).body(ApiResult.success(data))
 }
