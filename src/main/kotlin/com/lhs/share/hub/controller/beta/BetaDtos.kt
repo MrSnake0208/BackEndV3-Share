@@ -54,6 +54,8 @@ data class BetaMeResponse(
     val waitReason: String?,
     val nextAction: String,
     val canUseBetaFeatures: Boolean,
+    /** True only in local test mode, where the isolated local campaign may be self-reset. */
+    val canResetLocalTest: Boolean = false,
 )
 
 data class BetaAdminResponse(

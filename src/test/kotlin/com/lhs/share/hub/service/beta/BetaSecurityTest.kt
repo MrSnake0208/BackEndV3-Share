@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.beta
 
+import com.lhs.share.hub.controller.beta.BetaMeResponse
 import com.lhs.share.hub.controller.beta.BetaStatusResponse
 import com.lhs.share.hub.repository.entity.BetaMode
 import com.lhs.share.openapi.OpenApiTokenService
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -54,6 +56,7 @@ class BetaSecurityTest {
             .andExpect(jsonPath("$.data.access_mode").value("CLOSED"))
             .andExpect(jsonPath("$.data.reserved_initial").value(25))
         mvc.perform(get("/v1/beta/me")).andExpect(status().isUnauthorized)
+        mvc.perform(post("/v1/beta/test-reset")).andExpect(status().isUnauthorized)
         mvc.perform(get("/v1/accounts")).andExpect(status().isUnauthorized)
     }
 
@@ -79,5 +82,31 @@ class BetaSecurityTest {
         mvc.perform(get("/v1/inventory/current").param("account_id", "main").header("Authorization", "Bearer $token"))
             .andExpect(status().isServiceUnavailable)
             .andExpect(jsonPath("$.error.code").value("beta_temporarily_unavailable"))
+    }
+
+    @Test
+    fun `self-service local reset requires a JWT and reports the tester flag the service returns`() {
+        val token = jwt.issueAuthToken("tester", null, emptyList()).value
+        `when`(betaService.resetLocalSelf("tester")).thenReturn(
+            BetaMeResponse(
+                campaign = BetaStatusResponse(
+                    campaignId = "yuanhub-beta-local", accessMode = BetaMode.BETA, admissionsPaused = false,
+                    pauseReason = null, startsAt = Instant.EPOCH, reservedUntil = Instant.EPOCH.plusSeconds(72 * 3600),
+                    serverNow = Instant.now(), announcementTimezone = "Asia/Shanghai", snapshotAt = Instant.EPOCH,
+                    rulesVersion = "v1", initialCapacity = 100, capacity = 100, maxCapacity = 200, reservedInitial = 25,
+                    reservedRemaining = 25, grantedCount = 0, publicRemaining = 75, publicState = "OPEN_REGISTRATION",
+                    localTestMode = true,
+                ),
+                campaignId = "yuanhub-beta-local", accessMode = BetaMode.BETA, serverNow = Instant.now(),
+                enrollmentStatus = "NOT_JOINED", shareSnapshotEligible = true, slotPool = null, joinedAt = null,
+                grantedAt = null, waitReason = null, nextAction = "JOIN", canUseBetaFeatures = false,
+                canResetLocalTest = true,
+            ),
+        )
+        mvc.perform(post("/v1/beta/test-reset").header("Authorization", "Bearer $token"))
+            .andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.enrollment_status").value("NOT_JOINED"))
+            .andExpect(jsonPath("$.data.can_reset_local_test").value(true))
     }
 }

@@ -26,6 +26,8 @@ npm ci --prefix scripts/beta
 
 本地活动和正式 `yuanhub-beta-202609` 使用同一组 collection，但所有报名、资格和通知都按不同 `campaign_id` 隔离。管理页会显示醒目的 `LOCAL` 标识，并提供“重置本地内测”操作，用于清空本地活动的报名/资格后重新测试。重置不会删除正式快照或正式报名。
 
+本地模式下任何已登录账号也能在 `/beta` 页面自助重置：`/v1/beta/me` 返回 `can_reset_local_test`，前端据此显示“本地测试工具”，调用 `POST /v1/beta/test-reset` 复用同一套重置逻辑，不要求 `beta:manage`。非本地模式该接口返回 `beta_local_test_disabled`，正式活动不会因此被自助清空。管理页入口继续保留。
+
 普通 `./dev.sh`、未设置环境变量的后端以及生产环境仍默认使用正式活动且 `local-test-mode=false`。不要在生产部署设置 `YUANHUB_BETA_LOCAL_TEST=true`；后端还会要求本地模式的活动 ID 以 `yuanhub-beta-local` 开头，否则拒绝启动。
 
 切换普通开发模式与本地内测模式需要重启后端进程，因为 campaign ID 和本地模式是启动配置，不是网页开关。
