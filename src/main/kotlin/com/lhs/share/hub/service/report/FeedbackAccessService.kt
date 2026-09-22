@@ -49,6 +49,7 @@ class FeedbackAccessService(
 
     fun receiverUserIds(area: String): Set<String> = repository.findByReceiveAreasContaining(area)
         .map { it.userId }
+        .filter { userService.get(it)?.activated == true }
         .toSet()
 
     fun managerUserIds(area: String): Set<String> = authorizationService.managerUserIdsFor(area)

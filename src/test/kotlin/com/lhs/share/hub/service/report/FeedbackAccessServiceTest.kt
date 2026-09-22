@@ -66,6 +66,21 @@ class FeedbackAccessServiceTest {
     }
 
     @Test
+    fun `新反馈通知排除未激活和不存在用户且保留独立接收授权`() {
+        every { repository.findByReceiveAreasContaining(FeedbackArea.OPERATOR) } returns listOf(
+            FeedbackAccessGrant(userId = "receiver", receiveAreas = setOf(FeedbackArea.OPERATOR), updatedBy = "root"),
+            FeedbackAccessGrant(userId = "disabled", receiveAreas = setOf(FeedbackArea.OPERATOR), updatedBy = "root"),
+            FeedbackAccessGrant(userId = "missing", receiveAreas = setOf(FeedbackArea.OPERATOR), updatedBy = "root"),
+        )
+        every { userService.get("receiver") } returns MaaUserInfo("receiver", "接收者", activated = true)
+        every { userService.get("disabled") } returns MaaUserInfo("disabled", "未激活", activated = false)
+        every { userService.get("missing") } returns null
+
+        assertEquals(setOf("receiver"), service.receiverUserIds(FeedbackArea.OPERATOR))
+        verify(exactly = 0) { authorizationService.canManageFeedback(any(), any()) }
+    }
+
+    @Test
     fun `更新授权分别保存接收与管理模块`() {
         every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
         every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
