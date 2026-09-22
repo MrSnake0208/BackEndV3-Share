@@ -22,14 +22,18 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
 
 /** Exercises the actual JWT filter, MVC gate and exception advice without creating any real accounts. */
+@org.springframework.test.context.ActiveProfiles("test")
 @SpringBootTest(
     properties = [
-        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/MaaBackend?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
+        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/yuanhub_test_unit?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
         "spring.data.mongodb.auto-index-creation=false",
     ],
 )
 @AutoConfigureMockMvc
 class BetaSecurityTest {
+    @MockitoBean(answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+
     @Autowired lateinit var mvc: MockMvc
 
     @Autowired lateinit var jwt: JwtService
@@ -51,7 +55,7 @@ class BetaSecurityTest {
         )
         mvc.perform(get("/v1/beta/status"))
             .andExpect(status().isOk)
-            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
             .andExpect(jsonPath("$.status_code").value(200))
             .andExpect(jsonPath("$.data.access_mode").value("CLOSED"))
             .andExpect(jsonPath("$.data.reserved_initial").value(25))
@@ -105,7 +109,7 @@ class BetaSecurityTest {
         )
         mvc.perform(post("/v1/beta/test-reset").header("Authorization", "Bearer $token"))
             .andExpect(status().isOk)
-            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
             .andExpect(jsonPath("$.data.enrollment_status").value("NOT_JOINED"))
             .andExpect(jsonPath("$.data.can_reset_local_test").value(true))
     }

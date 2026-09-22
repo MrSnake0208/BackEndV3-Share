@@ -17,8 +17,8 @@ import com.lhs.share.hub.service.admin.AdminAuditService
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.notification.NotificationService
 import com.lhs.share.service.UserService
+import com.lhs.share.testinfra.TestMongo
 import com.mongodb.client.MongoClient
-import com.mongodb.client.MongoClients
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
@@ -43,14 +43,13 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
-import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** Opt in explicitly. Every test creates and drops ONLY a random beta_test_* database. */
-@EnabledIfEnvironmentVariable(named = "BETA_TEST_MONGO_URI", matches = ".+")
+@Tag("integration")
 class BetaQuotaMongoIntegrationTest {
     private lateinit var client: MongoClient
     private lateinit var mongo: MongoTemplate
@@ -67,8 +66,8 @@ class BetaQuotaMongoIntegrationTest {
 
     @BeforeEach
     fun setup() {
-        database = "beta_test_" + UUID.randomUUID().toString().replace("-", "")
-        client = MongoClients.create(System.getenv("BETA_TEST_MONGO_URI"))
+        database = TestMongo.database("beta")
+        client = TestMongo.client()
         val factory = SimpleMongoClientDatabaseFactory(client, database)
         mongo = MongoTemplate(factory)
         transactions = TransactionTemplate(MongoTransactionManager(factory))
@@ -93,7 +92,7 @@ class BetaQuotaMongoIntegrationTest {
             Index().on("campaignId", Sort.Direction.ASC).on("snapshotId", Sort.Direction.ASC).on("userId", Sort.Direction.ASC).unique(),
         )
         users = mockk()
-        every { users.get(any()) } answers { MaaUserInfo(firstArg(), "tester", activated = true) }
+        every { users.get(any()) } answers { com.lhs.share.fixtures.TestFixtures.user(firstArg()) }
         authorization = mockk(relaxed = true)
         val repositories = MongoRepositoryFactory(mongo)
         notifications = NotificationService(repositories.getRepository(NotificationRepository::class.java))
@@ -111,7 +110,7 @@ class BetaQuotaMongoIntegrationTest {
 
     @AfterEach
     fun cleanup() {
-        if (::mongo.isInitialized && ::database.isInitialized && database.startsWith("beta_test_")) mongo.db.drop()
+        if (::mongo.isInitialized && ::database.isInitialized && database.startsWith("beta_test_")) TestMongo.dropDatabase(client, database)
         if (::client.isInitialized) client.close()
     }
 

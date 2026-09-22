@@ -15,7 +15,7 @@ import com.lhs.share.hub.repository.entity.OperatorTrainingWorkspace
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.inventory.EntityCatalogService
-import com.mongodb.client.MongoClients
+import com.lhs.share.testinfra.TestMongo
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -23,24 +23,23 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory
 import org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments
 import org.springframework.transaction.support.TransactionTemplate
-import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 
 /** Uses a unique disposable database only; never connects a repository to the application's databases. */
-@EnabledIfEnvironmentVariable(named = "PLANNER_TEST_MONGO_URI", matches = ".+")
+@Tag("integration")
 class OperatorPlannerMongoTest {
-    private val database = "planner_test_${UUID.randomUUID().toString().replace("-", "")}"
-    private val client = MongoClients.create(System.getenv("PLANNER_TEST_MONGO_URI"))
+    private val database = TestMongo.database("operator")
+    private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val factory = MongoRepositoryFactory(template)
     private val accounts = factory.getRepository(SubAccountRepository::class.java)
@@ -76,7 +75,7 @@ class OperatorPlannerMongoTest {
 
     @AfterEach
     fun cleanup() {
-        client.getDatabase(database).drop()
+        TestMongo.dropDatabase(client, database)
         client.close()
     }
 

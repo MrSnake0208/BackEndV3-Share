@@ -2,34 +2,33 @@ package com.lhs.share.hub.service.inventory
 
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
-import com.mongodb.client.MongoClients
+import com.lhs.share.testinfra.TestMongo
 import io.mockk.mockk
 import org.bson.Document
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory
 import java.time.Instant
 import java.time.LocalDate
 import java.util.Date
-import java.util.UUID
 
-@EnabledIfEnvironmentVariable(named = "PLANNER_TEST_MONGO_URI", matches = ".+")
+@Tag("integration")
 class InventoryAcquiredSummaryMongoTest {
-    private val database = "planner_test_${UUID.randomUUID().toString().replace("-", "")}"
-    private val client = MongoClients.create(System.getenv("PLANNER_TEST_MONGO_URI"))
+    private val database = TestMongo.database("inventory")
+    private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val accounts = MongoRepositoryFactory(template).getRepository(SubAccountRepository::class.java)
     private val service = InventoryService(accounts, mockk(), mockk(), mockk(), template, mockk())
 
     @AfterEach
     fun cleanup() {
-        client.getDatabase(database).drop()
+        TestMongo.dropDatabase(client, database)
         client.close()
     }
 

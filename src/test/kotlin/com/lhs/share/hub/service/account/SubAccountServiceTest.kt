@@ -15,8 +15,8 @@ import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
-import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
+import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -239,5 +239,42 @@ class SubAccountServiceTest {
         verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
+    }
+
+    @Test
+    fun `empty and multi-account queries preserve identity without any repository write`() {
+        val scenario = com.lhs.share.fixtures.TestFixtures.multiAccountUser()
+        every { accountRepository.findAllByUserIdOrderByCreatedAtAsc(scenario.user.id) } returns scenario.accounts
+        every { accountRepository.findAllByUserIdOrderByCreatedAtAsc("empty-user") } returns emptyList()
+        assertEquals(emptyList<Any>(), service.list("empty-user"))
+        repeat(3) {
+            assertEquals(scenario.accounts.map { it.accountId }, service.list(scenario.user.id).map { it.id })
+        }
+        verify(exactly = 1) { accountRepository.findAllByUserIdOrderByCreatedAtAsc("empty-user") }
+        verify(exactly = 3) { accountRepository.findAllByUserIdOrderByCreatedAtAsc(scenario.user.id) }
+        io.mockk.confirmVerified(accountRepository)
+        io.mockk.verify { tokenService wasNot io.mockk.Called }
+    }
+
+    @Test
+    fun `requiring an existing canonical account is a pure owner-scoped read`() {
+        val account = com.lhs.share.fixtures.TestFixtures.account()
+        every { accountRepository.findByUserIdAndAccountId(account.userId, account.accountId) } returns account
+        repeat(3) { assertEquals(account, service.requireAccount(account.userId, account.accountId)) }
+        verify(exactly = 3) { accountRepository.findByUserIdAndAccountId(account.userId, account.accountId) }
+        io.mockk.confirmVerified(accountRepository)
+    }
+
+    @Test
+    fun `foreign account deletion cannot begin cascade or revoke the real owners tokens`() {
+        every { accountRepository.findByUserIdAndAccountId("intruder", "victim-account") } returns null
+        val error = assertThrows(InventoryApiException::class.java) { service.delete("intruder", "victim-account") }
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        verify(exactly = 1) { accountRepository.findByUserIdAndAccountId("intruder", "victim-account") }
+        io.mockk.confirmVerified(accountRepository)
+        io.mockk.verify { tokenService wasNot io.mockk.Called }
+        verify(exactly = 0) { starStateRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
 }

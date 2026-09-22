@@ -55,3 +55,10 @@ These documents are the authoritative inventory-domain specifications for this r
 - Cross-platform object identity uses the stable `(entity_type, id)` pair. Display names are not database or protocol identity keys.
 - Snapshot baseline rules determine whether a delayed reward changes current stock; historical rewards may remain valid for statistics without changing current stock.
 - Protocol behavior and field semantics must stay aligned with `exchange-protocol-v1.md` and its JSON Schema.
+
+
+## Local code-level test completion gate (2026-09-22)
+
+Before implementing a feature or bug fix, read `TESTING.md` at the YuanHub-All root and both `.trellis/spec/*/quality-guidelines.md`. Keep the active task's `test-plan.json` mapping changed sources to changed tests and business invariants. Bug fixes require actual red→green regression logs; do not only check source strings. New Trellis tasks automatically receive these guidelines in implement/check contexts and a test-plan scaffold. The scaffold itself is not coverage.
+
+Run root `./test quick` after edits and `./test smart --task .trellis/tasks/<task>` before completion; shared test infrastructure/release changes also require `./test all`. Mongo transaction/Redis semantics tests must use owned disposable containers, never existing development or production services. No unexplained missing tests, failed/skipped suites or stale results may be declared done. Actual Trellis `finish`/`archive` commands enforce fresh evidence before changing task state. Do not bypass this gate by directly changing task status or manufacturing reports. Preserve unrelated dirty files; explain them by exact path rather than resetting or including them in a commit.
