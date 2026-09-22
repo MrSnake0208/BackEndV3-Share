@@ -16,9 +16,10 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
 
+@org.springframework.test.context.ActiveProfiles("test")
 @SpringBootTest(
     properties = [
-        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/MaaBackend?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
+        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/yuanhub_test_unit?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
         "spring.data.mongodb.auto-index-creation=false",
     ],
 )

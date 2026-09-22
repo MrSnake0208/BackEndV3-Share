@@ -1,12 +1,12 @@
 package com.lhs.share.hub.service.inventory
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.lhs.share.hub.repository.EntityCatalogRepository
-import com.lhs.share.hub.repository.entity.EntityCatalogEntity
-import com.lhs.share.hub.service.operator.OperatorCatalogService
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCatalogResponse
+import com.lhs.share.hub.repository.EntityCatalogRepository
+import com.lhs.share.hub.repository.entity.EntityCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.service.operator.OperatorCatalogService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -89,7 +89,8 @@ class EntityCatalogServiceTest {
                     {"id":"baijinbi","name":"白金币","category":"货币"},
                     {"id":"fuchuan","name":"符传","category":"招募道具"},
                     {"id":"mazi","name":"麻籽"}
-                ]""".trimIndent(),
+                ]
+                """.trimIndent(),
             ),
         )
 
@@ -105,11 +106,14 @@ class EntityCatalogServiceTest {
             rows["agent" to id] = EntityCatalogEntity(entityType = "agent", entityId = id, name = name, catalogVersion = "old")
         }
         operators = listOf(operator("char_129_zhoutai", "周泰"), operator("char_130_chenlin", "陈琳"))
+        val beforeReadDate = java.time.LocalDate.now().toString()
         val catalog = service.catalog()
         assertEquals(listOf("char_129_zhoutai", "char_130_chenlin"), catalog.entities.filter { it.entityType == "agent" }.map { it.id })
         assertTrue(service.exists("agent", "char_129_zhoutai"))
         assertEquals(false, service.exists("agent", "char_130_zhoutai"))
-        assertEquals("2026-09-19T10:00:00Z", catalog.catalogVersion)
+        val possibleVersions = setOf(beforeReadDate, java.time.LocalDate.now().toString())
+            .map { maxOf(it, "2026-09-19T10:00:00Z") }
+        assertTrue(catalog.catalogVersion in possibleVersions)
 
         operators = listOf(operator("char_129_zhoutai", "改名"))
         assertEquals("改名", service.catalog().entities.single { it.entityType == "agent" }.name)

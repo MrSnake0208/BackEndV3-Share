@@ -22,14 +22,27 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
  * 业务状态码在响应体 status_code(前端 request.js 亦以 status_code 判定)。
  * 仅测 400 分支(校验失败不触达服务层,不写库,不污染共享 Mongo)。
  */
+@org.springframework.test.context.ActiveProfiles("test")
 @SpringBootTest(
     properties = [
-        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/MaaBackend?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
+        "spring.data.mongodb.uri=mongodb://127.0.0.1:1/yuanhub_test_unit?serverSelectionTimeoutMS=50&connectTimeoutMS=50",
         "spring.data.mongodb.auto-index-creation=false",
     ],
 )
 @AutoConfigureMockMvc
 class LedgerPlanMvcValidationTest {
+    // Parameter validation must reach MVC without using any real rate-limit Redis.
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    lateinit var plans: LedgerPlanService
+
+    @org.junit.jupiter.api.AfterEach
+    fun invalidRequestsNeverReachTheWriteService() {
+        org.mockito.Mockito.verifyNoInteractions(plans)
+    }
+
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
 
