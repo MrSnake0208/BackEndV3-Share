@@ -24,6 +24,9 @@ import java.time.Instant
 )
 @AutoConfigureMockMvc
 class OperatorShareSecurityTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
+
     @Autowired
     lateinit var mockMvc: MockMvc
 

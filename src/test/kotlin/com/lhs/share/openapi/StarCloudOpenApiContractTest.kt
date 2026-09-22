@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.config.doc.SpringDocConfig
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.config.security.AuthenticationHelper
-import com.lhs.share.hub.controller.star.StarStateController
 import com.lhs.share.hub.controller.star.StarLoadoutController
 import com.lhs.share.hub.controller.star.StarLoadoutPresetController
-import com.lhs.share.hub.service.star.StarStateService
-import com.lhs.share.hub.service.star.StarLoadoutService
+import com.lhs.share.hub.controller.star.StarStateController
 import com.lhs.share.hub.service.star.StarLoadoutPresetService
+import com.lhs.share.hub.service.star.StarLoadoutService
+import com.lhs.share.hub.service.star.StarStateService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtService
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -42,6 +42,9 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 )
 @TestPropertySource(properties = ["share.info.public-base-url=https://star.example.test"])
 class StarCloudOpenApiContractTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
+
     @Autowired
     lateinit var mockMvc: MockMvc
 
@@ -84,7 +87,9 @@ class StarCloudOpenApiContractTest {
         assertTrue(root.at("/paths/~1v1~1star-state~1recovery-points/get/responses").has("200"))
         assertTrue(root.at("/paths/~1v1~1star-state~1recovery-points~1{pointId}~1restore/post/responses").has("409"))
         assertTrue(root.at("/paths/~1v1~1star-state~1rebuild/post/responses/409/description").asText().contains("star_generation_changed"))
-        assertTrue(root.at("/paths/~1v1~1star-state~1rebuild/post/responses/422/description").asText().contains("star_state_invalid_snapshot"))
+        assertTrue(
+            root.at("/paths/~1v1~1star-state~1rebuild/post/responses/422/description").asText().contains("star_state_invalid_snapshot"),
+        )
         assertTrue(root.at("/paths/~1v1~1star-loadout~1current/put/responses/409/description").asText().contains("star_generation_changed"))
 
         val presetResponses = root.at("/paths/~1v1~1star-loadout-presets~1current/put/responses")

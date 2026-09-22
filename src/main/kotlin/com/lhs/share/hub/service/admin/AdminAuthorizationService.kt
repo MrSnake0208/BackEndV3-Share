@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 
 enum class AdminPermission(val value: String) {
+    BETA_MANAGE("beta:manage"),
     OPERATOR_CATALOG_WRITE("operator_catalog:write"),
     LEVEL_CATALOG_WRITE("level_catalog:write"),
     CHANGELOG_WRITE("changelog:write"),
@@ -36,6 +37,7 @@ class AdminAuthorizationService(
         val roles = rolesFor(userId)
         if (AdminRole.SUPER_ADMIN in roles) return true
         return when (permission) {
+            AdminPermission.BETA_MANAGE,
             AdminPermission.OPERATOR_CATALOG_WRITE,
             AdminPermission.LEVEL_CATALOG_WRITE,
             -> AdminRole.PLATFORM_ADMIN in roles

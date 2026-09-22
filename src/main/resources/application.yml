@@ -59,6 +59,10 @@ share:
   cache:
     # 缓存默认过期时间,单位秒
     default-expire: 60
+  beta:
+    # 正式环境默认使用正式活动；本地隔离测试必须显式通过环境变量开启。
+    campaign-id: ${YUANHUB_BETA_CAMPAIGN_ID:yuanhub-beta-202609}
+    local-test-mode: ${YUANHUB_BETA_LOCAL_TEST:false}
   vcode:
     # 验证码失效时间,单位秒
     expire: 600

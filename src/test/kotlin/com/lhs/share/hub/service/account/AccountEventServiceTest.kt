@@ -11,7 +11,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 class AccountEventServiceTest {
-    private val service = AccountEventService()
+    private val service = AccountEventService(io.mockk.mockk(relaxed = true))
 
     @Test
     fun `events are delivered only to the matching user and account`() {

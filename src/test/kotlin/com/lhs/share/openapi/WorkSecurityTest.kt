@@ -24,6 +24,9 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 )
 @AutoConfigureMockMvc
 class WorkSecurityTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
+
     @Autowired
     lateinit var mockMvc: MockMvc
 
