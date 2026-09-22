@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.account
 
+import com.lhs.share.hub.service.beta.BetaService
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronization
@@ -10,12 +11,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
 @Service
-class AccountEventService {
+class AccountEventService(private val beta: BetaService) {
     private val subscribers = ConcurrentHashMap<SubscriberKey, CopyOnWriteArraySet<SseEmitter>>()
 
     fun subscribe(userId: String, accountId: String): SseEmitter = register(userId, accountId, SseEmitter(0L))
 
     internal fun register(userId: String, accountId: String, emitter: SseEmitter): SseEmitter {
+        beta.requireAccess(userId)
         val key = SubscriberKey(userId, accountId)
         subscribers.computeIfAbsent(key) { CopyOnWriteArraySet() }.add(emitter)
         emitter.onCompletion { remove(key, emitter) }
@@ -31,6 +33,7 @@ class AccountEventService {
 
     fun publish(userId: String, accountId: String, eventName: String, eventId: String, data: Any) {
         val key = SubscriberKey(userId, accountId)
+        if (subscribers.containsKey(key) && !authorize(key)) return
         subscribers[key]?.forEach { emitter ->
             try {
                 emitter.send(SseEmitter.event().id(eventId).name(eventName).data(data))
@@ -55,6 +58,7 @@ class AccountEventService {
     @Scheduled(fixedDelay = 15_000)
     fun keepAlive() {
         subscribers.forEach { (key, emitters) ->
+            if (!authorize(key)) return@forEach
             emitters.forEach { emitter ->
                 try {
                     emitter.send(SseEmitter.event().comment("keepalive"))
@@ -63,6 +67,14 @@ class AccountEventService {
                 }
             }
         }
+    }
+
+    private fun authorize(key: SubscriberKey): Boolean = try {
+        beta.requireAccess(key.userId)
+        true
+    } catch (_: Exception) {
+        subscribers.remove(key)?.forEach { emitter -> runCatching { emitter.complete() } }
+        false
     }
 
     private fun remove(key: SubscriberKey, emitter: SseEmitter) {

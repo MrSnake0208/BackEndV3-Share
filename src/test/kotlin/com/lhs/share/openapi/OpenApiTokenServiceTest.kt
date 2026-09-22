@@ -24,7 +24,7 @@ class OpenApiTokenServiceTest {
     private val tokenRepository = mockk<OpenApiTokenRepository>()
     private val accountRepository = mockk<SubAccountRepository>()
     private val redisCache = mockk<RedisCache>(relaxed = true)
-    private val service = OpenApiTokenService(tokenRepository, accountRepository, redisCache)
+    private val service = OpenApiTokenService(tokenRepository, accountRepository, redisCache, mockk(relaxed = true))
 
     private fun entity(
         id: String = "token-id",

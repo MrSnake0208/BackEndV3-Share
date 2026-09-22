@@ -5,6 +5,7 @@ import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
 enum class AdminAuditAction {
+    BETA_UPDATED,
     ROLE_GRANTED,
     ROLE_REVOKED,
     ROLE_REPLACED,
@@ -16,6 +17,7 @@ enum class AdminAuditAction {
 }
 
 data class AdminAuditSnapshot(
+    val beta: Map<String, String>? = null,
     val roles: Set<String>? = null,
     val receiveAreas: Set<String>? = null,
     val manageAreas: Set<String>? = null,

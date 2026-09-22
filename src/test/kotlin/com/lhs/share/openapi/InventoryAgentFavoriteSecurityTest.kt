@@ -26,6 +26,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 )
 @AutoConfigureMockMvc
 class InventoryAgentFavoriteSecurityTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
+
     @Autowired
     lateinit var mockMvc: MockMvc
 

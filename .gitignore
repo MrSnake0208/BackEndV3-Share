@@ -20,3 +20,5 @@ application-prod.yml
 .env
 .agent-teams
 data/private-media
+# Local-only beta preparation dependencies; keep UID exports outside the repository.
+/scripts/beta/node_modules/

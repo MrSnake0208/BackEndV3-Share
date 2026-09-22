@@ -4,6 +4,7 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.repository.OpenApiTokenRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
+import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.repository.RedisCache
 import org.springframework.http.HttpStatus
@@ -22,6 +23,7 @@ class OpenApiTokenService(
     private val tokenRepository: OpenApiTokenRepository,
     private val accountRepository: SubAccountRepository,
     private val redisCache: RedisCache,
+    private val beta: BetaService,
 ) {
     /**
      * 生成绑定统一子账号的第三方 API Token(每账号上限 [MAX_TOKENS_PER_ACCOUNT] 个)。
@@ -29,6 +31,7 @@ class OpenApiTokenService(
      */
     fun generate(userId: String, accountId: String, scopes: List<String>, remark: String?): OpenApiTokenCreatedResponse {
         val permissions = parseScopes(scopes)
+        beta.requireAccess(userId)
         val accountName = accountRepository.findByUserIdAndAccountId(userId, accountId)?.name
             ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "子账号不存在")
         if (tokenRepository.countByUserIdAndAccountId(userId, accountId) >= MAX_TOKENS_PER_ACCOUNT) {
@@ -104,6 +107,7 @@ class OpenApiTokenService(
             if (requiredCode != null && !cached.scope.contains(requiredCode)) {
                 throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
             }
+            beta.requireAccess(cached.userId)
             return OpenApiPrincipal(cached.userId, cached.accountId)
         }
 
@@ -113,6 +117,7 @@ class OpenApiTokenService(
         if (requiredCode != null && !entity.scope.contains(requiredCode)) {
             throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
         }
+        beta.requireAccess(entity.userId)
         return OpenApiPrincipal(entity.userId, entity.accountId)
     }
 
@@ -130,6 +135,7 @@ class OpenApiTokenService(
      * 完整替换 token 权限。Token 明文及除 scope 外的持久化字段保持不变。
      */
     fun updateScopes(userId: String, tokenId: String, scopes: List<String>): OpenApiTokenListItemDto {
+        beta.requireAccess(userId)
         val permissions = parseScopes(scopes)
         val entity = tokenRepository.findByIdAndUserId(tokenId, userId)
             ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
