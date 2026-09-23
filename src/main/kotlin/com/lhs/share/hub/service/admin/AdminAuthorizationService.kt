@@ -33,6 +33,14 @@ class AdminAuthorizationService(
 
     fun hasRole(userId: String, role: AdminRole): Boolean = role in rolesFor(userId)
 
+    /** Matches the frontend's management-capability semantics: admin roles or feedback manage grants. */
+    fun hasAnyAdminCapability(userId: String): Boolean {
+        if (userService.get(userId)?.activated != true) return false
+        val roles = roleRepository.findById(userId).orElse(null)?.roles.orEmpty()
+        if (roles.isNotEmpty()) return true
+        return feedbackAccessRepository.findById(userId).orElse(null)?.manageAreas.orEmpty().isNotEmpty()
+    }
+
     fun hasPermission(userId: String, permission: AdminPermission): Boolean {
         val roles = rolesFor(userId)
         if (AdminRole.SUPER_ADMIN in roles) return true

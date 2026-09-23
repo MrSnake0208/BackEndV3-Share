@@ -87,6 +87,33 @@ class BetaService(
         }
     }
 
+    private fun detachAdminFromBetaQuota(userId: String) {
+        val existing = enrollment(userId) ?: return
+        if (existing.status !in setOf(BetaEnrollmentStatus.WAITING, BetaEnrollmentStatus.ACTIVE)) return
+        if (current()?.ready() != true) return
+        try {
+            val changed = mutate { c, now ->
+                val entry = enrollment(userId) ?: return@mutate false
+                if (entry.status == BetaEnrollmentStatus.WITHDRAWN) return@mutate false
+                if (entry.status == BetaEnrollmentStatus.ACTIVE) {
+                    c.grantedCount -= 1
+                    if (entry.slotPool == BetaSlotPool.SHARE_RESERVED) {
+                        c.reservedGrantedCount -= 1
+                        if (now < c.reservedUntil) c.reservedRemaining += 1 else c.releasedCount += 1
+                    }
+                }
+                entry.status = BetaEnrollmentStatus.WITHDRAWN
+                entry.withdrawnAt = now
+                entry.withdrawReason = "ADMIN_BYPASS"
+                mongo.save(entry)
+                true
+            }
+            if (changed) allocate("ADMIN_BYPASS")
+        } catch (e: Exception) {
+            log.warn { "failed to detach admin from beta quota: ${e.javaClass.simpleName}" }
+        }
+    }
+
     fun status(): BetaStatusResponse = safely { statusOf(campaignOrClosed(), clock.instant()) }
 
     private fun statusOf(c: BetaCampaign, now: Instant): BetaStatusResponse {
@@ -114,12 +141,17 @@ class BetaService(
 
     fun me(userId: String): BetaMeResponse = safely {
         requireActiveAccount(userId)
+        val adminBypass = authorization.hasAnyAdminCapability(userId)
+        if (adminBypass) detachAdminFromBetaQuota(userId)
         val c = campaignOrClosed()
         val now = clock.instant()
-        val entry = enrollment(userId)
+        val entry = if (adminBypass) null else enrollment(userId)
         val status = statusOf(c, now)
-        val canUse = c.accessMode == BetaMode.OPEN ||
-            (c.accessMode == BetaMode.BETA && c.ready() && now >= c.startsAt && entry?.status == BetaEnrollmentStatus.ACTIVE)
+        val canUseDuringBeta = c.accessMode == BetaMode.BETA &&
+            c.ready() &&
+            now >= c.startsAt &&
+            entry?.status == BetaEnrollmentStatus.ACTIVE
+        val canUse = adminBypass || c.accessMode == BetaMode.OPEN || canUseDuringBeta
         val isWaiting = entry?.status == BetaEnrollmentStatus.WAITING
         val next = when {
             canUse -> "ENTER"
@@ -130,7 +162,7 @@ class BetaService(
         BetaMeResponse(
             campaign = status, campaignId = c.id, accessMode = c.accessMode, serverNow = now,
             enrollmentStatus = entry?.status?.name ?: "NOT_JOINED",
-            shareSnapshotEligible = entry?.shareSnapshotEligible ?: eligible(c, userId),
+            shareSnapshotEligible = if (adminBypass) false else entry?.shareSnapshotEligible ?: eligible(c, userId),
             slotPool = entry?.slotPool, joinedAt = entry?.joinedAt, grantedAt = entry?.grantedAt,
             waitReason = if (isWaiting) status.publicState else null,
             nextAction = next, canUseBetaFeatures = canUse,
@@ -141,6 +173,10 @@ class BetaService(
     /** Called afresh for JWT requests and BOTH OpenAPI token authentication branches. */
     fun requireAccess(userId: String) = safely {
         requireActiveAccount(userId)
+        if (authorization.hasAnyAdminCapability(userId)) {
+            detachAdminFromBetaQuota(userId)
+            return@safely
+        }
         val c = campaignOrClosed()
         if (c.accessMode == BetaMode.OPEN) return@safely
         if (c.accessMode != BetaMode.BETA || !c.ready() || clock.instant() < c.startsAt) {
@@ -153,6 +189,10 @@ class BetaService(
 
     fun join(userId: String, request: BetaJoinRequest): BetaMeResponse = safely {
         requireActiveAccount(userId)
+        if (authorization.hasAnyAdminCapability(userId)) {
+            detachAdminFromBetaQuota(userId)
+            return@safely me(userId)
+        }
         if (!request.acceptedTerms || !request.acceptWaitlist) {
             fail(HttpStatus.BAD_REQUEST, "beta_terms_required", "请确认测试须知及满额后自动候补。")
         }
@@ -199,6 +239,10 @@ class BetaService(
 
     fun withdraw(userId: String): BetaMeResponse = safely {
         requireActiveAccount(userId)
+        if (authorization.hasAnyAdminCapability(userId)) {
+            detachAdminFromBetaQuota(userId)
+            return@safely me(userId)
+        }
         mutate { _, now ->
             val entry = enrollment(userId) ?: return@mutate
             if (entry.status == BetaEnrollmentStatus.ACTIVE) {
@@ -242,6 +286,13 @@ class BetaService(
                     candidate.status = BetaEnrollmentStatus.WITHDRAWN
                     candidate.withdrawnAt = now
                     candidate.withdrawReason = "ACCOUNT_UNAVAILABLE"
+                    mongo.save(candidate)
+                    return@mutate true
+                }
+                if (authorization.hasAnyAdminCapability(candidate.userId)) {
+                    candidate.status = BetaEnrollmentStatus.WITHDRAWN
+                    candidate.withdrawnAt = now
+                    candidate.withdrawReason = "ADMIN_BYPASS"
                     mongo.save(candidate)
                     return@mutate true
                 }
