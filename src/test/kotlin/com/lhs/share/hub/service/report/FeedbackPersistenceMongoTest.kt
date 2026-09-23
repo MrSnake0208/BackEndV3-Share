@@ -101,6 +101,14 @@ class FeedbackPersistenceMongoTest {
     }
 
     @Test
+    fun `all-area management scope returns tickets when type filter is absent`() {
+        mongo.insert(ticket("bug"))
+        mongo.insert(ticket("feature").copy(type = "FEATURE", category = "INVENTORY", area = "INVENTORY"))
+
+        assertEquals(setOf("bug", "feature"), ids(FeedbackArea.all))
+    }
+
+    @Test
     fun `simultaneous reporter supplements do not silently overwrite each other or exceed quota`() {
         val initial = ticket("parallel").let { value ->
             value.copy(messages = value.messages + (1..2).map { message("pending_$it") })

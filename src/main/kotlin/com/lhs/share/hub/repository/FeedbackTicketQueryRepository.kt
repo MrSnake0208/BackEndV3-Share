@@ -30,7 +30,9 @@ class FeedbackTicketQueryRepository(
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>()
         reporterUserId?.let { filters += Criteria.where("reporterUserId").`is`(it) }
-        manageableCategories?.let { filters += categorySetCriteria(it) }
+        manageableCategories
+            ?.takeUnless { it == FeedbackArea.all }
+            ?.let { filters += categorySetCriteria(it) }
         status?.let { filters += Criteria.where("status").`is`(it) }
         type?.let { filters += typeCriteria(it) }
         category?.let { filters += categorySetCriteria(setOf(it)) }
