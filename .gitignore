@@ -22,3 +22,4 @@ application-prod.yml
 data/private-media
 # Local-only beta preparation dependencies; keep UID exports outside the repository.
 /scripts/beta/node_modules/
+data/media
