@@ -83,6 +83,34 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
+    fun `任何管理角色或反馈管理授权都视为管理员能力`() {
+        activeUser("platform")
+        activeUser("feedback-manager")
+        activeUser("receiver")
+        every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))
+        every { roleRepository.findById("feedback-manager") } returns Optional.empty()
+        every { roleRepository.findById("receiver") } returns Optional.empty()
+        every { feedbackRepository.findById("feedback-manager") } returns Optional.of(
+            FeedbackAccessGrant(
+                userId = "feedback-manager",
+                manageAreas = setOf(FeedbackArea.INVENTORY),
+                updatedBy = "root",
+            ),
+        )
+        every { feedbackRepository.findById("receiver") } returns Optional.of(
+            FeedbackAccessGrant(
+                userId = "receiver",
+                receiveAreas = setOf(FeedbackArea.INVENTORY),
+                updatedBy = "root",
+            ),
+        )
+
+        assertTrue(service.hasAnyAdminCapability("platform"))
+        assertTrue(service.hasAnyAdminCapability("feedback-manager"))
+        assertFalse(service.hasAnyAdminCapability("receiver"))
+    }
+
+    @Test
     fun `receiveAreas 只接收通知不能读取工单`() {
         activeUser("receiver")
         every { roleRepository.findById("receiver") } returns Optional.empty()
