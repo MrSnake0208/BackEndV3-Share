@@ -114,8 +114,8 @@ class BetaQuotaMongoIntegrationTest {
         if (::client.isInitialized) client.close()
     }
 
-    private fun newService(notificationService: NotificationService): BetaService =
-        BetaService(mongo, transactions, users, notificationService, authorization, audit, time, id)
+    private fun newService(notificationService: NotificationService, capacityHardLimit: Int = 100_000): BetaService =
+        BetaService(mongo, transactions, users, notificationService, authorization, audit, time, id, false, capacityHardLimit)
 
     private fun campaign(): BetaCampaign = checkNotNull(mongo.findById(id, BetaCampaign::class.java))
     private fun addShare(vararg ids: String) {
@@ -228,19 +228,44 @@ class BetaQuotaMongoIntegrationTest {
     }
 
     @Test
-    fun `expand to 150 and 200 with absolute values preserves initial reservation and FIFO`() {
+    fun `custom absolute expansion 100 to 2000 preserves initial reservation and FIFO`() {
         fillPublic()
         repeat(8) { service.join("queued-$it", request) }
-        service.setCapacity("admin", 150, "expand testing", version())
+        service.setCapacity("admin", 120, "first expansion", version())
         assertCounts(83, 25)
         repeat(8) { assertEquals(BetaEnrollmentStatus.ACTIVE, entry("queued-$it").status) }
         assertEquals(25, campaign().reservedInitial)
-        service.setCapacity("admin", 150, "idempotent target", version())
-        assertEquals(150, campaign().capacity)
-        service.setCapacity("admin", 200, "final expansion", version())
-        assertEquals(200, campaign().capacity)
-        assertThrows(BetaApiException::class.java) { service.setCapacity("admin", 201, "invalid limit", version()) }
-        assertThrows(BetaApiException::class.java) { service.setCapacity("admin", 100, "invalid shrink", version()) }
+        service.setCapacity("admin", 120, "idempotent target", version())
+        assertEquals(120, campaign().capacity)
+        service.setCapacity("admin", 237, "second expansion", version())
+        assertEquals(237, campaign().capacity)
+        service.setCapacity("admin", 1000, "third expansion", version())
+        assertEquals(1000, campaign().capacity)
+        // Growth never re-derives the Share reservation: it stays at the frozen initial 25.
+        assertEquals(25, campaign().reservedInitial)
+        assertEquals(25, campaign().reservedRemaining)
+        service.setCapacity("admin", 2000, "fourth expansion", version())
+        assertEquals(2000, campaign().capacity)
+        assertThrows(BetaApiException::class.java) { service.setCapacity("admin", 800, "invalid shrink", version()) }
+        assertThrows(BetaApiException::class.java) { service.setCapacity("admin", 100_001, "over system hard limit", version()) }
+    }
+
+    @Test
+    fun `legacy campaign storing a removed maxCapacity field can expand far beyond it`() {
+        fillPublic()
+        // Deployments created before the capacity change still have `maxCapacity: 200` in Mongo.
+        val collection = mongo.getCollection("hub_beta_campaign")
+        collection.updateOne(
+            org.bson.Document("_id", id),
+            org.bson.Document("$" + "set", org.bson.Document("maxCapacity", 200)),
+        )
+        assertEquals(200, (checkNotNull(collection.find(org.bson.Document("_id", id)).first())["maxCapacity"] as Number).toInt())
+        service.setCapacity("admin", 1000, "legacy field must not block growth", version())
+        assertEquals(1000, campaign().capacity)
+        val raw = checkNotNull(collection.find(org.bson.Document("_id", id)).first())
+        assertEquals(1000, (raw["capacity"] as Number).toInt())
+        // The unmapped legacy field is dropped by the next runtime write, so it can never resurface.
+        assertFalse(raw.containsKey("maxCapacity"))
     }
 
     @Test

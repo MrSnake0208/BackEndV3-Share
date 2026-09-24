@@ -9,7 +9,7 @@ function config() {
   return {
     campaign_id: 'beta-test', snapshot_id: 'frozen-v1', starts_at: new Date(now.getTime() + 86_400_000).toISOString(),
     snapshot_at: new Date(now.getTime() - 86_400_000).toISOString(), snapshot_source_note: 'isolated synthetic Share export',
-    announcement_timezone: 'Asia/Shanghai', initial_capacity: 100, max_capacity: 200, rules_version: 'v1'
+    announcement_timezone: 'Asia/Shanghai', initial_capacity: 100, rules_version: 'v1'
   }
 }
 test('preparation validates explicit timezones, share cohort input and immutable initial ratio', () => {
@@ -20,7 +20,11 @@ test('preparation validates explicit timezones, share cohort input and immutable
   assert.throws(() => validateInput({ ...config(), starts_at: '2026-10-01T20:00:00' }, 'alpha'), /timezone/)
   assert.throws(() => validateInput({ ...config(), snapshot_source_note: '' }, 'alpha'), /required/)
   assert.throws(() => validateInput({ ...config(), initial_capacity: 101 }, 'alpha'), /divisible/)
-  assert.throws(() => validateInput({ ...config(), max_capacity: 201 }, 'alpha'), /200/)
+  assert.throws(() => validateInput({ ...config(), initial_capacity: 201 }, 'alpha'), /100\.\.200/)
+  assert.equal(validateInput({ ...config(), initial_capacity: 200 }, 'alpha').reservedInitial, 50)
+  // The removed `max_capacity` key no longer exists: stale config files are accepted and ignored,
+  // and later growth is decided by the admin API, never by this initial-preparation ceiling.
+  assert.equal(validateInput({ ...config(), max_capacity: 500 }, 'alpha').maxCapacity, undefined)
   assert.throws(() => validateInput(config(), 'uid password'), /opaque UID/)
   assert.throws(() => validateInput({ ...config(), announcement_timezone: 'Fake/Zone' }, 'alpha'), PreparationError)
 })

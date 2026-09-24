@@ -49,7 +49,7 @@ class BetaSecurityTest {
                 campaignId = "test", accessMode = BetaMode.CLOSED, admissionsPaused = true, pauseReason = null,
                 startsAt = Instant.EPOCH, reservedUntil = Instant.EPOCH.plusSeconds(72 * 3600), serverNow = Instant.now(),
                 announcementTimezone = "Asia/Shanghai", snapshotAt = null, rulesVersion = "v1", initialCapacity = 100,
-                capacity = 100, maxCapacity = 200, reservedInitial = 25, reservedRemaining = 0, grantedCount = 0,
+                capacity = 100, reservedInitial = 25, reservedRemaining = 0, grantedCount = 0,
                 publicRemaining = 100, publicState = "CLOSED",
             ),
         )
@@ -97,7 +97,7 @@ class BetaSecurityTest {
                     campaignId = "yuanhub-beta-local", accessMode = BetaMode.BETA, admissionsPaused = false,
                     pauseReason = null, startsAt = Instant.EPOCH, reservedUntil = Instant.EPOCH.plusSeconds(72 * 3600),
                     serverNow = Instant.now(), announcementTimezone = "Asia/Shanghai", snapshotAt = Instant.EPOCH,
-                    rulesVersion = "v1", initialCapacity = 100, capacity = 100, maxCapacity = 200, reservedInitial = 25,
+                    rulesVersion = "v1", initialCapacity = 100, capacity = 100, reservedInitial = 25,
                     reservedRemaining = 25, grantedCount = 0, publicRemaining = 75, publicState = "OPEN_REGISTRATION",
                     localTestMode = true,
                 ),

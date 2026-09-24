@@ -53,6 +53,8 @@ class BetaService(
     @param:Qualifier("betaClock") private val clock: Clock,
     @param:Value("\${share.beta.campaign-id:yuanhub-beta-202609}") val campaignId: String,
     @param:Value("\${share.beta.local-test-mode:false}") val localTestMode: Boolean = false,
+    /** Operator-facing system safety limit, not a per-campaign product ceiling. */
+    @param:Value("\${share.beta.capacity-hard-limit:100000}") val capacityHardLimit: Int = 100_000,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -133,7 +135,8 @@ class BetaService(
             pauseReason = c.pauseReason, startsAt = c.startsAt, reservedUntil = c.reservedUntil,
             serverNow = now, announcementTimezone = c.announcementTimezone, snapshotAt = c.snapshotAt,
             rulesVersion = c.rulesVersion, initialCapacity = c.initialCapacity, capacity = c.capacity,
-            maxCapacity = c.maxCapacity, reservedInitial = c.reservedInitial,
+            maxCapacity = capacityHardLimit,
+            reservedInitial = c.reservedInitial,
             reservedRemaining = c.effectiveReserved(now), grantedCount = c.grantedCount,
             publicRemaining = remaining, publicState = state, localTestMode = localTestMode,
         )
@@ -330,6 +333,7 @@ class BetaService(
         val c = existing ?: BetaCampaign(campaignId)
         BetaAdminResponse(
             campaign = statusOf(c, clock.instant()), configured = existing != null, configVersion = c.configVersion,
+            capacityHardLimit = capacityHardLimit,
             reservedGrantedCount = c.reservedGrantedCount, publicGrantedCount = c.grantedCount - c.reservedGrantedCount,
             releasedCount = c.releasedCount, releasedAt = c.releasedAt,
             waitingCount = mongo.count(waiting(), BetaEnrollment::class.java), snapshotId = c.snapshotId,
@@ -347,8 +351,11 @@ class BetaService(
 
     fun setCapacity(actor: String, capacity: Int, reason: String, version: Long): BetaAdminResponse =
         change(actor, reason, version, "EXPAND") { c, _ ->
-            if (capacity !in c.capacity..c.maxCapacity) {
-                fail(HttpStatus.UNPROCESSABLE_ENTITY, "beta_capacity_invalid", "容量只能增加，且本轮最多 200 人。")
+            if (capacity < c.capacity) {
+                fail(HttpStatus.UNPROCESSABLE_ENTITY, "beta_capacity_invalid", "目标容量不能低于当前容量（当前 ${c.capacity} 人）。")
+            }
+            if (capacity > capacityHardLimit) {
+                fail(HttpStatus.UNPROCESSABLE_ENTITY, "beta_capacity_invalid", "目标容量超过系统安全上限（最多 $capacityHardLimit 人）。")
             }
             c.capacity = capacity
         }

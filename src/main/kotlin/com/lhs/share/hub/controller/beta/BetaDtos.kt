@@ -3,6 +3,7 @@ package com.lhs.share.hub.controller.beta
 import com.lhs.share.hub.repository.entity.BetaMode
 import com.lhs.share.hub.repository.entity.BetaSlotPool
 import com.lhs.share.hub.repository.entity.BetaSnapshotStatus
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
 data class BetaJoinRequest(
@@ -31,7 +32,11 @@ data class BetaStatusResponse(
     val rulesVersion: String,
     val initialCapacity: Int,
     val capacity: Int,
-    val maxCapacity: Int,
+    @field:Schema(
+        description = "Deprecated compatibility alias for the system capacity safety limit; not a per-campaign product ceiling.",
+        deprecated = true,
+    )
+    val maxCapacity: Int = 100_000,
     val reservedInitial: Int,
     val reservedRemaining: Int,
     val grantedCount: Int,
@@ -62,6 +67,8 @@ data class BetaAdminResponse(
     val campaign: BetaStatusResponse,
     val configured: Boolean,
     val configVersion: Long,
+    /** System safety limit for accidental extreme input, not this round's planned maximum. */
+    val capacityHardLimit: Int,
     val reservedGrantedCount: Int,
     val publicGrantedCount: Int,
     val releasedCount: Int,
