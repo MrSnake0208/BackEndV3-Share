@@ -53,6 +53,7 @@ data class FeedbackMessageResponse(
  * @property quota 配额信息
  * @property viewerIsReporter 当前查看者是否为提交人
  * @property clientInfo 客户端信息
+ * @property diagnostics 应用诊断信息(前端版本 / commit / 构建时间);旧工单为 null
  * @property reporter 提交人信息
  * @property handler 处理人信息
  * @property createdAt 创建时间
@@ -75,6 +76,7 @@ data class FeedbackReportResponse(
     val handler: UserInfo?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val diagnostics: DiagnosticsResponse? = null,
 ) {
     data class QuotaInfo(
         val pendingCount: Int,
@@ -87,6 +89,17 @@ data class FeedbackReportResponse(
         val userAgent: String?,
         val ip: String?,
         val ipLocation: String?,
+    )
+
+    /**
+     * 反馈工单应用诊断信息
+     *
+     * 与 [ClientInfoResponse] 分开:这里不含 IP / User-Agent,也不受 consent 控制。
+     */
+    data class DiagnosticsResponse(
+        val productVersion: String?,
+        val frontendCommit: String?,
+        val buildTime: String?,
     )
 
     data class UserInfo(

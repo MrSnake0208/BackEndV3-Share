@@ -1,0 +1,229 @@
+name: Release
+
+# 生产发布：仅由本仓库自己的 v* tag 触发，与 YuanHub 前端仓库完全独立。
+# 前端发版不会触发后端发布，后端也不必跟随前端版本号。
+#
+# 部署形态（原子切换 + 可回滚，避免覆盖到一半时线上残缺）：
+#   $PRODUCTION_BACKEND_PATH/releases/<tag>/app.jar
+#   $PRODUCTION_BACKEND_PATH/current -> releases/<tag>
+#   $PRODUCTION_BACKEND_PATH/shared/version.env  ← 由本 workflow 写入 YUANHUB_* 版本变量
+#   $PRODUCTION_BACKEND_PATH/shared/backend.env  ← 由运维维护，workflow 不会覆盖
+# systemd 单元参考 deploy/yuanhub-backend.service。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的已存在 tag（例如 v0.2.0）"
+        required: true
+
+concurrency:
+  group: yuanhub-backend-production
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release version
+        run: |
+          set -eu
+          test -n "$RELEASE_TAG" || { echo "::error::RELEASE_TAG is empty"; exit 1; }
+          echo "BACKEND_VERSION=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "Releasing backend $RELEASE_TAG"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Unit tests
+        run: ./gradlew test --console=plain
+
+      - name: Build jar
+        run: ./gradlew assemble --console=plain
+
+      - name: Collect release artifact
+        run: |
+          set -eu
+          jar="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"
+          test -n "$jar" || { echo "::error::no bootJar produced"; exit 1; }
+          cp "$jar" build/libs/app.jar
+          ls -l build/libs/app.jar
+          echo "Artifact: $jar"
+
+      - name: Upload jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuanhub-backend-${{ env.BACKEND_VERSION }}
+          path: build/libs/app.jar
+          retention-days: 30
+
+      - name: Validate deployment SSH key
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" || {
+            echo "::error::PRODUCTION_SSH_KEY is empty or unavailable. Add it as an environment secret."
+            exit 1
+          }
+          case "$DEPLOY_KEY" in
+            "-----BEGIN OPENSSH PRIVATE KEY-----"*|"-----BEGIN RSA PRIVATE KEY-----"*) ;;
+            *)
+              echo "::error::PRODUCTION_SSH_KEY must contain the complete private key, including BEGIN and END lines."
+              exit 1
+              ;;
+          esac
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          chmod 600 "$key_file"
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          ssh-keygen -y -f "$key_file" >/dev/null
+
+      - name: Upload jar to release directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.PRODUCTION_HOST }}
+          username: ${{ vars.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ vars.PRODUCTION_PORT }}
+          source: "build/libs/app.jar"
+          target: "${{ vars.PRODUCTION_BACKEND_PATH }}/releases/${{ env.BACKEND_VERSION }}/"
+          overwrite: true
+          strip_components: 2
+
+      - name: Activate release and restart service
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          BACKEND_ROOT: ${{ vars.PRODUCTION_BACKEND_PATH }}
+          BACKEND_SERVICE: ${{ vars.PRODUCTION_BACKEND_SERVICE }}
+          BACKEND_VERSION: ${{ env.BACKEND_VERSION }}
+          PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
+          KEEP_RELEASES: ${{ vars.YUANHUB_KEEP_RELEASES }}
+        with:
+          host: ${{ vars.PRODUCTION_HOST }}
+          username: ${{ vars.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ vars.PRODUCTION_PORT }}
+          envs: BACKEND_ROOT,BACKEND_SERVICE,BACKEND_VERSION,PRODUCT_VERSION,KEEP_RELEASES
+          script: |
+            set -eu
+            test -n "$BACKEND_ROOT" || { echo "PRODUCTION_BACKEND_PATH is not configured"; exit 1; }
+            test -n "$BACKEND_SERVICE" || { echo "PRODUCTION_BACKEND_SERVICE is not configured"; exit 1; }
+
+            release_dir="$BACKEND_ROOT/releases/$BACKEND_VERSION"
+            test -f "$release_dir/app.jar" || {
+              echo "release directory is incomplete: $release_dir"
+              exit 1
+            }
+
+            mkdir -p "$BACKEND_ROOT/shared"
+            # 只写 workflow 管理的版本变量文件，绝不覆盖运维维护的 backend.env。
+            version_env="$BACKEND_ROOT/shared/version.env.tmp"
+            {
+              echo "YUANHUB_BACKEND_VERSION=$BACKEND_VERSION"
+              echo "YUANHUB_PRODUCT_VERSION=$PRODUCT_VERSION"
+            } > "$version_env"
+            chmod 0640 "$version_env"
+            mv -f "$version_env" "$BACKEND_ROOT/shared/version.env"
+
+            ln -sfn "releases/$BACKEND_VERSION" "$BACKEND_ROOT/.current-tmp"
+            mv -T "$BACKEND_ROOT/.current-tmp" "$BACKEND_ROOT/current"
+            echo "current -> $(readlink "$BACKEND_ROOT/current")"
+
+            # 优先用免密 sudo 重启（见 docs/deployment.md 的 sudoers 配置），
+            # 失败时退回直接 systemctl 并明确说明原因，便于排查权限问题。
+            if sudo -n systemctl restart "$BACKEND_SERVICE" 2>/dev/null; then
+              echo "restarted $BACKEND_SERVICE via sudo -n"
+            else
+              echo "sudo -n systemctl restart failed; retrying without sudo"
+              systemctl restart "$BACKEND_SERVICE"
+            fi
+            systemctl is-active --quiet "$BACKEND_SERVICE" || {
+              echo "service $BACKEND_SERVICE is not active after restart"
+              systemctl --no-pager --lines=50 status "$BACKEND_SERVICE" || true
+              exit 1
+            }
+
+            keep="${KEEP_RELEASES:-5}"
+            case "$keep" in
+              ''|*[!0-9]*) keep=5 ;;
+            esac
+            if [ "$keep" -gt 0 ]; then
+              cd "$BACKEND_ROOT/releases"
+              # shellcheck disable=SC2012
+              ls -1dt -- */ 2>/dev/null | tail -n "+$((keep + 1))" | while read -r old; do
+                case "$old" in
+                  "$BACKEND_VERSION"/*) continue ;;
+                esac
+                rm -rf -- "$old"
+              done
+            fi
+
+      - name: Health check
+        env:
+          BACKEND_URL: ${{ vars.PRODUCTION_BACKEND_URL }}
+        run: |
+          set -eu
+          test -n "$BACKEND_URL" || { echo "::error::PRODUCTION_BACKEND_URL is not configured"; exit 1; }
+          url="${BACKEND_URL%/}/version"
+          attempt=1
+          while [ "$attempt" -le 20 ]; do
+            payload="$(curl --silent --show-error --location --max-time 10 "$url" || true)"
+            reported="$(printf '%s' "$payload" | jq -r '.data.backend_version // ""' 2>/dev/null || true)"
+            if [ "$reported" = "$BACKEND_VERSION" ]; then
+              echo "Health check passed: /version reports backend_version=$reported"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: backend_version='${reported}' (want '${BACKEND_VERSION}')"
+            attempt=$((attempt + 1))
+            sleep 6
+          done
+          echo "::error::Health check failed: ${url} did not report backend_version=${BACKEND_VERSION}"
+          exit 1
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCTION_BACKEND_URL: ${{ vars.PRODUCTION_BACKEND_URL }}
+        run: |
+          set -eu
+          notes="$(mktemp)"
+          {
+            echo "## Backend ${RELEASE_TAG}"
+            echo
+            echo "- backendVersion: \`${BACKEND_VERSION}\`"
+            echo "- backendCommit: \`${GITHUB_SHA::7}\`"
+            echo "- deployedTo: \`${PRODUCTION_BACKEND_URL:-}\`"
+            echo
+            echo "Jar 产物见本 Release 附件（亦可在 Actions Artifacts 中下载）。"
+          } > "$notes"
+          gh release create "$RELEASE_TAG" build/libs/app.jar \
+            --title "Backend $RELEASE_TAG" \
+            --notes-file "$notes" \
+            --verify-tag

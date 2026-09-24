@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.report.request
 
+import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 
@@ -12,6 +13,7 @@ import jakarta.validation.constraints.Size
  * @property content 正文(1..1000 字符)
  * @property mediaIds 关联媒体 id 列表(最多 3 个)
  * @property clientInfoConsent 是否同意附带浏览器信息
+ * @property diagnostics 应用诊断信息(前端版本 / commit / 构建时间),与 clientInfoConsent 无关
  */
 data class FeedbackReportCreateRequest(
     val type: String = "FEEDBACK",
@@ -23,4 +25,6 @@ data class FeedbackReportCreateRequest(
     @field:Size(max = 3, message = "附件数量不能超过 3 个")
     val mediaIds: List<String> = emptyList(),
     val clientInfoConsent: Boolean = false,
+    @field:Valid
+    val diagnostics: FeedbackDiagnosticsRequest? = null,
 )

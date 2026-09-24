@@ -29,6 +29,7 @@ import java.time.Instant
  * @property lastMessageSender 最后一条消息发送方: REPORTER | ADMIN
  * @property clientInfoConsent 是否同意保存客户端信息
  * @property clientInfo 客户端信息(仅 consent=true 时保存)
+ * @property diagnostics 应用诊断信息(前端版本 / commit / 构建时间);与 consent 无关,旧文档为 null
  * @property messages 消息列表
  * @property createdAt 创建时间
  * @property updatedAt 更新时间
@@ -86,6 +87,9 @@ data class FeedbackTicket(
 
     /** 客户端信息(仅 consent=true 时保存) */
     val clientInfo: FeedbackClientInfo? = null,
+
+    /** 应用诊断信息(前端版本 / commit / 构建时间);与 clientInfoConsent 无关,旧文档为 null */
+    val diagnostics: FeedbackDiagnostics? = null,
 
     /** 消息列表 */
     val messages: List<FeedbackMessage> = emptyList(),

@@ -61,7 +61,14 @@ data class ShareProperties(
     data class Info(
         var title: String = "Share Backend API",
         var description: String = "Share Backend API",
+        /**
+         * 后端自身版本,与 YuanHub 产品版本无关;可由环境变量 YUANHUB_BACKEND_VERSION 覆盖。
+         */
         var version: String = "v0.1.0",
+        /**
+         * YuanHub 产品版本。后端不硬编码该值,生产环境通过 YUANHUB_PRODUCT_VERSION 注入。
+         */
+        var productVersion: String = "",
         var publicBaseUrl: String = "https://hub.maayuan.fun:16666",
         var domain: String = "",
         var frontendDomain: String = "",
