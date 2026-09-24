@@ -192,7 +192,7 @@ class OperatorUpgradeService(
             invalid(code, "target must be greater than current and no greater than $max")
         }
         if (request.dimension == ELITE) {
-            val allowed = (entry.level / 5 - 3).coerceIn(0, 17)
+            val allowed = OperatorGrowthRules.maxEliteForLevel(entry.level)
             if (request.target > allowed) invalid("invalid_upgrade_target", "elite target exceeds the current level limit")
         }
         val baseCost = when (request.dimension) {
