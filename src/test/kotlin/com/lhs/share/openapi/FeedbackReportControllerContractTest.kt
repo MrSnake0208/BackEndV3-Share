@@ -152,6 +152,35 @@ class FeedbackReportControllerContractTest {
             .andExpect(jsonPath("$.data.reports[0].last_reporter_message_index").value(4))
     }
 
+    @Test
+    fun `feedback detail serializes application diagnostics as snake case`() {
+        every { reportService.getById("u1", "rpt_1") } returns response().copy(
+            clientInfo = null,
+            diagnostics = FeedbackReportResponse.DiagnosticsResponse(
+                productVersion = "0.9.0-beta.1",
+                frontendCommit = "abc1234",
+                buildTime = "2026-01-02T03:04:05Z",
+            ),
+        )
+
+        mockMvc.perform(get("/v1/reports/rpt_1"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.diagnostics.product_version").value("0.9.0-beta.1"))
+            .andExpect(jsonPath("$.data.diagnostics.frontend_commit").value("abc1234"))
+            .andExpect(jsonPath("$.data.diagnostics.build_time").value("2026-01-02T03:04:05Z"))
+            // 版本诊断与 clientInfoConsent 无关：未附带 consent 时 diagnostics 仍然返回
+            .andExpect(jsonPath("$.data.client_info").doesNotExist())
+    }
+
+    @Test
+    fun `feedback detail without diagnostics keeps the field absent`() {
+        every { reportService.getById("u1", "rpt_1") } returns response()
+
+        mockMvc.perform(get("/v1/reports/rpt_1"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.diagnostics").doesNotExist())
+    }
+
     private fun response(): FeedbackReportResponse {
         val now = Instant.parse("2026-08-31T00:00:00Z")
         return FeedbackReportResponse(

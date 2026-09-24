@@ -3,6 +3,7 @@ package com.lhs.share.hub.service.report
 import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
+import com.lhs.share.hub.controller.report.request.FeedbackDiagnosticsRequest
 import com.lhs.share.hub.controller.report.request.FeedbackMessageAppendRequest
 import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackStatusUpdateRequest
@@ -100,6 +101,67 @@ class FeedbackReportServiceTest {
 
         assertEquals(FeedbackType.BUG, response.type)
         assertEquals(FeedbackArea.OPERATOR, response.category)
+    }
+
+    @Test
+    fun `未同意客户端信息时应用诊断仍然保存并回传`() {
+        prepareCreate()
+
+        val response = service.create(
+            "user",
+            FeedbackReportCreateRequest(
+                type = "BUG",
+                category = "OPERATOR",
+                content = "版本诊断",
+                clientInfoConsent = false,
+                diagnostics = FeedbackDiagnosticsRequest(
+                    productVersion = " 0.9.0-beta.1 ",
+                    frontendCommit = "abc1234",
+                    buildTime = "2026-01-02T03:04:05Z",
+                ),
+            ),
+        )
+
+        // consent 只控制 IP / User-Agent，版本与 Build 属于应用诊断信息，必须记录。
+        verify {
+            ticketRepository.save(
+                match {
+                    it.clientInfoConsent.not() &&
+                        it.clientInfo == null &&
+                        it.diagnostics?.productVersion == "0.9.0-beta.1" &&
+                        it.diagnostics?.frontendCommit == "abc1234" &&
+                        it.diagnostics?.buildTime == "2026-01-02T03:04:05Z"
+                },
+            )
+        }
+        assertEquals("0.9.0-beta.1", response.diagnostics?.productVersion)
+        assertEquals("abc1234", response.diagnostics?.frontendCommit)
+        assertEquals("2026-01-02T03:04:05Z", response.diagnostics?.buildTime)
+    }
+
+    @Test
+    fun `旧客户端缺少或全空 diagnostics 时不写入空对象`() {
+        prepareCreate()
+
+        val legacy = service.create(
+            "user",
+            FeedbackReportCreateRequest(type = "BUG", category = "OPERATOR", content = "旧客户端无诊断"),
+        )
+        verify { ticketRepository.save(match { it.diagnostics == null }) }
+        assertNull(legacy.diagnostics)
+
+        prepareCreate()
+        val blank = service.create(
+            "user",
+            FeedbackReportCreateRequest(
+                type = "BUG",
+                category = "OPERATOR",
+                content = "全空诊断",
+                diagnostics = FeedbackDiagnosticsRequest(productVersion = "  ", frontendCommit = "", buildTime = null),
+            ),
+        )
+        verify { ticketRepository.save(match { it.diagnostics == null }) }
+        assertNull(blank.diagnostics)
     }
 
     @Test

@@ -14,6 +14,7 @@ import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.FeedbackClientInfo
+import com.lhs.share.hub.repository.entity.FeedbackDiagnostics
 import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
@@ -186,6 +187,9 @@ class FeedbackReportService(
             null
         }
 
+        // 应用诊断信息与 consent 无关:版本与 Build 始终记录。
+        val diagnostics = buildDiagnostics(request)
+
         // 构建首条消息
         val firstMessage = FeedbackMessage(
             id = generateId("rpm_"),
@@ -208,6 +212,7 @@ class FeedbackReportService(
             content = request.content,
             clientInfoConsent = request.clientInfoConsent,
             clientInfo = clientInfo,
+            diagnostics = diagnostics,
             messages = listOf(firstMessage),
             createdAt = now,
             updatedAt = now,
@@ -646,6 +651,24 @@ class FeedbackReportService(
     }
 
     /**
+     * 归一化前端上报的应用诊断信息。
+     *
+     * 旧客户端不带 diagnostics 字段,或三个字段都为空时返回 null,不写入空对象。
+     */
+    private fun buildDiagnostics(request: FeedbackReportCreateRequest): FeedbackDiagnostics? {
+        val raw = request.diagnostics ?: return null
+        val normalized = FeedbackDiagnostics(
+            productVersion = raw.productVersion?.trim()?.takeIf(String::isNotEmpty),
+            frontendCommit = raw.frontendCommit?.trim()?.takeIf(String::isNotEmpty),
+            buildTime = raw.buildTime?.trim()?.takeIf(String::isNotEmpty),
+        )
+        if (normalized.productVersion == null && normalized.frontendCommit == null && normalized.buildTime == null) {
+            return null
+        }
+        return normalized
+    }
+
+    /**
      * 生成带前缀的唯一 id
      */
     private fun generateId(prefix: String): String {
@@ -723,6 +746,13 @@ class FeedbackReportService(
                     userAgent = it.userAgent,
                     ip = it.ip,
                     ipLocation = it.ipLocation,
+                )
+            },
+            diagnostics = ticket.diagnostics?.let {
+                FeedbackReportResponse.DiagnosticsResponse(
+                    productVersion = it.productVersion,
+                    frontendCommit = it.frontendCommit,
+                    buildTime = it.buildTime,
                 )
             },
             reporter = FeedbackReportResponse.UserInfo(
