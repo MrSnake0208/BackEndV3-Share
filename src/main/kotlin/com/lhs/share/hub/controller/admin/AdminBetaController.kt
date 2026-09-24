@@ -35,7 +35,10 @@ class AdminBetaController(private val service: BetaService, private val helper: 
     )
 
     @PutMapping("/capacity")
-    @Operation(summary = "绝对值扩容", description = "只增不减，最多200，新增名额全部公开且候补优先")
+    @Operation(
+        summary = "绝对值扩容",
+        description = "按绝对目标容量调整，只增不减；新增名额全部公开且候补优先。除防止误输入的系统安全上限外没有本轮人数上限。",
+    )
     fun capacity(@RequestBody request: BetaCapacityRequest): ResponseEntity<ApiResult<BetaAdminResponse>> = reply(
         service.setCapacity(helper.requireUserId(), request.capacity, request.reason, request.expectedConfigVersion),
     )

@@ -84,6 +84,9 @@ dependencies {
     // hutool
     implementation("cn.hutool:hutool-jwt:$hutoolVersion")
     implementation("cn.hutool:hutool-extra:$hutoolVersion")
+    // Hutool 5.x mail uses the legacy javax.mail namespace at runtime.
+    // Spring Boot 3 no longer brings JavaMail onto the classpath implicitly.
+    implementation("com.sun.mail:javax.mail:1.6.2")
 
     // mapstruct
     implementation("org.mapstruct:mapstruct:$mapstructVersion")

@@ -1947,7 +1947,7 @@
           "Beta Admin"
         ],
         "summary": "绝对值扩容",
-        "description": "只增不减，最多200，新增名额全部公开且候补优先",
+        "description": "按绝对目标容量调整，只增不减；新增名额全部公开且候补优先。除防止误输入的系统安全上限外没有本轮人数上限。",
         "operationId": "capacity",
         "requestBody": {
           "content": {
@@ -10656,6 +10656,10 @@
             "type": "integer",
             "format": "int64"
           },
+          "capacity_hard_limit": {
+            "type": "integer",
+            "format": "int32"
+          },
           "reserved_granted_count": {
             "type": "integer",
             "format": "int32"
@@ -10712,6 +10716,7 @@
         },
         "required": [
           "campaign",
+          "capacity_hard_limit",
           "config_version",
           "configured",
           "public_granted_count",
@@ -10774,7 +10779,9 @@
           },
           "max_capacity": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Deprecated compatibility alias for the system capacity safety limit; not a per-campaign product ceiling.",
+            "deprecated": true
           },
           "reserved_initial": {
             "type": "integer",

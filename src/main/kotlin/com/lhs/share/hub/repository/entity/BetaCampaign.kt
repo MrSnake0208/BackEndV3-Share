@@ -21,7 +21,6 @@ data class BetaCampaign(
     val reservedUntil: Instant = startsAt.plusSeconds(72 * 3600),
     val initialCapacity: Int = 100,
     var capacity: Int = initialCapacity,
-    val maxCapacity: Int = 200,
     val reservedInitial: Int = initialCapacity / 4,
     var reservedRemaining: Int = reservedInitial,
     var reservedGrantedCount: Int = 0,
@@ -56,7 +55,10 @@ data class BetaCampaign(
 
     fun checkQuota() {
         check(initialCapacity in 100..200 && initialCapacity % 4 == 0)
-        check(capacity in initialCapacity..maxCapacity && maxCapacity <= 200)
+        // Capacity growth has no product ceiling. The only upper bound is the operator-facing
+        // system safety limit enforced by BetaService.setCapacity; legacy documents that still
+        // carry the removed `maxCapacity` field are simply unmapped and never consulted.
+        check(capacity >= initialCapacity)
         check(reservedInitial == initialCapacity / 4)
         check(grantedCount >= 0 && reservedRemaining >= 0 && reservedGrantedCount >= 0 && releasedCount >= 0)
         check(grantedCount >= reservedGrantedCount && grantedCount + reservedRemaining <= capacity)

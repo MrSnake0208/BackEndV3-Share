@@ -21,16 +21,14 @@ export function validateInput(config, uidText, now = new Date()) {
   requireValue(Number.isFinite(snapshotAt.getTime()) && /(?:Z|[+-]\d\d:\d\d)$/.test(config.snapshot_at), 'snapshot_at requires an explicit timezone.')
   requireValue(snapshotAt <= now && snapshotAt <= startsAt, 'snapshot_at must be an actual past source time, not a future snapshot.')
   const initialCapacity = config.initial_capacity ?? 100
-  const maxCapacity = config.max_capacity ?? 200
   requireValue(Number.isInteger(initialCapacity) && initialCapacity >= 100 && initialCapacity <= 200 && initialCapacity % 4 === 0, 'initial_capacity must be 100..200 and divisible by four.')
-  requireValue(Number.isInteger(maxCapacity) && maxCapacity >= initialCapacity && maxCapacity <= 200, 'max_capacity must not exceed 200.')
   const timezone = text(config.announcement_timezone, 'announcement_timezone')
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }).format(now) } catch (_) { throw new PreparationError('Invalid IANA announcement timezone.') }
   requireValue(typeof uidText === 'string' && uidText.length <= 10 * 1024 * 1024, 'UID file must be UTF-8 text, at most 10 MiB.')
   const raw = uidText.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
   requireValue(raw.length > 0 && raw.every(x => x.length <= 128 && !/\s/.test(x)), 'UID file must contain one opaque UID per line, not email/password/token columns.')
   return {
-    campaignId, snapshotId, startsAt, snapshotAt, initialCapacity, maxCapacity,
+    campaignId, snapshotId, startsAt, snapshotAt, initialCapacity,
     reservedInitial: initialCapacity / 4, reservedUntil: new Date(startsAt.getTime() + 72 * 3600_000),
     snapshotSourceNote: text(config.snapshot_source_note, 'snapshot_source_note', 600),
     rulesVersion: text(config.rules_version ?? 'v1', 'rules_version'), announcementTimezone: timezone,
@@ -115,7 +113,7 @@ export async function prepare(input, { hubUri, accountUri, apply = false, resume
     const document = {
       _id: input.campaignId, accessMode: 'CLOSED', publicOpenedAt: null, admissionsPaused: true, pauseReason: '尚未开放',
       startsAt: input.startsAt, reservedUntil: input.reservedUntil, initialCapacity: input.initialCapacity,
-      capacity: input.initialCapacity, maxCapacity: input.maxCapacity, reservedInitial: input.reservedInitial,
+      capacity: input.initialCapacity, reservedInitial: input.reservedInitial,
       reservedRemaining: input.reservedInitial, reservedGrantedCount: 0, releasedCount: 0, releasedAt: null, grantedCount: 0,
       nextQueueSequence: Long.ZERO, allocationRevision: Long.ZERO, configVersion: Long.ZERO,
       snapshotId: input.snapshotId, snapshotStatus: 'BUILDING', snapshotAt: input.snapshotAt,

@@ -49,7 +49,7 @@ class BetaAccessPolicyTest {
     @Test
     fun `all reachable quota counts remain consistent when unused reservation expires`() {
         val start = Instant.parse("2026-09-24T12:00:00Z")
-        for (capacity in listOf(100, 150, 200)) {
+        for (capacity in listOf(100, 120, 237, 1000, 2000)) {
             for (shareGranted in 0..25) {
                 for (publicGranted in 0..(capacity - 25)) {
                     val c = BetaCampaign(
@@ -76,7 +76,16 @@ class BetaAccessPolicyTest {
     @Test
     fun `invalid quotas rejected instead of overselling`() {
         assertThrows(IllegalStateException::class.java) { BetaCampaign("x", grantedCount = 76).checkQuota() }
-        assertThrows(IllegalStateException::class.java) { BetaCampaign("x", capacity = 201).checkQuota() }
         assertThrows(IllegalStateException::class.java) { BetaCampaign("x", reservedRemaining = -1).checkQuota() }
+    }
+
+    @Test
+    fun `capacity growth has no product ceiling but never shrinks below the initial capacity`() {
+        // 100 -> 120 -> 237 -> 1000 -> 2000 are all valid absolute targets once reservation
+        // arithmetic still fits; only a value below the immutable initial capacity is rejected.
+        for (capacity in listOf(100, 120, 237, 1000, 2000, 100_000)) {
+            BetaCampaign("x", capacity = capacity).checkQuota()
+        }
+        assertThrows(IllegalStateException::class.java) { BetaCampaign("x", capacity = 99).checkQuota() }
     }
 }
