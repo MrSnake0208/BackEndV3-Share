@@ -1,7 +1,7 @@
 # YuanHub Backend systemd 单元（参考模板）
 #
 # 首次部署时按实际服务器替换以下占位符，然后安装到 /etc/systemd/system/：
-#   __BACKEND_PATH__  与 GitHub Variable PRODUCTION_BACKEND_PATH 完全一致
+#   __BACKEND_PATH__  与 GitHub Variable YUANHUB_BACKEND_DEPLOY_DIR 完全一致
 #   __RUN_USER__      运行后端的系统用户（需要该目录的读写权限）
 #
 #   sudo cp deploy/yuanhub-backend.service /etc/systemd/system/yuanhub-backend.service

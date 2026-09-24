@@ -43,6 +43,9 @@ logging:
 
 # 应用自定义配置
 share:
+  cors:
+    # 本地默认保持兼容；生产环境必须通过环境变量收敛为实际前端域名。
+    allowed-origin-patterns: "${SHARE_CORS_ALLOWED_ORIGIN_PATTERNS:*}"
   info:
     title: Share Backend API
     description: Share Backend API

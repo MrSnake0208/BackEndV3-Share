@@ -21,30 +21,37 @@
 
 ## 2. 需要配置的 GitHub 项
 
-在仓库 **Settings → Environments → production** 下配置（推荐开启 Required reviewers）：
+`release.yml` 里的 SSH 连接用的是 YuanHub 仓库 `promo-site-deploy.yml` 那套**同名**凭据：
 
 ### Secrets
 
-| 名称 | 说明 |
+| 名称 | 本仓库是否需要新建 |
 | --- | --- |
-| `PRODUCTION_SSH_KEY` | 部署用私钥全文（含 `BEGIN` / `END` 行） |
+| `YUANHUB_PROMO_VPS_SSH_KEY` | 见下方说明 |
+| `YUANHUB_PROMO_VPS_HOST` | 见下方说明 |
+| `YUANHUB_PROMO_VPS_USER` | 见下方说明 |
+| `YUANHUB_PROMO_VPS_PORT` | 见下方说明 |
 
-### Variables
+> **GitHub 的 secrets 按仓库隔离。** 如果这 4 个是 **Organization secrets 且已授权给本仓库**，那就什么都不用做；
+> 否则请在本仓库 **Settings → Secrets and variables → Actions → Secrets** 里添加这 4 个同名 secret，
+> 值与 YuanHub 仓库完全一致（同一台 VPS、同一个部署用户、同一把私钥）。
+> 私钥全文需含 `BEGIN` / `END` 行。
+
+### Variables（本仓库新增：Settings → Secrets and variables → Actions → Variables）
 
 | 名称 | 示例 | 说明 |
 | --- | --- | --- |
-| `PRODUCTION_HOST` | `203.0.113.10` | 生产服务器地址 |
-| `PRODUCTION_USER` | `deploy` | SSH 用户 |
-| `PRODUCTION_PORT` | `22` | SSH 端口 |
-| `PRODUCTION_BACKEND_PATH` | `/var/lib/yuanhub-backend` | 后端部署根目录 |
-| `PRODUCTION_BACKEND_SERVICE` | `yuanhub-backend` | systemd 服务名（**不要猜，按实际填写**） |
-| `PRODUCTION_BACKEND_URL` | `https://api.example.com` | health check 使用，需能访问 `/version` |
+| `YUANHUB_BACKEND_DEPLOY_DIR` | `/var/lib/yuanhub-backend` | 后端部署根目录 |
+| `YUANHUB_BACKEND_SERVICE` | `yuanhub-backend` | systemd 服务名（**不要猜，按实际安装的填**） |
+| `YUANHUB_BACKEND_URL` | `https://api-hub.maayuan.com` | 稳定后端公网地址；内测和正式开放都不变，需能访问 `/version`。 |
 | `YUANHUB_PRODUCT_VERSION` | `0.0.1-beta.1` | 当前线上 YuanHub 产品版本 |
 | `YUANHUB_KEEP_RELEASES` | `5` | 可选。保留的历史版本目录数量，默认 5 |
 
+> `environment: production` 会由 GitHub 在首次运行时自动创建，无需手工建；要发布需人工批准就在该 environment 加 Required reviewers。
+
 ## 3. 服务器需要提前准备
 
-1. 部署用户 + 公钥写入 `~/.ssh/authorized_keys`；私钥存到 `PRODUCTION_SSH_KEY`。
+1. 复用同一台 VPS 上已有的部署用户（`YUANHUB_PROMO_VPS_USER`）；确认其公钥已在服务器 `~/.ssh/authorized_keys`。
 2. Java 21 运行时（`/usr/bin/java`，与单元文件保持一致）。
 3. 目录与文件布局：
 
@@ -65,13 +72,15 @@
    ```bash
    # /var/lib/yuanhub-backend/shared/backend.env（chmod 640，勿提交）
    SPRING_PROFILES_ACTIVE=prod
+   SERVER_ADDRESS=127.0.0.1
    SPRING_DATA_MONGODB_URI=mongodb://<user>:<pass>@<host>:27017/MaaBackend
    SHARE_MONGO_HUB_URI=mongodb://<user>:<pass>@<host>:27017/HubBackend
    SPRING_DATA_REDIS_HOST=<redis-host>
    SPRING_DATA_REDIS_PORT=6379
    SPRING_DATA_REDIS_PASSWORD=<redis-password>
    SHARE_JWT_SECRET=<随机长字符串，务必替换默认值>
-   SHARE_PUBLIC_BASE_URL=https://<你的后端域名>
+   SHARE_PUBLIC_BASE_URL=https://api-hub.maayuan.com
+   SHARE_CORS_ALLOWED_ORIGIN_PATTERNS=https://beta-hub.maayuan.com,https://hub.maayuan.com
    SHARE_AVATAR_DIR=/var/lib/yuanhub-backend/data/avatar
    SHARE_MEDIA_DIR=/var/lib/yuanhub-backend/data/media
    SHARE_PRIVATE_MEDIA_DIR=/var/lib/yuanhub-backend/data/private-media
@@ -101,18 +110,26 @@
    sudo chmod 440 /etc/sudoers.d/yuanhub-deploy
    ```
 
-   若 `PRODUCTION_BACKEND_SERVICE` 用了别的名字，上面的 sudoers 规则也要同步改。
+   若 `YUANHUB_BACKEND_SERVICE` 用了别的名字，上面的 sudoers 规则也要同步改。
 
 7. 反向代理（nginx 示例）把公网地址转发到后端端口：
 
    ```nginx
-   location / {
-     proxy_pass http://127.0.0.1:8080;
-     proxy_set_header Host $host;
-     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-     proxy_set_header X-Forwarded-Proto $scheme;
+   server {
+     listen 443 ssl;
+     server_name api-hub.maayuan.com;
+
+     location / {
+       proxy_pass http://127.0.0.1:8080;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+     }
    }
    ```
+
+   Cloudflare 中让 `api-hub.maayuan.com` 指向同一台服务器并开启 Proxy。后端只监听 `127.0.0.1:8080`，不要直接把 8080 暴露到公网。
 
 ## 4. 发布流程
 
@@ -124,10 +141,10 @@ git push origin v0.2.0
 workflow 依次执行：
 
 1. `./gradlew test` → `./gradlew assemble`（产出 bootJar）
-2. 上传 jar 到 `$PRODUCTION_BACKEND_PATH/releases/v0.2.0/app.jar`
+2. 上传 jar 到 `$YUANHUB_BACKEND_DEPLOY_DIR/releases/v0.2.0/app.jar`
 3. 写入 `shared/version.env`，原子切换 `current` 符号链接（先临时链接再 `mv -T`）
-4. `systemctl restart $PRODUCTION_BACKEND_SERVICE`，并确认服务处于 active
-5. health check：轮询 `$PRODUCTION_BACKEND_URL/version`，直到 `data.backend_version` 等于本次 tag
+4. `systemctl restart $YUANHUB_BACKEND_SERVICE`，并确认服务处于 active
+5. health check：轮询 `$YUANHUB_BACKEND_URL/version`，直到 `data.backend_version` 等于本次 tag
 6. 创建 GitHub Release（附 jar）
 7. 按 `YUANHUB_KEEP_RELEASES` 清理旧版本目录
 
@@ -143,7 +160,7 @@ ln -sfn releases/v0.1.0 .current-tmp && mv -T .current-tmp current
 # 同步回退 /version 报告的后端版本
 printf 'YUANHUB_BACKEND_VERSION=v0.1.0\nYUANHUB_PRODUCT_VERSION=<当前产品版本>\n' > shared/version.env.tmp
 mv -f shared/version.env.tmp shared/version.env
-sudo systemctl restart $PRODUCTION_BACKEND_SERVICE
+sudo systemctl restart $YUANHUB_BACKEND_SERVICE
 curl -s localhost:8080/version   # 确认 backend_version
 ```
 
