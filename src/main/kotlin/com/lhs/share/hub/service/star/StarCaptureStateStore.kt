@@ -47,23 +47,20 @@ data class StoredStarCapture(
     val expiresAt: Instant,
     val consumed: Boolean = false,
 ) {
-    fun toUploadResponse() =
-        StarCaptureUploadResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt)
+    fun toUploadResponse() = StarCaptureUploadResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt)
 
-    fun toPendingResponse() =
-        StarCapturePendingResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt, expiresAt)
+    fun toPendingResponse() = StarCapturePendingResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt, expiresAt)
 
-    fun toManifestResponse() =
-        StarCaptureManifestResponse(
-            captureId = manifest.captureId,
-            gameVersion = manifest.gameVersion,
-            section = manifest.section,
-            stopReason = manifest.stopReason,
-            images = manifest.images,
-            adjacentRelations = manifest.adjacentRelations,
-            source = manifest.source,
-            sections = manifest.sections,
-        )
+    fun toManifestResponse() = StarCaptureManifestResponse(
+        captureId = manifest.captureId,
+        gameVersion = manifest.gameVersion,
+        section = manifest.section,
+        stopReason = manifest.stopReason,
+        images = manifest.images,
+        adjacentRelations = manifest.adjacentRelations,
+        source = manifest.source,
+        sections = manifest.sections,
+    )
 }
 
 data class StarCaptureCleanupEntry(
@@ -151,8 +148,8 @@ class RedisStarCaptureStateStore(
         }
     }
 
-    override fun claimCleanup(record: StarCaptureCleanupRecord): Boolean =
-        java.lang.Boolean.TRUE == redis.opsForValue().setIfAbsent(
+    override fun claimCleanup(record: StarCaptureCleanupRecord): Boolean = java.lang.Boolean.TRUE ==
+        redis.opsForValue().setIfAbsent(
             cleanupLockKey(record.entry.key),
             record.entry.directory,
             CLEANUP_LOCK_SECONDS,
@@ -172,14 +169,11 @@ class RedisStarCaptureStateStore(
         redis.delete(cleanupLockKey(record.entry.key))
     }
 
-    private fun metadataKey(key: StarCaptureKey): String =
-        "$METADATA_PREFIX:${key.userId}:${key.accountId}:${key.captureId}"
+    private fun metadataKey(key: StarCaptureKey): String = "$METADATA_PREFIX:${key.userId}:${key.accountId}:${key.captureId}"
 
-    private fun accountIndexKey(userId: String, accountId: String): String =
-        "$ACCOUNT_INDEX_PREFIX:$userId:$accountId"
+    private fun accountIndexKey(userId: String, accountId: String): String = "$ACCOUNT_INDEX_PREFIX:$userId:$accountId"
 
-    private fun cleanupLockKey(key: StarCaptureKey): String =
-        "$CLEANUP_LOCK_PREFIX:${key.userId}:${key.accountId}:${key.captureId}"
+    private fun cleanupLockKey(key: StarCaptureKey): String = "$CLEANUP_LOCK_PREFIX:${key.userId}:${key.accountId}:${key.captureId}"
 
     private companion object {
         const val METADATA_PREFIX = "star-capture:metadata:v1"
