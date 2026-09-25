@@ -237,16 +237,15 @@ private class FakeStarCaptureStateStore : StarCaptureStateStore {
         return true
     }
 
-    override fun latestPending(userId: String, accountId: String, now: Instant): StoredStarCapture? =
-        captures.values
-            .asSequence()
-            .filter {
-                it.key.userId == userId &&
-                    it.key.accountId == accountId &&
-                    !it.consumed &&
-                    now.isBefore(it.expiresAt)
-            }
-            .maxByOrNull { it.createdAt }
+    override fun latestPending(userId: String, accountId: String, now: Instant): StoredStarCapture? = captures.values
+        .asSequence()
+        .filter {
+            it.key.userId == userId &&
+                it.key.accountId == accountId &&
+                !it.consumed &&
+                now.isBefore(it.expiresAt)
+        }
+        .maxByOrNull { it.createdAt }
 
     override fun markConsumed(capture: StoredStarCapture): StoredStarCapture {
         val updated = capture.copy(consumed = true)
@@ -254,18 +253,17 @@ private class FakeStarCaptureStateStore : StarCaptureStateStore {
         return updated
     }
 
-    override fun dueCleanup(now: Instant, limit: Long): List<StarCaptureCleanupRecord> =
-        captures.values
-            .asSequence()
-            .filter { !now.isBefore(it.expiresAt) }
-            .take(limit.toInt())
-            .map {
-                StarCaptureCleanupRecord(
-                    redisMember = it.key.captureId,
-                    entry = StarCaptureCleanupEntry(it.key, it.directory),
-                )
-            }
-            .toList()
+    override fun dueCleanup(now: Instant, limit: Long): List<StarCaptureCleanupRecord> = captures.values
+        .asSequence()
+        .filter { !now.isBefore(it.expiresAt) }
+        .take(limit.toInt())
+        .map {
+            StarCaptureCleanupRecord(
+                redisMember = it.key.captureId,
+                entry = StarCaptureCleanupEntry(it.key, it.directory),
+            )
+        }
+        .toList()
 
     override fun claimCleanup(record: StarCaptureCleanupRecord): Boolean = true
 
