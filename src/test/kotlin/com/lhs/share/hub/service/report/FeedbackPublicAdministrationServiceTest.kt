@@ -4,9 +4,15 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMergeRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
+import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
+import com.lhs.share.hub.repository.ChangelogEntryRepository
 import com.lhs.share.hub.repository.FeedbackSupportRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
+import com.lhs.share.hub.repository.entity.ChangelogEntry
+import com.lhs.share.hub.repository.entity.ChangelogPublishedRevision
+import com.lhs.share.hub.repository.entity.ChangelogRevisionState
+import com.lhs.share.hub.repository.entity.ChangelogWorkingRevision
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import io.mockk.every
 import io.mockk.mockk
@@ -21,12 +27,49 @@ class FeedbackPublicAdministrationServiceTest {
     private val ticketRepository = mockk<FeedbackTicketRepository>()
     private val queryRepository = mockk<FeedbackTicketQueryRepository>()
     private val supportRepository = mockk<FeedbackSupportRepository>()
+    private val changelogEntryRepository = mockk<ChangelogEntryRepository>()
     private val accessService = mockk<FeedbackAccessService>()
     private val service = FeedbackPublicAdministrationService(
         ticketRepository,
         queryRepository,
         supportRepository,
+        changelogEntryRepository,
         accessService,
+    )
+
+    private fun changelogEntry(id: String, publishedLabel: String? = null, workingLabel: String? = null) = ChangelogEntry(
+        id = id,
+        createdBy = "author",
+        createdAt = Instant.parse("2026-09-01T00:00:00Z"),
+        updatedBy = "author",
+        updatedAt = Instant.parse("2026-09-01T00:00:00Z"),
+        publishedRevision = publishedLabel?.let { label ->
+            ChangelogPublishedRevision(
+                revision = 1,
+                title = "版本 " + label,
+                versionLabel = label,
+                body = emptyMap(),
+                mediaIds = emptySet(),
+                authoredBy = "author",
+                submittedBy = "author",
+                submittedAt = Instant.parse("2026-09-01T00:00:00Z"),
+                approvedBy = "reviewer",
+                publishedAt = Instant.parse("2026-09-02T00:00:00Z"),
+            )
+        },
+        workingRevision = workingLabel?.let { label ->
+            ChangelogWorkingRevision(
+                revision = 2,
+                state = ChangelogRevisionState.DRAFT,
+                title = "版本 " + label,
+                versionLabel = label,
+                body = emptyMap(),
+                mediaIds = emptySet(),
+                authoredBy = "author",
+                updatedBy = "author",
+                updatedAt = Instant.parse("2026-09-03T00:00:00Z"),
+            )
+        },
     )
 
     private fun ticket(
@@ -238,5 +281,84 @@ class FeedbackPublicAdministrationServiceTest {
 
         verify(exactly = 0) { supportRepository.save(any()) }
         verify(exactly = 0) { queryRepository.incrementSupportCount(any()) }
+    }
+
+    @Test
+    fun `关联版本需要板块管理权限`() {
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { accessService.canManage(any(), any()) } returns false
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateVersions("user", "rpt_1", FeedbackVersionRequest(targetVersionId = "chg_1"))
+        }
+
+        assertEquals(403, error.statusCode)
+    }
+
+    @Test
+    fun `完成版本必须是已发布更新日志`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { changelogEntryRepository.findById("chg_draft") } returns Optional.of(
+            changelogEntry("chg_draft", workingLabel = "0.0.3"),
+        )
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateVersions("admin", "rpt_1", FeedbackVersionRequest(completedVersionId = "chg_draft"))
+        }
+
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun `目标版本允许草稿并写入 id 与 label 快照`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { changelogEntryRepository.findById("chg_draft") } returns Optional.of(
+            changelogEntry("chg_draft", workingLabel = "0.0.3"),
+        )
+        every { queryRepository.setVersions(any(), any(), any(), any(), any()) } returns ticket("rpt_1")
+
+        service.updateVersions("admin", "rpt_1", FeedbackVersionRequest(targetVersionId = "chg_draft"))
+
+        verify(exactly = 1) { queryRepository.setVersions("rpt_1", "chg_draft", "0.0.3", null, null) }
+    }
+
+    @Test
+    fun `关联完成版本使用已发布标签`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { changelogEntryRepository.findById("chg_pub") } returns Optional.of(
+            changelogEntry("chg_pub", publishedLabel = "0.0.1-beta.5"),
+        )
+        every { queryRepository.setVersions(any(), any(), any(), any(), any()) } returns ticket("rpt_1")
+
+        service.updateVersions("admin", "rpt_1", FeedbackVersionRequest(completedVersionId = "chg_pub"))
+
+        verify(exactly = 1) { queryRepository.setVersions("rpt_1", null, null, "chg_pub", "0.0.1-beta.5") }
+    }
+
+    @Test
+    fun `不存在的版本被拒绝`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { changelogEntryRepository.findById("chg_missing") } returns Optional.empty()
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.updateVersions("admin", "rpt_1", FeedbackVersionRequest(targetVersionId = "chg_missing"))
+        }
+
+        assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun `清除版本写入 null`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { queryRepository.setVersions(any(), any(), any(), any(), any()) } returns ticket("rpt_1")
+
+        service.updateVersions("admin", "rpt_1", FeedbackVersionRequest())
+
+        verify(exactly = 1) { queryRepository.setVersions("rpt_1", null, null, null, null) }
     }
 }

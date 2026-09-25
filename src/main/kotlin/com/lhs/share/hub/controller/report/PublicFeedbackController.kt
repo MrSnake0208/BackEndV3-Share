@@ -36,6 +36,7 @@ class PublicFeedbackController(
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) status: String?,
         @RequestParam(required = false) keyword: String?,
+        @RequestParam(required = false) completedVersionId: String?,
         @RequestParam(defaultValue = "latest") sort: String,
     ): ApiResult<PublicFeedbackPage> = success(
         service.list(
@@ -45,6 +46,7 @@ class PublicFeedbackController(
             type = type,
             status = status,
             keyword = keyword,
+            completedVersionId = completedVersionId,
             sort = sort,
         ),
     )

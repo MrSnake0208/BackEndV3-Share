@@ -829,6 +829,24 @@ class FeedbackReportServiceTest {
         kind: MediaKind? = null,
     ): MediaAsset = MediaAsset(id, owner, name, mime, size, path, kind = kind)
 
+    @Test
+    fun `详情响应透传目标与完成版本`() {
+        val ticket = openTicket().copy(
+            targetVersionId = "chg_target",
+            targetVersionLabel = "0.0.2",
+            completedVersionId = "chg_done",
+            completedVersionLabel = "0.0.1-beta.5",
+        )
+        prepareTicket(ticket, "user", canManage = false)
+
+        val detail = service.getById("user", "rpt_1")
+
+        assertEquals("chg_target", detail.targetVersionId)
+        assertEquals("0.0.2", detail.targetVersionLabel)
+        assertEquals("chg_done", detail.completedVersionId)
+        assertEquals("0.0.1-beta.5", detail.completedVersionLabel)
+    }
+
     private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {
         every { ticketRepository.findById(checkNotNull(ticket.id)) } returns Optional.of(ticket)
         every { ticketRepository.save(any()) } answers { firstArg() }

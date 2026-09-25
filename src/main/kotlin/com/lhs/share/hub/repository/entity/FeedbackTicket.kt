@@ -41,6 +41,7 @@ import java.time.Instant
 @CompoundIndex(name = "idx_public_visibility_status_published", def = "{'visibility': 1, 'publicStatus': 1, 'publishedAt': -1}")
 @CompoundIndex(name = "idx_public_visibility_type_published", def = "{'visibility': 1, 'type': 1, 'publishedAt': -1}")
 @CompoundIndex(name = "idx_merged_into", def = "{'mergedIntoId': 1}")
+@CompoundIndex(name = "idx_public_visibility_completed_version", def = "{'visibility': 1, 'completedVersionId': 1}")
 data class FeedbackTicket(
     @Id
     val id: String? = null,
@@ -108,6 +109,18 @@ data class FeedbackTicket(
 
     /** 进入 COMPLETED 公开状态的时间 */
     val completedAt: Instant? = null,
+
+    /** 目标版本: 更新日志 ChangelogEntry.id;null 表示未指定 */
+    val targetVersionId: String? = null,
+
+    /** 目标版本展示名快照 */
+    val targetVersionLabel: String? = null,
+
+    /** 完成版本: 更新日志 ChangelogEntry.id;null 表示未指定 */
+    val completedVersionId: String? = null,
+
+    /** 完成版本展示名快照 */
+    val completedVersionLabel: String? = null,
 
     /** 最近管理员回复预览 */
     val adminReply: String? = null,

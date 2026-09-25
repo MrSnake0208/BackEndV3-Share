@@ -57,13 +57,21 @@ class FeedbackTicketQueryRepository(
     /**
      * 公开反馈检索: 强制 visibility=PUBLIC 且未合并;keyword 只匹配 publicTitle/publicSummary。
      */
-    fun publicSearch(type: String?, publicStatus: String?, keyword: String?, sort: String, pageable: Pageable): Page<FeedbackTicket> {
+    fun publicSearch(
+        type: String?,
+        publicStatus: String?,
+        keyword: String?,
+        completedVersionId: String?,
+        sort: String,
+        pageable: Pageable,
+    ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>(
             Criteria.where("visibility").`is`(FeedbackVisibility.PUBLIC),
             Criteria.where("mergedIntoId").`is`(null),
         )
         type?.let { filters += typeCriteria(it) }
         publicStatus?.let { filters += Criteria.where("publicStatus").`is`(it) }
+        completedVersionId?.let { filters += Criteria.where("completedVersionId").`is`(it) }
         keyword?.takeIf { it.isNotBlank() }?.let { value ->
             val pattern = Pattern.compile(Pattern.quote(value.trim()), Pattern.CASE_INSENSITIVE)
             filters += Criteria().orOperator(
@@ -162,6 +170,24 @@ class FeedbackTicketQueryRepository(
     fun setMergedInto(ticketId: String, targetTicketId: String): FeedbackTicket? = template.findAndModify(
         Query(Criteria.where("_id").`is`(ticketId)),
         Update().set("mergedIntoId", targetTicketId),
+        FindAndModifyOptions.options().returnNew(true),
+        FeedbackTicket::class.java,
+    )
+
+    /** 定向写入目标/完成版本与展示名快照。 */
+    fun setVersions(
+        ticketId: String,
+        targetVersionId: String?,
+        targetVersionLabel: String?,
+        completedVersionId: String?,
+        completedVersionLabel: String?,
+    ): FeedbackTicket? = template.findAndModify(
+        Query(Criteria.where("_id").`is`(ticketId)),
+        Update()
+            .set("targetVersionId", targetVersionId)
+            .set("targetVersionLabel", targetVersionLabel)
+            .set("completedVersionId", completedVersionId)
+            .set("completedVersionLabel", completedVersionLabel),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
     )

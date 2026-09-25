@@ -47,6 +47,7 @@ class FeedbackPublicService(
         type: String?,
         status: String?,
         keyword: String?,
+        completedVersionId: String?,
         sort: String,
     ): PublicFeedbackPage {
         if (page < 1) {
@@ -66,6 +67,7 @@ class FeedbackPublicService(
             type = normalizedType,
             publicStatus = normalizedStatus,
             keyword = keyword?.trim()?.takeIf { it.isNotEmpty() },
+            completedVersionId = completedVersionId?.trim()?.takeIf { it.isNotEmpty() },
             sort = normalizedSort,
             pageable = PageRequest.of(page - 1, pageSize),
         )
@@ -181,6 +183,8 @@ class FeedbackPublicService(
         supportedByCurrentUser = supported,
         publishedAt = ticket.publishedAt,
         publicUpdatedAt = ticket.publicUpdatedAt ?: ticket.publishedAt,
+        targetVersionLabel = ticket.targetVersionLabel,
+        completedVersionLabel = ticket.completedVersionLabel,
     )
 
     private fun toDetail(ticket: FeedbackTicket, currentUserId: String?): PublicFeedbackDetail {
@@ -208,6 +212,8 @@ class FeedbackPublicService(
             publishedAt = ticket.publishedAt,
             publicUpdatedAt = ticket.publicUpdatedAt ?: ticket.publishedAt,
             completedAt = ticket.completedAt,
+            targetVersionLabel = ticket.targetVersionLabel,
+            completedVersionLabel = ticket.completedVersionLabel,
             mergedInto = mergedInto,
         )
     }
