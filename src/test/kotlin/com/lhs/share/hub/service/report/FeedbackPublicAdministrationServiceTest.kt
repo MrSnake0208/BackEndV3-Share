@@ -4,6 +4,7 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMergeRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
+import com.lhs.share.hub.controller.report.request.FeedbackTypeUpdateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
 import com.lhs.share.hub.repository.ChangelogEntryRepository
 import com.lhs.share.hub.repository.FeedbackSupportRepository
@@ -360,5 +361,32 @@ class FeedbackPublicAdministrationServiceTest {
         service.updateVersions("admin", "rpt_1", FeedbackVersionRequest())
 
         verify(exactly = 1) { queryRepository.setVersions("rpt_1", null, null, null, null) }
+    }
+
+    @Test
+    fun `修改类型需要管理权限并校验枚举`() {
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { accessService.canManage(any(), any()) } returns false
+        val forbidden = assertThrows(ApiResultException::class.java) {
+            service.updateType("user", "rpt_1", FeedbackTypeUpdateRequest(type = "FEATURE"))
+        }
+        assertEquals(403, forbidden.statusCode)
+
+        allowManage()
+        val invalid = assertThrows(ApiResultException::class.java) {
+            service.updateType("admin", "rpt_1", FeedbackTypeUpdateRequest(type = "UNKNOWN"))
+        }
+        assertEquals(400, invalid.statusCode)
+    }
+
+    @Test
+    fun `修改类型写入规范化后的类型`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { queryRepository.setType("rpt_1", "FEATURE") } returns ticket("rpt_1").copy(type = FeedbackType.FEATURE)
+
+        service.updateType("admin", "rpt_1", FeedbackTypeUpdateRequest(type = "feature"))
+
+        verify(exactly = 1) { queryRepository.setType("rpt_1", "FEATURE") }
     }
 }

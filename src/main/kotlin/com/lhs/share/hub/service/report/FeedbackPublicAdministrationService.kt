@@ -4,6 +4,7 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMergeRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
+import com.lhs.share.hub.controller.report.request.FeedbackTypeUpdateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
 import com.lhs.share.hub.repository.ChangelogEntryRepository
 import com.lhs.share.hub.repository.FeedbackSupportRepository
@@ -124,6 +125,21 @@ class FeedbackPublicAdministrationService(
         queryRepository.incrementMergedCount(rootId)
         autoSupport(root, source.reporterUserId)
         return updated
+    }
+
+    /** 修改反馈类型;影响反馈广场展示与许愿池归属。 */
+    fun updateType(adminUserId: String, ticketId: String, request: FeedbackTypeUpdateRequest): FeedbackTicket {
+        val ticket = requireTicket(ticketId)
+        requireManage(adminUserId, categoryOf(ticket))
+        val type = request.type.trim().uppercase()
+        if (type !in FeedbackType.all) {
+            throw ApiResultException(
+                HttpStatus.BAD_REQUEST.value(),
+                "无效的反馈类型: ${request.type}, 可选: ${FeedbackType.all}",
+            )
+        }
+        return queryRepository.setType(ticketId, type)
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
     }
 
     /**
