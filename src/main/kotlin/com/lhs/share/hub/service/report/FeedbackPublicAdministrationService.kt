@@ -6,6 +6,7 @@ import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
 import com.lhs.share.hub.controller.report.request.FeedbackTypeUpdateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
+import com.lhs.share.hub.controller.report.response.FeedbackVersionOptionResponse
 import com.lhs.share.hub.repository.ChangelogEntryRepository
 import com.lhs.share.hub.repository.FeedbackSupportRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
@@ -162,15 +163,43 @@ class FeedbackPublicAdministrationService(
         ) ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
     }
 
+    /**
+     * 返回反馈管理工作台可关联的产品版本。
+     *
+     * 反馈管理员不需要额外拥有 changelog:write / changelog:review 权限；
+     * 这里只暴露版本标签，不返回草稿正文。无任何反馈管理范围时拒绝访问。
+     */
+    fun versionOptions(adminUserId: String): List<FeedbackVersionOptionResponse> {
+        if (accessService.manageableAreas(adminUserId).isEmpty()) {
+            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有反馈管理权限")
+        }
+        return changelogEntryRepository.findAll()
+            .mapNotNull { entry ->
+                val published = entry.publishedRevision?.takeIf { entry.withdrawnAt == null }
+                val label = published?.versionLabel ?: entry.workingRevision?.versionLabel
+                label?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                    entry.updatedAt to
+                        FeedbackVersionOptionResponse(
+                            id = entry.id,
+                            versionLabel = it,
+                            published = published != null,
+                        )
+                }
+            }
+            .sortedByDescending { it.first }
+            .map { it.second }
+    }
+
     private fun resolveVersion(versionId: String?, requirePublished: Boolean): Pair<String, String>? {
         val id = versionId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val entry = changelogEntryRepository.findById(id).orElseThrow {
             ApiResultException(HttpStatus.BAD_REQUEST.value(), "版本不存在: $id")
         }
-        if (requirePublished && entry.publishedRevision == null) {
+        val published = entry.publishedRevision?.takeIf { entry.withdrawnAt == null }
+        if (requirePublished && published == null) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "完成版本必须是已发布的更新日志")
         }
-        val label = entry.publishedRevision?.versionLabel ?: entry.workingRevision?.versionLabel
+        val label = published?.versionLabel ?: entry.workingRevision?.versionLabel
         if (label.isNullOrBlank()) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "版本缺少标签: $id")
         }

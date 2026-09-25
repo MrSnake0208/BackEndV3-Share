@@ -326,6 +326,36 @@ class FeedbackPublicAdministrationServiceTest {
     }
 
     @Test
+    fun `反馈管理员可读取草稿与已发布版本选项但看不到正文`() {
+        every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
+        every { changelogEntryRepository.findAll() } returns listOf(
+            changelogEntry("chg_pub", publishedLabel = "0.0.1-beta.7"),
+            changelogEntry("chg_draft", workingLabel = "0.0.1-beta.8"),
+        )
+
+        val options = service.versionOptions("admin")
+
+        assertEquals(
+            setOf(
+                Triple("chg_pub", "0.0.1-beta.7", true),
+                Triple("chg_draft", "0.0.1-beta.8", false),
+            ),
+            options.map { Triple(it.id, it.versionLabel, it.published) }.toSet(),
+        )
+    }
+
+    @Test
+    fun `无反馈管理权限不能读取版本选项`() {
+        every { accessService.manageableAreas("user") } returns emptySet()
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.versionOptions("user")
+        }
+
+        assertEquals(403, error.statusCode)
+    }
+
+    @Test
     fun `关联完成版本使用已发布标签`() {
         allowManage()
         every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
