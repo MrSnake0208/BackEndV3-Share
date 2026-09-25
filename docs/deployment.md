@@ -1,176 +1,385 @@
-# YuanHub Backend 部署说明
+# YuanHub Backend 蓝绿部署
 
-本仓库可独立 clone / build / release / deploy，不依赖 YuanHub 前端仓库。
+生产后端采用 **GitHub Actions 编排 + 服务器 B 本地构建 + systemd Blue/Green + Nginx 原子切流**。
 
-- **CI**（`.github/workflows/ci.yml`）：`push main`、PR、手动触发。执行 `ktlintCheck`、`test`、`assemble`，并上传 jar 产物。**不做任何生产部署。**
-- **Release**（`.github/workflows/release.yml`）：仅由本仓库自己的 `v*` tag 触发，使用 `environment: production`，通过 SSH 发布。
+日常发布不再从 GitHub Runner 上传约 60 MiB 的 JAR。GitHub 只传递 tag / commit /版本信息，服务器 B 使用本地源码缓存执行 `git fetch` 与 Gradle 构建。
 
-前端发版不会触发后端发布；后端也不必跟随前端版本号。
+## 1. 生产拓扑
 
-> 仓库内没有 Dockerfile / docker-compose / 既有部署脚本，因此采用 **JAR + systemd** 方案（`deploy/yuanhub-backend.service` 为参考单元）。
+```text
+用户
+  ↓
+api-hub.maayuan.com（服务器 A / 外部稳定 API）
+  ↓
+api-hub.maayuan.top（服务器 B）
+  ↓
+服务器 B Nginx
+  ↓
+yuanhub_backend upstream
+  ├─ Blue  127.0.0.1:8080  / management 127.0.0.1:18080
+  └─ Green 127.0.0.1:8081  / management 127.0.0.1:18081
+```
 
-## 1. 版本概念
+任意时刻只有一个 slot 接收新流量。另一个 slot 用于部署新版本。
 
-| 字段 | 来源 | 含义 |
-| --- | --- | --- |
-| `productVersion` | 环境变量 `YUANHUB_PRODUCT_VERSION`（GitHub Variable，部署时写入服务器） | YuanHub 产品版本，后端不硬编码 |
-| `backendVersion` | 环境变量 `YUANHUB_BACKEND_VERSION`，默认 `v0.1.0` | 后端自身版本，取本仓库 tag |
-| `backendCommit` / `branch` / `commitTime` | 构建期 `GitProperties`（`git.properties`） | 后端构建信息 |
+切流前，新 slot 必须同时满足：
 
-`/version` 同时保留旧的 `title` / `description` / `version` / `git` 字段以兼容既有调用方，响应沿用全局 SNAKE_CASE 命名策略。
+- `/actuator/health/readiness` 返回 `UP`（应用 readiness + 主 Mongo + Redis + 磁盘）
+- `/version` 返回本次 tag 与 commit
+- `/v1/beta/status` 可访问（额外覆盖 HubBackend Mongo 链路）
 
-## 2. 需要配置的 GitHub 项
+切流后还会通过 `YUANHUB_BACKEND_URL/version` 从公网再次验证。若公网验证失败，脚本自动恢复旧 Nginx upstream 并停止新 slot。
 
-`release.yml` 里的 SSH 连接用的是 YuanHub 仓库 `promo-site-deploy.yml` 那套**同名**凭据：
+## 2. 发布目录
+
+默认根目录：
+
+```text
+/var/lib/yuanhub-backend/
+├── .source/                    # 服务器 B 的 Git 源码缓存
+├── releases/
+│   └── vX.Y.Z/
+│       ├── app.jar
+│       └── deploy-meta.json
+├── slots/
+│   ├── blue.env
+│   └── green.env
+├── state/
+│   └── active-slot             # legacy / blue / green
+├── nginx/
+│   └── active.conf             # Nginx upstream 当前指向
+├── shared/
+│   ├── backend.env             # 运维配置，不由 Release 覆盖
+│   └── version.env             # 旧单实例兼容文件；蓝绿 slot 不依赖它
+├── data/
+│   ├── avatar/
+│   ├── media/
+│   ├── private-media/
+│   └── star-captures/
+└── logs/
+    ├── blue.log
+    └── green.log
+```
+
+`data/` 与 `shared/backend.env` 在 Blue / Green 间共享。
+
+星石采集的 pending 元数据存储在 Redis，图片继续放在 `data/star-captures`，因此 JVM 切换不会丢失正在进行的采集。
+
+## 3. GitHub 配置
+
+后端仓库使用独立的服务器 B SSH 凭据，不再复用前端/宣传站服务器 A 的 secret 名称。
 
 ### Secrets
 
-| 名称 | 本仓库是否需要新建 |
+在 **BackEndV3-Share → Settings → Secrets and variables → Actions → Secrets** 配置：
+
+| Secret | 含义 |
 | --- | --- |
-| `YUANHUB_PROMO_VPS_SSH_KEY` | 见下方说明 |
-| `YUANHUB_PROMO_VPS_HOST` | 见下方说明 |
-| `YUANHUB_PROMO_VPS_USER` | 见下方说明 |
-| `YUANHUB_PROMO_VPS_PORT` | 见下方说明 |
+| `YUANHUB_BACKEND_VPS_HOST` | 服务器 B SSH 地址 |
+| `YUANHUB_BACKEND_VPS_USER` | 部署用户，例如 `sylvine` |
+| `YUANHUB_BACKEND_VPS_PORT` | SSH 端口 |
+| `YUANHUB_BACKEND_VPS_SSH_KEY` | GitHub Actions → 服务器 B 的完整私钥 |
 
-> **GitHub 的 secrets 按仓库隔离。** 如果这 4 个是 **Organization secrets 且已授权给本仓库**，那就什么都不用做；
-> 否则请在本仓库 **Settings → Secrets and variables → Actions → Secrets** 里添加这 4 个同名 secret，
-> 值与 YuanHub 仓库完全一致（同一台 VPS、同一个部署用户、同一把私钥）。
-> 私钥全文需含 `BEGIN` / `END` 行。
+### Variables
 
-### Variables（本仓库新增：Settings → Secrets and variables → Actions → Variables）
+| Variable | 推荐值 |
+| --- | --- |
+| `YUANHUB_BACKEND_DEPLOY_DIR` | `/var/lib/yuanhub-backend` |
+| `YUANHUB_BACKEND_URL` | `https://api-hub.maayuan.com` |
+| `YUANHUB_PRODUCT_VERSION` | 当前 YuanHub 产品版本 |
+| `YUANHUB_KEEP_RELEASES` | `5` |
+| `YUANHUB_BACKEND_DRAIN_SECONDS` | `45` |
+| `YUANHUB_BACKEND_LEGACY_SERVICE` | `yuanhub-backend` |
 
-| 名称 | 示例 | 说明 |
-| --- | --- | --- |
-| `YUANHUB_BACKEND_DEPLOY_DIR` | `/var/lib/yuanhub-backend` | 后端部署根目录 |
-| `YUANHUB_BACKEND_SERVICE` | `yuanhub-backend` | systemd 服务名（**不要猜，按实际安装的填**） |
-| `YUANHUB_BACKEND_URL` | `https://api-hub.maayuan.com` | 稳定后端公网地址；内测和正式开放都不变，需能访问 `/version`。 |
-| `YUANHUB_PRODUCT_VERSION` | `0.0.1-beta.1` | 当前线上 YuanHub 产品版本 |
-| `YUANHUB_KEEP_RELEASES` | `5` | 可选。保留的历史版本目录数量，默认 5 |
+`production` Environment 可以继续配置 Required reviewers，让生产发布需要人工批准。
 
-> `environment: production` 会由 GitHub 在首次运行时自动创建，无需手工建；要发布需人工批准就在该 environment 加 Required reviewers。
+## 4. 服务器 B：生产公共环境
 
-## 3. 服务器需要提前准备
+服务器 B 需要：
 
-1. 复用同一台 VPS 上已有的部署用户（`YUANHUB_PROMO_VPS_USER`）；确认其公钥已在服务器 `~/.ssh/authorized_keys`。
-2. Java 21 运行时（`/usr/bin/java`，与单元文件保持一致）。
-3. 目录与文件布局：
+- Git
+- Java 21
+- curl
+- Python 3
+- Nginx
+- systemd
+- 能访问 GitHub 与 Gradle/Maven 依赖源
 
-   ```bash
-   sudo mkdir -p /var/lib/yuanhub-backend/{releases,shared}
-   sudo chown -R deploy:deploy /var/lib/yuanhub-backend
-   sudo -u deploy touch /var/lib/yuanhub-backend/shared/backend.env
-   chmod 640 /var/lib/yuanhub-backend/shared/backend.env
-   ```
-
-   - `shared/backend.env`：**运维维护**（Mongo/Redis 地址、JWT secret、端口等），release workflow 不会覆盖它。
-   - `shared/version.env`：由 workflow 每次发布写入 `YUANHUB_BACKEND_VERSION` / `YUANHUB_PRODUCT_VERSION`。
-   - `application-prod.yml` 之类的生产配置放在服务器上（仓库已 gitignore），不要提交。
-
-4. **必填的生产配置**（否则会带着开发配置启动）。`application.yml` 里 `spring.profiles.active` 默认是 `dev`，
-   而 `application-dev.yml` 指向内网 `192.168.31.21` 的 Mongo/Redis —— 所以必须显式切到 prod：
-
-   ```bash
-   # /var/lib/yuanhub-backend/shared/backend.env（chmod 640，勿提交）
-   SPRING_PROFILES_ACTIVE=prod
-   SERVER_ADDRESS=127.0.0.1
-   SPRING_DATA_MONGODB_URI=mongodb://<user>:<pass>@<host>:27017/MaaBackend
-   SHARE_MONGO_HUB_URI=mongodb://<user>:<pass>@<host>:27017/HubBackend
-   SPRING_DATA_REDIS_HOST=<redis-host>
-   SPRING_DATA_REDIS_PORT=6379
-   SPRING_DATA_REDIS_PASSWORD=<redis-password>
-   SHARE_JWT_SECRET=<随机长字符串，务必替换默认值>
-   SHARE_PUBLIC_BASE_URL=https://api-hub.maayuan.com
-   SHARE_CORS_ALLOWED_ORIGIN_PATTERNS=https://beta-hub.maayuan.com,https://hub.maayuan.com
-   SHARE_AVATAR_DIR=/var/lib/yuanhub-backend/data/avatar
-   SHARE_MEDIA_DIR=/var/lib/yuanhub-backend/data/media
-   SHARE_PRIVATE_MEDIA_DIR=/var/lib/yuanhub-backend/data/private-media
-   SHARE_STAR_CAPTURE_DIR=/var/lib/yuanhub-backend/data/star-captures
-   LOGGING_FILE_NAME=/var/lib/yuanhub-backend/logs/latest.log
-   ```
-
-   另外两处默认值在生产通常要改（可写在服务器的 `application-prod.yml` 里）：
-
-   - `debug.email.no-send: true` 是**基础配置**的默认值 —— 不改的话注册/验证码邮件只会打进日志，不会真的发送。
-     需要真实发信时，同时配置 `share.mails` 的 SMTP，并把 `debug.email.no-send` 设为 `false`。
-   - `springdoc.api-docs.enabled` / `springdoc.swagger-ui.enabled` 默认 `true`，如需对公网隐藏可设为 `false`。
-
-5. 安装 systemd 单元（替换 `__BACKEND_PATH__` / `__RUN_USER__` 后）：
-
-   ```bash
-   sudo cp deploy/yuanhub-backend.service /etc/systemd/system/yuanhub-backend.service
-   sudo systemctl daemon-reload
-   sudo systemctl enable yuanhub-backend
-   ```
-
-6. 允许部署用户重启该服务（否则 release workflow 无法重载）：
-
-   ```bash
-   echo 'deploy ALL=(root) NOPASSWD: /bin/systemctl restart yuanhub-backend, /bin/systemctl is-active yuanhub-backend, /bin/systemctl status yuanhub-backend' \
-     | sudo tee /etc/sudoers.d/yuanhub-deploy
-   sudo chmod 440 /etc/sudoers.d/yuanhub-deploy
-   ```
-
-   若 `YUANHUB_BACKEND_SERVICE` 用了别的名字，上面的 sudoers 规则也要同步改。
-
-7. 反向代理（nginx 示例）把公网地址转发到后端端口：
-
-   ```nginx
-   server {
-     listen 443 ssl;
-     server_name api-hub.maayuan.com;
-
-     location / {
-       proxy_pass http://127.0.0.1:8080;
-       proxy_set_header Host $host;
-       proxy_set_header X-Real-IP $remote_addr;
-       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-       proxy_set_header X-Forwarded-Proto $scheme;
-     }
-   }
-   ```
-
-   Cloudflare 中让 `api-hub.maayuan.com` 指向同一台服务器并开启 Proxy。后端只监听 `127.0.0.1:8080`，不要直接把 8080 暴露到公网。
-
-## 4. 发布流程
+`/var/lib/yuanhub-backend/shared/backend.env` 仍由运维维护。至少确认：
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+SPRING_PROFILES_ACTIVE=prod
+SERVER_ADDRESS=127.0.0.1
+
+SPRING_DATA_MONGODB_URI=mongodb://...
+SHARE_MONGO_HUB_URI=mongodb://...
+
+SPRING_DATA_REDIS_HOST=...
+SPRING_DATA_REDIS_PORT=6379
+SPRING_DATA_REDIS_PASSWORD=...
+
+SHARE_JWT_SECRET=...
+SHARE_PUBLIC_BASE_URL=https://api-hub.maayuan.com
+SHARE_CORS_ALLOWED_ORIGIN_PATTERNS=https://beta-hub.maayuan.com,https://hub.maayuan.com
+
+SHARE_AVATAR_DIR=/var/lib/yuanhub-backend/data/avatar
+SHARE_MEDIA_DIR=/var/lib/yuanhub-backend/data/media
+SHARE_PRIVATE_MEDIA_DIR=/var/lib/yuanhub-backend/data/private-media
+SHARE_STAR_CAPTURE_DIR=/var/lib/yuanhub-backend/data/star-captures
 ```
 
-workflow 依次执行：
+不要在 `backend.env` 固定 `SERVER_PORT`、`MANAGEMENT_SERVER_PORT`、`YUANHUB_BACKEND_VERSION`、`YUANHUB_PRODUCT_VERSION` 或 `LOGGING_FILE_NAME`；这些由 Blue/Green slot 文件覆盖。
 
-1. `./gradlew test` → `./gradlew assemble`（产出 bootJar）
-2. 上传 jar 到 `$YUANHUB_BACKEND_DEPLOY_DIR/releases/v0.2.0/app.jar`
-3. 写入 `shared/version.env`，原子切换 `current` 符号链接（先临时链接再 `mv -T`）
-4. `systemctl restart $YUANHUB_BACKEND_SERVICE`，并确认服务处于 active
-5. health check：轮询 `$YUANHUB_BACKEND_URL/version`，直到 `data.backend_version` 等于本次 tag
-6. 创建 GitHub Release（附 jar）
-7. 按 `YUANHUB_KEEP_RELEASES` 清理旧版本目录
+## 5. 服务器 B：给 Git 仓库配置只读 Deploy Key
 
-> 后端没有 `VERSION` 文件：版本号就是 tag 本身，由 workflow 注入 `YUANHUB_BACKEND_VERSION`。
-
-## 5. 人工回滚
+Release Action 会 SSH 到服务器 B，然后由服务器 B 自己执行：
 
 ```bash
-ssh deploy@<HOST>
-cd /var/lib/yuanhub-backend
-ls -1dt releases/*/
-ln -sfn releases/v0.1.0 .current-tmp && mv -T .current-tmp current
-# 同步回退 /version 报告的后端版本
-printf 'YUANHUB_BACKEND_VERSION=v0.1.0\nYUANHUB_PRODUCT_VERSION=<当前产品版本>\n' > shared/version.env.tmp
-mv -f shared/version.env.tmp shared/version.env
-sudo systemctl restart $YUANHUB_BACKEND_SERVICE
-curl -s localhost:8080/version   # 确认 backend_version
+git fetch
+git checkout <exact commit>
+./gradlew bootJar
 ```
 
-## 6. 本地验证
+如果仓库为私有仓库，需要让服务器 B 的部署用户拥有只读 GitHub Deploy Key。
+
+在服务器 B（以部署用户运行）：
 
 ```bash
-./gradlew ktlintCheck
-./gradlew test
-./gradlew assemble
-java -jar build/libs/*.jar   # 需本地 Mongo/Redis 配置
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+ssh-keygen -t ed25519   -f ~/.ssh/yuanhub-backend-github   -N ''   -C 'yuanhub-backend-server-b'
 ```
 
-容器依赖的完整套件（`integrationTest` / `apiSchemaTest` / `realisticTest`）需要 Docker，可在本机按 `./gradlew integrationTest apiSchemaTest` 单独执行；默认 CI 不包含它们。
+查看公钥：
+
+```bash
+cat ~/.ssh/yuanhub-backend-github.pub
+```
+
+把它添加到：
+
+**GitHub → BackEndV3-Share → Settings → Deploy keys → Add deploy key**
+
+只需要读取权限，**不要勾选 Allow write access**。
+
+然后服务器 B 写：
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/yuanhub-backend-github
+  IdentitiesOnly yes
+EOF
+
+chmod 600 ~/.ssh/config
+ssh -T git@github.com
+```
+
+GitHub 提示不提供 shell access 是正常的，只要认证成功即可。
+
+## 6. 一次性从旧单实例迁移到 Blue/Green
+
+第一次启用蓝绿前，现有 `yuanhub-backend.service` 可以继续占用 8080。
+
+先把包含本次蓝绿实现的代码放到服务器 B 任意临时目录，或者在现有仓库 clone 中执行下面脚本。
+
+先确认真实 Nginx site 文件。项目历史环境常见位置：
+
+```bash
+sudo grep -RIl '127.0.0.1:8080' /etc/nginx
+```
+
+找到服务器 B 上真正代理后端的 site，例如：
+
+```text
+/etc/nginx/sites-available/yuanhub-api-origin
+```
+
+然后：
+
+```bash
+cd <BackEndV3-Share 仓库目录>
+
+sudo bash deploy/bootstrap-blue-green.sh   /etc/nginx/sites-available/yuanhub-api-origin
+```
+
+bootstrap 会：
+
+1. 安装 `/etc/systemd/system/yuanhub-backend@.service`
+2. 创建 `/var/lib/yuanhub-backend/nginx/active.conf`，初始仍指向 `127.0.0.1:8080`
+3. 创建 Nginx `yuanhub_backend` upstream
+4. 把当前 site 的
+   `proxy_pass http://127.0.0.1:8080;`
+   改成
+   `proxy_pass http://yuanhub_backend;`
+5. 执行 `nginx -t` 后 graceful reload
+6. 写入最小化 sudoers，使 GitHub 部署用户只能启动/停止两个 slot、校验/reload Nginx
+7. 将 `state/active-slot` 初始化为 `legacy`
+
+**bootstrap 不会停止当前旧后端。**
+
+因此执行完成后，用户仍由原来的 8080 实例服务。
+
+检查：
+
+```bash
+cat /var/lib/yuanhub-backend/state/active-slot
+cat /var/lib/yuanhub-backend/nginx/active.conf
+sudo nginx -t
+curl -s http://127.0.0.1:8080/version
+```
+
+首次自动 Release 会先构建新版本。由于旧单实例的星石 pending 元数据仍只存在旧 JVM 内存中，
+脚本会在首次切流前等待 `data/star-captures/capture-*` 清空；默认最多等待 2100 秒（35 分钟）。
+如果仍有 pending 采集则发布失败并保持 legacy 在线，绝不强行切流。该等待只发生在 `legacy → 首个蓝绿 slot`。
+
+```text
+legacy :8080 继续服务
+        ↓
+服务器构建新版本
+        ↓
+等待旧星石 pending 消费/过期（仅首次）
+        ↓
+Green :8081 启动
+        ↓
+Green readiness 通过
+        ↓
+Nginx → Green
+        ↓
+公网检查通过
+        ↓
+等待 drain
+        ↓
+停止旧 yuanhub-backend.service
+```
+
+之后就正式进入 Blue ↔ Green 循环。
+
+## 7. 日常发布
+
+后端版本由 Git tag 决定。
+
+例如：
+
+```bash
+cd /Users/snake/Desktop/YuanHub-All/BackEndV3-Share
+
+git add .
+git commit -m "feat: server-build blue-green deployment"
+
+git tag v0.1.1
+git push origin main
+git push origin v0.1.1
+```
+
+push `v*` tag 后 Release workflow 自动执行。
+
+GitHub Runner：
+
+1. checkout 精确 tag
+2. JDK 21
+3. `./gradlew test` 作为发布闸门
+4. SSH 到服务器 B
+
+服务器 B：
+
+1. 第一次 clone `.source`，以后只 `git fetch` 增量
+2. checkout 精确 commit
+3. 保留 `~/.gradle`、`.gradle`、`build` 缓存
+4. `./gradlew --no-daemon --max-workers=2 bootJar -x test --build-cache`
+5. 将 JAR 放入 `releases/<tag>/app.jar`
+6. 启动非活动 slot
+7. 本机 readiness
+8. Nginx 原子切流 + graceful reload
+9. 公网版本/commit 验证
+10. 失败自动切回旧 upstream
+11. 成功后等待 drain，再停止旧实例
+12. 保留最近若干 release
+
+GitHub Actions **不再 SCP JAR，也不再上传 JAR artifact**。
+
+## 8. 自动失败回滚
+
+以下任一步骤失败都不会主动停旧实例：
+
+- 服务器本地构建失败
+- 新 slot 启动失败
+- Actuator health 不是 `UP`
+- `/version` tag/commit 不匹配
+- `/v1/beta/status` 不可用
+- `nginx -t` 失败
+
+若已经 reload 到新 upstream，但公网 `/version` 验证失败：
+
+1. 恢复旧 `active.conf`
+2. 再次 `nginx -t`
+3. reload Nginx
+4. 停止失败的新 slot
+5. workflow 失败退出
+
+旧 slot 在公网验证成功之前始终保持运行。
+
+## 9. 主动回滚到旧版本
+
+不需要 SSH 手改软链接。
+
+在 GitHub：
+
+**Actions → Release → Run workflow**
+
+输入一个仍存在的旧 tag，例如：
+
+```text
+v0.1.0
+```
+
+workflow 会把旧 tag 部署到非活动 slot，完成相同的 readiness 与切流流程。
+
+即使服务器已经清理了该版本的 JAR，只要 Git tag 还存在，服务器会重新 fetch/build。
+
+## 10. 查看当前状态
+
+服务器 B：
+
+```bash
+cat /var/lib/yuanhub-backend/state/active-slot
+cat /var/lib/yuanhub-backend/nginx/active.conf
+
+sudo systemctl status yuanhub-backend@blue --no-pager
+sudo systemctl status yuanhub-backend@green --no-pager
+
+curl -s http://127.0.0.1:18080/actuator/health/readiness
+curl -s http://127.0.0.1:18081/actuator/health/readiness
+
+curl -s https://api-hub.maayuan.com/version
+```
+
+正常情况下活动 slot 为 `active`，另一个 slot 在 drain 完成后为 `inactive`。
+
+## 11. 为什么不使用 GitHub self-hosted runner
+
+生产服务器不注册成 GitHub Actions Runner。
+
+GitHub-hosted runner 只做发布闸门和 SSH 编排，服务器 B 使用只读 Git deploy key 拉取代码。这样避免让普通 workflow job 直接成为生产服务器上的长期执行器，同时也达到了“不上传大 JAR”的目标。
+
+## 12. 资源注意事项
+
+Blue/Green 切换期间两个 JVM 会短时间同时运行。模板把每个 JVM 的 `MaxRAMPercentage` 默认设置为 40%，并在服务器构建时使用：
+
+```text
+--no-daemon --max-workers=2
+```
+
+以降低编译和双实例同时存在时的内存峰值。
+
+若服务器 B 内存很小，应在首次生产切换前观察：
+
+```bash
+free -h
+ps -o pid,rss,cmd -C java
+```
+
+必要时再降低 `YUANHUB_JAVA_MAX_RAM_PERCENTAGE`。

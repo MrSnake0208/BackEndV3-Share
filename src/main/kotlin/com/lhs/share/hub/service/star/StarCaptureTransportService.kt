@@ -19,13 +19,12 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Comparator
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * MaaYuan 星石截图的短期私有中转。
  *
- * 元数据仅保留在进程内；文件位于未暴露给静态资源的运行时目录，生命周期由 TTL
- * 或浏览器成功 consume 结束。此服务刻意不使用 MediaAsset、Mongo 或 Redis。
+ * 元数据放在 Redis 并按 TTL 自动失效，图片仍位于未暴露给静态资源的共享运行时目录。
+ * 因此蓝绿切换 JVM 时，pending / manifest / image / consume 可以继续命中同一笔采集。
  */
 @Service
 class StarCaptureTransportService(
@@ -33,15 +32,15 @@ class StarCaptureTransportService(
     private val properties: ShareProperties,
     private val accountService: SubAccountService,
     private val accountEventService: AccountEventService,
+    private val stateStore: StarCaptureStateStore,
 ) {
-    private val captures = ConcurrentHashMap<CaptureKey, StoredCapture>()
 
     fun upload(userId: String, accountId: String, rawManifest: String, files: List<MultipartFile>): StarCaptureUploadResponse {
         accountService.requireAccount(userId, accountId)
         cleanupExpired()
         val manifest = parseManifest(rawManifest, files)
-        val key = CaptureKey(userId, accountId, manifest.captureId)
-        val existing = captures[key]
+        val key = StarCaptureKey(userId, accountId, manifest.captureId)
+        val existing = stateStore.find(key)
         if (existing != null) {
             if (!sameContent(existing, manifest, files)) conflict("capture_id 已被不同内容使用")
             return existing.toUploadResponse()
@@ -57,18 +56,24 @@ class StarCaptureTransportService(
                 val destination = directory.resolve(image.fileName).normalize()
                 if (!destination.startsWith(directory)) invalid("图片文件名无效")
                 file.inputStream.use { input -> Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING) }
-                StoredImage(image.sourceImageId, image.sourceOrder, image.fileName, destination)
+                StoredStarCaptureImage(image.sourceImageId, image.sourceOrder, image.fileName, destination.toString())
             }
             val now = Instant.now()
-            val stored = StoredCapture(
+            val ttlMinutes = properties.starCapture.ttlMinutes.coerceAtLeast(1)
+            val stored = StoredStarCapture(
                 key = key,
                 manifest = manifest,
                 images = storedImages,
-                directory = directory,
+                directory = directory.toString(),
                 createdAt = now,
-                expiresAt = now.plus(properties.starCapture.ttlMinutes.coerceAtLeast(1), ChronoUnit.MINUTES),
+                expiresAt = now.plus(ttlMinutes, ChronoUnit.MINUTES),
             )
-            captures[key] = stored
+            if (!stateStore.create(stored, ttlMinutes * 60)) {
+                deleteDirectory(directory)
+                val winner = stateStore.find(key) ?: conflict("capture_id 正在由另一实例写入，请重试")
+                if (!sameContent(winner, manifest, files)) conflict("capture_id 已被不同内容使用")
+                return winner.toUploadResponse()
+            }
             accountEventService.publish(
                 userId,
                 accountId,
@@ -96,11 +101,7 @@ class StarCaptureTransportService(
     fun pending(userId: String, accountId: String): StarCapturePendingResponse? {
         accountService.requireAccount(userId, accountId)
         cleanupExpired()
-        return captures.values
-            .asSequence()
-            .filter { it.key.userId == userId && it.key.accountId == accountId && !it.consumed }
-            .maxByOrNull { it.createdAt }
-            ?.toPendingResponse()
+        return stateStore.latestPending(userId, accountId, Instant.now())?.toPendingResponse()
     }
 
     fun manifest(userId: String, accountId: String, captureId: String): StarCaptureManifestResponse =
@@ -110,41 +111,49 @@ class StarCaptureTransportService(
         val capture = requirePending(userId, accountId, captureId)
         val image = capture.images.singleOrNull { it.sourceImageId == sourceImageId }
             ?: missing("星石采集图片不存在")
-        if (!Files.isRegularFile(image.path)) missing("星石采集图片不存在")
-        return FileSystemResource(image.path)
+        val path = Path.of(image.path)
+        if (!Files.isRegularFile(path)) missing("星石采集图片不存在")
+        return FileSystemResource(path)
     }
 
     fun consume(userId: String, accountId: String, captureId: String): StarCaptureConsumeResponse {
         accountService.requireAccount(userId, accountId)
         cleanupExpired()
-        val capture = captures[CaptureKey(userId, accountId, captureId)] ?: missing("星石采集不存在")
+        val capture = stateStore.find(StarCaptureKey(userId, accountId, captureId)) ?: missing("星石采集不存在")
         if (!capture.consumed) {
-            capture.consumed = true
-            deleteDirectory(capture.directory)
+            stateStore.markConsumed(capture)
+            deleteDirectory(Path.of(capture.directory))
         }
         return StarCaptureConsumeResponse(captureId = captureId, consumed = true)
     }
 
     /** Focused tests call this directly; the scheduler invokes the same path. */
     fun cleanupExpired(now: Instant = Instant.now()) {
-        captures.entries.removeIf { (_, capture) ->
-            if (!now.isBefore(capture.expiresAt)) {
-                deleteDirectory(capture.directory)
-                true
-            } else {
-                false
+        while (true) {
+            val batch = stateStore.dueCleanup(now)
+            if (batch.isEmpty()) return
+            var claimed = 0
+            batch.forEach { record ->
+                if (!stateStore.claimCleanup(record)) return@forEach
+                claimed += 1
+                val directory = Path.of(record.entry.directory).toAbsolutePath().normalize()
+                val root = storageRoot()
+                if (directory.startsWith(root)) deleteDirectory(directory)
+                stateStore.completeCleanup(record)
             }
+            if (batch.size < 200 || claimed == 0) return
         }
     }
 
     @Scheduled(fixedDelay = 60_000)
     fun scheduledCleanup() = cleanupExpired()
 
-    private fun requirePending(userId: String, accountId: String, captureId: String): StoredCapture {
+    private fun requirePending(userId: String, accountId: String, captureId: String): StoredStarCapture {
         accountService.requireAccount(userId, accountId)
         cleanupExpired()
-        val capture = captures[CaptureKey(userId, accountId, captureId)] ?: missing("星石采集不存在")
+        val capture = stateStore.find(StarCaptureKey(userId, accountId, captureId)) ?: missing("星石采集不存在")
         if (capture.consumed) missing("星石采集已被消费")
+        if (!Instant.now().isBefore(capture.expiresAt)) missing("星石采集已过期")
         return capture
     }
 
@@ -311,11 +320,13 @@ class StarCaptureTransportService(
         return StarCaptureSection(images, relations, complete, stopReason)
     }
 
-    private fun sameContent(existing: StoredCapture, manifest: StarCaptureManifest, files: List<MultipartFile>): Boolean {
+    private fun sameContent(existing: StoredStarCapture, manifest: StarCaptureManifest, files: List<MultipartFile>): Boolean {
         if (existing.manifest != manifest) return false
         return existing.images.all { stored ->
             val retry = files.singleOrNull { it.originalFilename == stored.fileName } ?: return false
-            retry.inputStream.use { input -> Files.readAllBytes(stored.path).contentEquals(input.readAllBytes()) }
+            val storedPath = Path.of(stored.path)
+            if (!Files.isRegularFile(storedPath)) return false
+            retry.inputStream.use { input -> Files.readAllBytes(storedPath).contentEquals(input.readAllBytes()) }
         }
     }
 
@@ -342,32 +353,6 @@ class StarCaptureTransportService(
         throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "star_capture_invalid", message)
     private fun conflict(message: String): Nothing = throw InventoryApiException(HttpStatus.CONFLICT, "star_capture_conflict", message)
     private fun missing(message: String): Nothing = throw InventoryApiException(HttpStatus.NOT_FOUND, "star_capture_not_found", message)
-
-    private data class CaptureKey(val userId: String, val accountId: String, val captureId: String)
-    private data class StoredImage(val sourceImageId: String, val sourceOrder: Int, val fileName: String, val path: Path)
-    private data class StoredCapture(
-        val key: CaptureKey,
-        val manifest: StarCaptureManifest,
-        val images: List<StoredImage>,
-        val directory: Path,
-        val createdAt: Instant,
-        val expiresAt: Instant,
-        var consumed: Boolean = false,
-    ) {
-        fun toUploadResponse() = StarCaptureUploadResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt)
-        fun toPendingResponse() =
-            StarCapturePendingResponse(manifest.captureId, manifest.section, manifest.images.size, createdAt, expiresAt)
-        fun toManifestResponse() = StarCaptureManifestResponse(
-            captureId = manifest.captureId,
-            gameVersion = manifest.gameVersion,
-            section = manifest.section,
-            stopReason = manifest.stopReason,
-            images = manifest.images,
-            adjacentRelations = manifest.adjacentRelations,
-            source = manifest.source,
-            sections = manifest.sections,
-        )
-    }
 
     companion object {
         const val STAR_CAPTURE_READY_EVENT = "star_capture_ready"

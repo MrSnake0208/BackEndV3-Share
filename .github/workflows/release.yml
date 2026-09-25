@@ -1,21 +1,10 @@
 name: Release
 
-# 生产发布：仅由本仓库自己的 v* tag 触发，与 YuanHub 前端仓库完全独立。
-# 前端发版不会触发后端发布，后端也不必跟随前端版本号。
-#
-# SSH 连接复用 YuanHub 仓库 promo-site-deploy.yml 已在用的同一套凭据名：
-#   secrets.YUANHUB_PROMO_VPS_SSH_KEY / _HOST / _USER / _PORT
-# 注意：GitHub 的 secrets 按仓库隔离。若这几个是组织级(Organization) secret 且已授权给
-# 本仓库，则无需任何新增；否则请在本仓库添加同名 secret，值与 YuanHub 仓库保持一致。
-# 本应用专属配置(Variables)：YUANHUB_BACKEND_DEPLOY_DIR / YUANHUB_BACKEND_SERVICE /
-# YUANHUB_BACKEND_URL / YUANHUB_PRODUCT_VERSION / YUANHUB_KEEP_RELEASES
-#
-# 部署形态（原子切换 + 可回滚，避免覆盖到一半时线上残缺）：
-#   $YUANHUB_BACKEND_DEPLOY_DIR/releases/<tag>/app.jar
-#   $YUANHUB_BACKEND_DEPLOY_DIR/current -> releases/<tag>
-#   $YUANHUB_BACKEND_DEPLOY_DIR/shared/version.env  ← 由本 workflow 写入 YUANHUB_* 版本变量
-#   $YUANHUB_BACKEND_DEPLOY_DIR/shared/backend.env  ← 由运维维护，workflow 不会覆盖
-# systemd 单元参考 deploy/yuanhub-backend.service。
+# Production backend release:
+# GitHub-hosted runner performs the release gate, then server B fetches the exact commit
+# and builds the Spring Boot jar locally. No large jar is uploaded through GitHub Actions.
+# Traffic switches between blue:8080 and green:8081 only after the inactive slot passes
+# local readiness checks. Public verification failure automatically restores the old upstream.
 
 on:
   push:
@@ -24,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要发布的已存在 tag（例如 v0.2.0）"
+        description: "Existing immutable backend tag to deploy (for example v0.2.0)"
         required: true
 
 concurrency:
@@ -36,29 +25,42 @@ permissions:
 
 jobs:
   release:
-    name: Build and deploy to production
+    name: Server-build blue/green release
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     environment: production
 
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
     steps:
-      - name: Checkout
+      - name: Checkout release ref
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
 
-      - name: Resolve release version
+      - name: Resolve immutable release
+        shell: bash
         run: |
-          set -eu
-          test -n "$RELEASE_TAG" || { echo "::error::RELEASE_TAG is empty"; exit 1; }
-          release_commit="$(git rev-parse HEAD)"
-          echo "BACKEND_VERSION=$RELEASE_TAG" >> "$GITHUB_ENV"
+          set -euo pipefail
+          test -n "$RELEASE_TAG"
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "::error::backend release tag must start with v"; exit 1 ;;
+          esac
+          git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null || {
+            echo "::error::tag $RELEASE_TAG does not exist in this checkout"
+            exit 1
+          }
+          release_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$release_commit" != "$head_commit" ]; then
+            echo "::error::checked out commit $head_commit does not match tag $RELEASE_TAG ($release_commit)"
+            exit 1
+          fi
           echo "BACKEND_RELEASE_COMMIT=$release_commit" >> "$GITHUB_ENV"
-          echo "Releasing backend $RELEASE_TAG (commit ${release_commit::7})"
+          echo "Releasing $RELEASE_TAG (${release_commit::7})"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -67,194 +69,152 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Unit tests
-        run: ./gradlew test --console=plain
-
-      - name: Build jar
-        run: ./gradlew assemble --console=plain
-
-      - name: Collect release artifact
+      - name: Release gate
+        shell: bash
         run: |
-          set -eu
-          jar="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' | head -n 1)"
-          test -n "$jar" || { echo "::error::no bootJar produced"; exit 1; }
-          cp "$jar" build/libs/app.jar
-          ls -l build/libs/app.jar
-          echo "Artifact: $jar"
-
-      - name: Upload jar artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: yuanhub-backend-${{ env.BACKEND_VERSION }}
-          path: build/libs/app.jar
-          retention-days: 30
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew test --console=plain
 
       - name: Validate deployment configuration
         env:
           BACKEND_ROOT: ${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}
-          BACKEND_SERVICE: ${{ vars.YUANHUB_BACKEND_SERVICE }}
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
           PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
+          DEPLOY_HOST: ${{ secrets.YUANHUB_BACKEND_VPS_HOST }}
+          DEPLOY_USER: ${{ secrets.YUANHUB_BACKEND_VPS_USER }}
+          DEPLOY_PORT: ${{ secrets.YUANHUB_BACKEND_VPS_PORT }}
+          DEPLOY_KEY: ${{ secrets.YUANHUB_BACKEND_VPS_SSH_KEY }}
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           test -n "$BACKEND_ROOT" || { echo "::error::YUANHUB_BACKEND_DEPLOY_DIR is not configured"; exit 1; }
+          case "$BACKEND_ROOT" in /*) ;; *) echo "::error::YUANHUB_BACKEND_DEPLOY_DIR must be absolute"; exit 1 ;; esac
           test "$BACKEND_ROOT" != "/" || { echo "::error::YUANHUB_BACKEND_DEPLOY_DIR must not be /"; exit 1; }
-          case "$BACKEND_ROOT" in
-            /*) ;;
-            *) echo "::error::YUANHUB_BACKEND_DEPLOY_DIR must be an absolute path"; exit 1 ;;
-          esac
-          test -n "$BACKEND_SERVICE" || { echo "::error::YUANHUB_BACKEND_SERVICE is not configured"; exit 1; }
           test -n "$BACKEND_URL" || { echo "::error::YUANHUB_BACKEND_URL is not configured"; exit 1; }
-          case "$BACKEND_URL" in
-            https://*) ;;
-            *) echo "::error::YUANHUB_BACKEND_URL must use https://"; exit 1 ;;
-          esac
+          case "$BACKEND_URL" in https://*) ;; *) echo "::error::YUANHUB_BACKEND_URL must use https://"; exit 1 ;; esac
           test -n "$PRODUCT_VERSION" || { echo "::error::YUANHUB_PRODUCT_VERSION is not configured"; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo "::error::YUANHUB_BACKEND_VPS_HOST is not configured"; exit 1; }
+          test -n "$DEPLOY_USER" || { echo "::error::YUANHUB_BACKEND_VPS_USER is not configured"; exit 1; }
+          test -n "$DEPLOY_PORT" || { echo "::error::YUANHUB_BACKEND_VPS_PORT is not configured"; exit 1; }
+          test -n "$DEPLOY_KEY" || { echo "::error::YUANHUB_BACKEND_VPS_SSH_KEY is not configured"; exit 1; }
 
-      - name: Validate deployment SSH key
-        env:
-          DEPLOY_KEY: ${{ secrets.YUANHUB_PROMO_VPS_SSH_KEY }}
-        run: |
-          set -eu
-          test -n "$DEPLOY_KEY" || {
-            echo "::error::YUANHUB_PROMO_VPS_SSH_KEY is empty or unavailable. Add it as an environment secret."
-            exit 1
-          }
-          case "$DEPLOY_KEY" in
-            "-----BEGIN OPENSSH PRIVATE KEY-----"*|"-----BEGIN RSA PRIVATE KEY-----"*) ;;
-            *)
-              echo "::error::YUANHUB_PROMO_VPS_SSH_KEY must contain the complete private key, including BEGIN and END lines."
-              exit 1
-              ;;
-          esac
           key_file="$(mktemp)"
           trap 'rm -f "$key_file"' EXIT
           chmod 600 "$key_file"
           printf '%s\n' "$DEPLOY_KEY" > "$key_file"
           ssh-keygen -y -f "$key_file" >/dev/null
 
-      - name: Upload jar to release directory
-        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
-        with:
-          host: ${{ secrets.YUANHUB_PROMO_VPS_HOST }}
-          username: ${{ secrets.YUANHUB_PROMO_VPS_USER }}
-          key: ${{ secrets.YUANHUB_PROMO_VPS_SSH_KEY }}
-          port: ${{ secrets.YUANHUB_PROMO_VPS_PORT }}
-          source: "build/libs/app.jar"
-          target: "${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}/releases/${{ env.BACKEND_VERSION }}/"
-          overwrite: true
-          strip_components: 2
-
-      - name: Activate release and restart service
+      - name: Fetch, build and blue-green deploy on server B
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         env:
           BACKEND_ROOT: ${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}
-          BACKEND_SERVICE: ${{ vars.YUANHUB_BACKEND_SERVICE }}
-          BACKEND_VERSION: ${{ env.BACKEND_VERSION }}
+          BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
           PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
           KEEP_RELEASES: ${{ vars.YUANHUB_KEEP_RELEASES }}
+          DRAIN_SECONDS: ${{ vars.YUANHUB_BACKEND_DRAIN_SECONDS }}
+          LEGACY_SERVICE: ${{ vars.YUANHUB_BACKEND_LEGACY_SERVICE }}
+          RELEASE_VERSION: ${{ env.RELEASE_TAG }}
+          RELEASE_COMMIT: ${{ env.BACKEND_RELEASE_COMMIT }}
+          REPO_URL: git@github.com:${{ github.repository }}.git
         with:
-          host: ${{ secrets.YUANHUB_PROMO_VPS_HOST }}
-          username: ${{ secrets.YUANHUB_PROMO_VPS_USER }}
-          key: ${{ secrets.YUANHUB_PROMO_VPS_SSH_KEY }}
-          port: ${{ secrets.YUANHUB_PROMO_VPS_PORT }}
-          envs: BACKEND_ROOT,BACKEND_SERVICE,BACKEND_VERSION,PRODUCT_VERSION,KEEP_RELEASES
+          host: ${{ secrets.YUANHUB_BACKEND_VPS_HOST }}
+          username: ${{ secrets.YUANHUB_BACKEND_VPS_USER }}
+          key: ${{ secrets.YUANHUB_BACKEND_VPS_SSH_KEY }}
+          port: ${{ secrets.YUANHUB_BACKEND_VPS_PORT }}
+          command_timeout: 60m
+          envs: BACKEND_ROOT,BACKEND_URL,PRODUCT_VERSION,KEEP_RELEASES,DRAIN_SECONDS,LEGACY_SERVICE,RELEASE_VERSION,RELEASE_COMMIT,REPO_URL
           script: |
-            set -eu
-            test -n "$BACKEND_ROOT" || { echo "YUANHUB_BACKEND_DEPLOY_DIR is not configured"; exit 1; }
-            test -n "$BACKEND_SERVICE" || { echo "YUANHUB_BACKEND_SERVICE is not configured"; exit 1; }
+            set -euo pipefail
 
-            release_dir="$BACKEND_ROOT/releases/$BACKEND_VERSION"
-            test -f "$release_dir/app.jar" || {
-              echo "release directory is incomplete: $release_dir"
+            : "${BACKEND_ROOT:?}"
+            : "${BACKEND_URL:?}"
+            : "${PRODUCT_VERSION:?}"
+            : "${RELEASE_VERSION:?}"
+            : "${RELEASE_COMMIT:?}"
+            : "${REPO_URL:?}"
+
+            source_dir="$BACKEND_ROOT/.source"
+            mkdir -p "$BACKEND_ROOT"
+            export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new'
+
+            if [ ! -d "$source_dir/.git" ]; then
+              rm -rf "$source_dir"
+              git clone --filter=blob:none "$REPO_URL" "$source_dir"
+            fi
+
+            cd "$source_dir"
+            git remote set-url origin "$REPO_URL"
+            git fetch --force --prune --tags origin
+            git checkout --detach "$RELEASE_COMMIT"
+            git reset --hard "$RELEASE_COMMIT"
+            git clean -ffdx -e .gradle/ -e build/
+
+            actual_commit="$(git rev-parse HEAD)"
+            [ "$actual_commit" = "$RELEASE_COMMIT" ] || {
+              echo "Checked-out commit $actual_commit does not match expected $RELEASE_COMMIT"
               exit 1
             }
 
-            mkdir -p "$BACKEND_ROOT/shared"
-            # 只写 workflow 管理的版本变量文件，绝不覆盖运维维护的 backend.env。
-            version_env="$BACKEND_ROOT/shared/version.env.tmp"
-            {
-              echo "YUANHUB_BACKEND_VERSION=$BACKEND_VERSION"
-              echo "YUANHUB_PRODUCT_VERSION=$PRODUCT_VERSION"
-            } > "$version_env"
-            chmod 0640 "$version_env"
-            mv -f "$version_env" "$BACKEND_ROOT/shared/version.env"
+            chmod +x deploy/blue-green-deploy.sh
+            KEEP_RELEASES="${KEEP_RELEASES:-5}" \
+            DRAIN_SECONDS="${DRAIN_SECONDS:-45}" \
+            LEGACY_SERVICE="${LEGACY_SERVICE:-yuanhub-backend}" \
+            BACKEND_ROOT="$BACKEND_ROOT" \
+            BACKEND_URL="$BACKEND_URL" \
+            PRODUCT_VERSION="$PRODUCT_VERSION" \
+            RELEASE_VERSION="$RELEASE_VERSION" \
+            RELEASE_COMMIT="$RELEASE_COMMIT" \
+              ./deploy/blue-green-deploy.sh
 
-            ln -sfn "releases/$BACKEND_VERSION" "$BACKEND_ROOT/.current-tmp"
-            mv -T "$BACKEND_ROOT/.current-tmp" "$BACKEND_ROOT/current"
-            echo "current -> $(readlink "$BACKEND_ROOT/current")"
-
-            # 优先用免密 sudo 重启（见 docs/deployment.md 的 sudoers 配置），
-            # 失败时退回直接 systemctl 并明确说明原因，便于排查权限问题。
-            if sudo -n systemctl restart "$BACKEND_SERVICE" 2>/dev/null; then
-              echo "restarted $BACKEND_SERVICE via sudo -n"
-            else
-              echo "sudo -n systemctl restart failed; retrying without sudo"
-              systemctl restart "$BACKEND_SERVICE"
-            fi
-            systemctl is-active --quiet "$BACKEND_SERVICE" || {
-              echo "service $BACKEND_SERVICE is not active after restart"
-              systemctl --no-pager --lines=50 status "$BACKEND_SERVICE" || true
-              exit 1
-            }
-
-            keep="${KEEP_RELEASES:-5}"
-            case "$keep" in
-              ''|*[!0-9]*) keep=5 ;;
-            esac
-            if [ "$keep" -gt 0 ]; then
-              cd "$BACKEND_ROOT/releases"
-              # shellcheck disable=SC2012
-              ls -1dt -- */ 2>/dev/null | tail -n "+$((keep + 1))" | while read -r old; do
-                case "$old" in
-                  "$BACKEND_VERSION"/*) continue ;;
-                esac
-                rm -rf -- "$old"
-              done
-            fi
-
-      - name: Health check
+      - name: Verify public deployment from GitHub runner
         env:
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
+        shell: bash
         run: |
-          set -eu
-          test -n "$BACKEND_URL" || { echo "::error::YUANHUB_BACKEND_URL is not configured"; exit 1; }
-          url="${BACKEND_URL%/}/version"
-          attempt=1
-          while [ "$attempt" -le 20 ]; do
-            payload="$(curl --silent --show-error --location --max-time 10 "$url" || true)"
-            reported="$(printf '%s' "$payload" | jq -r '.data.backend_version // ""' 2>/dev/null || true)"
-            if [ "$reported" = "$BACKEND_VERSION" ]; then
-              echo "Health check passed: /version reports backend_version=$reported"
-              exit 0
+          set -euo pipefail
+          base="${BACKEND_URL%/}"
+          for attempt in $(seq 1 10); do
+            payload="$(curl --fail --silent --show-error --location --max-time 10 \
+              -H 'Cache-Control: no-cache' \
+              "$base/version?deploy=$BACKEND_RELEASE_COMMIT" || true)"
+            version="$(printf '%s' "$payload" | jq -r '.data.backend_version // ""' 2>/dev/null || true)"
+            commit="$(printf '%s' "$payload" | jq -r '.data.backend_commit // ""' 2>/dev/null || true)"
+            if [ "$version" = "$RELEASE_TAG" ] && [ -n "$commit" ]; then
+              case "$BACKEND_RELEASE_COMMIT" in
+                "$commit"*)
+                  echo "Verified public backend: version=$version commit=$commit"
+                  exit 0
+                  ;;
+              esac
             fi
-            echo "Attempt ${attempt}: backend_version='${reported}' (want '${BACKEND_VERSION}')"
-            attempt=$((attempt + 1))
-            sleep 6
+            echo "Attempt $attempt: version='$version' commit='$commit'"
+            sleep 3
           done
-          echo "::error::Health check failed: ${url} did not report backend_version=${BACKEND_VERSION}"
+          echo "::error::public backend did not converge to $RELEASE_TAG / $BACKEND_RELEASE_COMMIT"
           exit 1
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          YUANHUB_BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
+          BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           notes="$(mktemp)"
           {
-            echo "## Backend ${RELEASE_TAG}"
+            echo "## Backend $RELEASE_TAG"
             echo
-            echo "- backendVersion: \`${BACKEND_VERSION}\`"
-            echo "- backendCommit: \`${BACKEND_RELEASE_COMMIT::7}\`"
-            echo "- deployedTo: \`${YUANHUB_BACKEND_URL:-}\`"
+            echo "- backendVersion: $RELEASE_TAG"
+            echo "- backendCommit: ${BACKEND_RELEASE_COMMIT::7}"
+            echo "- deployment: server-build blue/green"
+            echo "- deployedTo: $BACKEND_URL"
             echo
-            echo "Jar 产物见本 Release 附件（亦可在 Actions Artifacts 中下载）。"
+            echo "The production jar is built on server B from the exact tagged commit; no large jar is uploaded by GitHub Actions."
           } > "$notes"
-          gh release create "$RELEASE_TAG" build/libs/app.jar \
-            --title "Backend $RELEASE_TAG" \
-            --notes-file "$notes" \
-            --verify-tag
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "Backend $RELEASE_TAG" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" --title "Backend $RELEASE_TAG" --notes-file "$notes" --verify-tag
+          fi

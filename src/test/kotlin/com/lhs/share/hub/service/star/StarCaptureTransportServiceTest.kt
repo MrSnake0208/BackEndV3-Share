@@ -28,6 +28,7 @@ class StarCaptureTransportServiceTest {
 
     private val accountService = mockk<SubAccountService>()
     private val eventService = mockk<AccountEventService>(relaxed = true)
+    private lateinit var stateStore: FakeStarCaptureStateStore
     private lateinit var service: StarCaptureTransportService
 
     @BeforeEach
@@ -39,7 +40,8 @@ class StarCaptureTransportServiceTest {
             starCapture.dir = temporaryDirectory.resolve("captures").toString()
             starCapture.ttlMinutes = 30
         }
-        service = StarCaptureTransportService(jacksonObjectMapper(), properties, accountService, eventService)
+        stateStore = FakeStarCaptureStateStore()
+        service = StarCaptureTransportService(jacksonObjectMapper(), properties, accountService, eventService, stateStore)
     }
 
     @Test
@@ -221,5 +223,54 @@ class StarCaptureTransportServiceTest {
             0x1A,
             0x0A,
         )
+    }
+}
+
+private class FakeStarCaptureStateStore : StarCaptureStateStore {
+    private val captures = linkedMapOf<StarCaptureKey, StoredStarCapture>()
+
+    override fun find(key: StarCaptureKey): StoredStarCapture? = captures[key]
+
+    override fun create(capture: StoredStarCapture, ttlSeconds: Long): Boolean {
+        if (captures.containsKey(capture.key)) return false
+        captures[capture.key] = capture
+        return true
+    }
+
+    override fun latestPending(userId: String, accountId: String, now: Instant): StoredStarCapture? =
+        captures.values
+            .asSequence()
+            .filter {
+                it.key.userId == userId &&
+                    it.key.accountId == accountId &&
+                    !it.consumed &&
+                    now.isBefore(it.expiresAt)
+            }
+            .maxByOrNull { it.createdAt }
+
+    override fun markConsumed(capture: StoredStarCapture): StoredStarCapture {
+        val updated = capture.copy(consumed = true)
+        captures[capture.key] = updated
+        return updated
+    }
+
+    override fun dueCleanup(now: Instant, limit: Long): List<StarCaptureCleanupRecord> =
+        captures.values
+            .asSequence()
+            .filter { !now.isBefore(it.expiresAt) }
+            .take(limit.toInt())
+            .map {
+                StarCaptureCleanupRecord(
+                    redisMember = it.key.captureId,
+                    entry = StarCaptureCleanupEntry(it.key, it.directory),
+                )
+            }
+            .toList()
+
+    override fun claimCleanup(record: StarCaptureCleanupRecord): Boolean = true
+
+    override fun completeCleanup(record: StarCaptureCleanupRecord) {
+        val current = captures[record.entry.key]
+        if (current == null || current.directory == record.entry.directory) captures.remove(record.entry.key)
     }
 }
