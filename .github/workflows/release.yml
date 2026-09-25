@@ -221,8 +221,14 @@ jobs:
 
             cd "$source_dir"
             git remote set-url origin "$REPO_URL"
+
+            # .source is only a deployment cache: discard server-side edits before
+            # switching commits so stale manual changes cannot block a release.
+            git reset --hard HEAD
+            git clean -ffdx -e .gradle/ -e build/
+
             git fetch --force --prune --tags origin
-            git checkout --detach "$RELEASE_COMMIT"
+            git checkout --force --detach "$RELEASE_COMMIT"
             git reset --hard "$RELEASE_COMMIT"
             git clean -ffdx -e .gradle/ -e build/
 
