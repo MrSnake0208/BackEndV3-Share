@@ -174,6 +174,14 @@ class FeedbackTicketQueryRepository(
         FeedbackTicket::class.java,
     )
 
+    /** 定向修改反馈类型。 */
+    fun setType(ticketId: String, type: String): FeedbackTicket? = template.findAndModify(
+        Query(Criteria.where("_id").`is`(ticketId)),
+        Update().set("type", type),
+        FindAndModifyOptions.options().returnNew(true),
+        FeedbackTicket::class.java,
+    )
+
     /** 定向写入目标/完成版本与展示名快照。 */
     fun setVersions(
         ticketId: String,

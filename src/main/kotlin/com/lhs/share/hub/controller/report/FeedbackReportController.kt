@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.report
 
+import com.lhs.share.config.accesslimit.AccessLimit
 import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
@@ -118,6 +119,7 @@ class FeedbackReportController(
      */
     @Operation(summary = "支持公开反馈", description = "仅 PUBLIC 反馈可支持;服务端按唯一约束去重。")
     @RequireJwt
+    @AccessLimit(times = 30, second = 60)
     @PostMapping("/{id}/support")
     fun support(@PathVariable id: String): ApiResult<PublicFeedbackDetail> {
         val userId = helper.requireUserId()
@@ -129,6 +131,7 @@ class FeedbackReportController(
      */
     @Operation(summary = "取消支持公开反馈")
     @RequireJwt
+    @AccessLimit(times = 30, second = 60)
     @DeleteMapping("/{id}/support")
     fun unsupport(@PathVariable id: String): ApiResult<PublicFeedbackDetail> {
         val userId = helper.requireUserId()
