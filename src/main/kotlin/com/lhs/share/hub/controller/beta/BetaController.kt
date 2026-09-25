@@ -26,26 +26,26 @@ class BetaController(private val service: BetaService, private val helper: Authe
 
     @RequireJwt
     @GetMapping("/me")
-    @AccessLimit(times = 60, second = 60)
+    @AccessLimit(times = 600, second = 60)
     @Operation(summary = "本人资格", description = "无需已开通；含同次读取的campaign状态")
     fun me(): ResponseEntity<ApiResult<BetaMeResponse>> = reply(service.me(helper.requireUserId()))
 
     @RequireJwt
     @PostMapping("/join")
-    @AccessLimit(times = 10, second = 10)
+    @AccessLimit(times = 100, second = 10)
     @Operation(summary = "自助报名", description = "确认须知后受理，满额自动候补；重复请求不重复占位")
     fun join(@RequestBody request: BetaJoinRequest): ResponseEntity<ApiResult<BetaMeResponse>> =
         reply(service.join(helper.requireUserId(), request))
 
     @RequireJwt
     @DeleteMapping("/waitlist")
-    @AccessLimit(times = 10, second = 10)
+    @AccessLimit(times = 100, second = 10)
     @Operation(summary = "取消候补", description = "只可取消WAITING，不回收ACTIVE；再次报名排到队尾")
     fun withdraw(): ResponseEntity<ApiResult<BetaMeResponse>> = reply(service.withdraw(helper.requireUserId()))
 
     @RequireJwt
     @PostMapping("/test-reset")
-    @AccessLimit(times = 10, second = 10)
+    @AccessLimit(times = 100, second = 10)
     @Operation(summary = "重置本地内测（自助）", description = "仅在本地测试模式生效；只清空隔离的本地活动并立即重新开放，不影响正式内测")
     fun testReset(): ResponseEntity<ApiResult<BetaMeResponse>> = reply(service.resetLocalSelf(helper.requireUserId()))
 
