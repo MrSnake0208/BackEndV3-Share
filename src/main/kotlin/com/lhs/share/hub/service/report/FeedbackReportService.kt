@@ -744,6 +744,10 @@ class FeedbackReportService(
             publishedAt = ticket.publishedAt,
             publicUpdatedAt = ticket.publicUpdatedAt,
             completedAt = ticket.completedAt,
+            targetVersionId = ticket.targetVersionId,
+            targetVersionLabel = ticket.targetVersionLabel,
+            completedVersionId = ticket.completedVersionId,
+            completedVersionLabel = ticket.completedVersionLabel,
             messages = messageResponses,
             hasAdminReply = ticket.hasAdminReply || ticket.messages.any { it.senderKind == "ADMIN" },
             quota = FeedbackReportResponse.QuotaInfo(

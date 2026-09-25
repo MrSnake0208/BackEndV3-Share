@@ -7,6 +7,7 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.report.request.FeedbackMergeRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
+import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
 import com.lhs.share.hub.service.report.FeedbackPublicAdministrationService
 import com.lhs.share.hub.service.report.FeedbackReportService
@@ -67,6 +68,14 @@ class AdminFeedbackController(
     fun merge(@PathVariable id: String, @Valid @RequestBody request: FeedbackMergeRequest): ApiResult<FeedbackReportResponse> {
         val userId = helper.requireUserId()
         administrationService.merge(userId, id, request)
+        return success(feedbackReportService.getById(userId, id))
+    }
+
+    @Operation(summary = "关联目标/完成版本")
+    @PatchMapping("/{id}/versions")
+    fun updateVersions(@PathVariable id: String, @Valid @RequestBody request: FeedbackVersionRequest): ApiResult<FeedbackReportResponse> {
+        val userId = helper.requireUserId()
+        administrationService.updateVersions(userId, id, request)
         return success(feedbackReportService.getById(userId, id))
     }
 }

@@ -4,6 +4,8 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.controller.report.request.FeedbackMergeRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
+import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
+import com.lhs.share.hub.repository.ChangelogEntryRepository
 import com.lhs.share.hub.repository.FeedbackSupportRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
@@ -26,6 +28,7 @@ class FeedbackPublicAdministrationService(
     private val ticketRepository: FeedbackTicketRepository,
     private val queryRepository: FeedbackTicketQueryRepository,
     private val supportRepository: FeedbackSupportRepository,
+    private val changelogEntryRepository: ChangelogEntryRepository,
     private val accessService: FeedbackAccessService,
 ) {
     private val random = SecureRandom()
@@ -121,6 +124,41 @@ class FeedbackPublicAdministrationService(
         queryRepository.incrementMergedCount(rootId)
         autoSupport(root, source.reporterUserId)
         return updated
+    }
+
+    /**
+     * 关联/清除目标版本与完成版本。
+     *
+     * 版本使用更新日志条目 id;完成版本必须是已发布版本,目标版本允许草稿。
+     * label 取更新日志版本标签作为展示快照。
+     */
+    fun updateVersions(adminUserId: String, ticketId: String, request: FeedbackVersionRequest): FeedbackTicket {
+        val ticket = requireTicket(ticketId)
+        requireManage(adminUserId, categoryOf(ticket))
+        val target = resolveVersion(request.targetVersionId, requirePublished = false)
+        val completed = resolveVersion(request.completedVersionId, requirePublished = true)
+        return queryRepository.setVersions(
+            ticketId = ticketId,
+            targetVersionId = target?.first,
+            targetVersionLabel = target?.second,
+            completedVersionId = completed?.first,
+            completedVersionLabel = completed?.second,
+        ) ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
+    }
+
+    private fun resolveVersion(versionId: String?, requirePublished: Boolean): Pair<String, String>? {
+        val id = versionId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val entry = changelogEntryRepository.findById(id).orElseThrow {
+            ApiResultException(HttpStatus.BAD_REQUEST.value(), "版本不存在: $id")
+        }
+        if (requirePublished && entry.publishedRevision == null) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "完成版本必须是已发布的更新日志")
+        }
+        val label = entry.publishedRevision?.versionLabel ?: entry.workingRevision?.versionLabel
+        if (label.isNullOrBlank()) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "版本缺少标签: $id")
+        }
+        return id to label
     }
 
     // ========== 内部方法 ==========

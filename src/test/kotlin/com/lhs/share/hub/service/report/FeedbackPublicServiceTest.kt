@@ -64,13 +64,13 @@ class FeedbackPublicServiceTest {
     @Test
     fun `公开列表只暴露公开字段并标记当前用户支持`() {
         every {
-            queryRepository.publicSearch(any(), any(), any(), any(), any())
+            queryRepository.publicSearch(any(), any(), any(), any(), any(), any())
         } returns PageImpl(listOf(ticket("rpt_1", supportCount = 3)), PageRequest.of(0, 20), 1)
         every {
             supportRepository.findByUserIdAndFeedbackIdIn("user", listOf("rpt_1"))
         } returns listOf(FeedbackSupport(feedbackId = "rpt_1", userId = "user"))
 
-        val page = service.list("user", 1, 20, null, null, null, "latest")
+        val page = service.list("user", 1, 20, null, null, null, null, "latest")
 
         assertEquals(1, page.total)
         assertEquals(1, page.items.size)
@@ -188,7 +188,7 @@ class FeedbackPublicServiceTest {
     @Test
     fun `列表分页参数非法抛 400`() {
         val error = assertThrows(ApiResultException::class.java) {
-            service.list("user", 0, 20, null, null, null, "latest")
+            service.list("user", 0, 20, null, null, null, null, "latest")
         }
         assertEquals(400, error.statusCode)
     }
