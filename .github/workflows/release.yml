@@ -76,11 +76,35 @@ jobs:
           chmod +x ./gradlew
           ./gradlew test --console=plain
 
+      - name: Resolve product version
+        id: product-version
+        env:
+          CONFIGURED_PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
+          BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          product_version="$CONFIGURED_PRODUCT_VERSION"
+
+          if [ -z "$product_version" ] && [ -n "$BACKEND_URL" ]; then
+            echo "YUANHUB_PRODUCT_VERSION is not visible in vars; falling back to the currently deployed backend."
+            payload="$(curl --fail --silent --show-error --location --max-time 10 "${BACKEND_URL%/}/version" || true)"
+            product_version="$(printf '%s' "$payload" | jq -r '.data.product_version // ""' 2>/dev/null || true)"
+          fi
+
+          test -n "$product_version" || {
+            echo "::error::Could not resolve YuanHub product version from GitHub Variables or the current /version endpoint."
+            exit 1
+          }
+
+          echo "Resolved product version: $product_version"
+          echo "value=$product_version" >> "$GITHUB_OUTPUT"
+
       - name: Validate deployment configuration
         env:
           BACKEND_ROOT: ${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
-          PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
+          PRODUCT_VERSION: ${{ steps.product-version.outputs.value }}
           DEPLOY_HOST: ${{ secrets.YUANHUB_BACKEND_VPS_HOST }}
           DEPLOY_USER: ${{ secrets.YUANHUB_BACKEND_VPS_USER }}
           DEPLOY_PORT: ${{ secrets.YUANHUB_BACKEND_VPS_PORT }}
@@ -110,7 +134,7 @@ jobs:
         env:
           BACKEND_ROOT: ${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
-          PRODUCT_VERSION: ${{ vars.YUANHUB_PRODUCT_VERSION }}
+          PRODUCT_VERSION: ${{ steps.product-version.outputs.value }}
           KEEP_RELEASES: ${{ vars.YUANHUB_KEEP_RELEASES }}
           DRAIN_SECONDS: ${{ vars.YUANHUB_BACKEND_DRAIN_SECONDS }}
           LEGACY_SERVICE: ${{ vars.YUANHUB_BACKEND_LEGACY_SERVICE }}
