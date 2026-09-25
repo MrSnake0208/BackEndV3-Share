@@ -218,7 +218,7 @@ class InventoryController(
     @Operation(summary = "删除单条记录(重放重建库存)")
     @InventoryDeleteResponses
     @RequireJwt
-    @AccessLimit(times = 10, second = 60)
+    @AccessLimit(times = 100, second = 60)
     @DeleteMapping("/records/{recordId}")
     fun deleteRecord(
         @PathVariable(name = "recordId") recordId: String,

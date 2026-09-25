@@ -40,7 +40,7 @@ class LedgerPlanController(
      */
     @Operation(summary = "创建方案")
     @RequireJwt
-    @AccessLimit(times = 10, second = 60)
+    @AccessLimit(times = 100, second = 60)
     @PostMapping
     fun create(@Valid @RequestBody request: LedgerPlanCreateRequest): ApiResult<LedgerPlanResponse> =
         success(ledgerPlanService.create(helper.requireUserId(), request))
@@ -50,7 +50,7 @@ class LedgerPlanController(
      */
     @Operation(summary = "整体替换更新方案")
     @RequireJwt
-    @AccessLimit(times = 10, second = 60)
+    @AccessLimit(times = 100, second = 60)
     @PutMapping("/{id}")
     fun update(
         @PathVariable(name = "id") id: String,
@@ -80,7 +80,7 @@ class LedgerPlanController(
      */
     @Operation(summary = "删除方案")
     @RequireJwt
-    @AccessLimit(times = 10, second = 60)
+    @AccessLimit(times = 100, second = 60)
     @DeleteMapping("/{id}")
     fun delete(@PathVariable(name = "id") id: String): ApiResult<Boolean> {
         ledgerPlanService.delete(helper.requireUserId(), id)
