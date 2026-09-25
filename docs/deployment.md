@@ -98,7 +98,7 @@ yuanhub_backend upstream
 服务器 B 需要：
 
 - Git
-- Java 21
+- Java 21 JDK（必须包含 `javac`，仅安装 JRE 不足以在服务器构建）
 - curl
 - Python 3
 - Nginx

@@ -34,7 +34,7 @@ NGINX_ACTIVE_FILE="$BACKEND_ROOT/nginx/active.conf"
 
 mkdir -p "$RELEASES_DIR" "$SLOTS_DIR" "$STATE_DIR" "$BACKEND_ROOT/nginx" "$BACKEND_ROOT/logs"
 
-for tool in git java curl python3; do
+for tool in git java javac curl python3; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "$tool is required on the deployment server" >&2
     exit 1
@@ -141,8 +141,13 @@ if [ "$reuse_release" -ne 1 ]; then
   }
 
   java_major="$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  javac_major="$(javac -version 2>&1 | sed -n 's/^javac \([0-9][0-9]*\).*/\1/p' | head -n 1)"
   [ "$java_major" = "21" ] || {
-    echo "Java 21 is required on the deployment server; found $(java -version 2>&1 | head -n1)" >&2
+    echo "Java 21 runtime is required on the deployment server; found $(java -version 2>&1 | head -n1)" >&2
+    exit 1
+  }
+  [ "$javac_major" = "21" ] || {
+    echo "Java 21 JDK compiler is required on the deployment server; found $(javac -version 2>&1 | head -n1)" >&2
     exit 1
   }
 
