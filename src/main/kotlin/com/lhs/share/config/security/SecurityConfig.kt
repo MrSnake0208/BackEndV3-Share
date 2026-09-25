@@ -105,6 +105,8 @@ class SecurityConfig(
                 "/",
                 "/error",
                 "/version",
+                "/actuator/health",
+                "/actuator/health/**",
                 "/v1/beta/status",
                 "/demo/**",
                 "/user/info",

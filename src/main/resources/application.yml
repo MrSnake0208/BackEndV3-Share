@@ -22,8 +22,11 @@ spring:
     type: caffeine
     caffeine:
       spec: maximumSize=500,expireAfterWrite=300s
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 server:
   port: 8080
+  shutdown: graceful
   forward-headers-strategy: framework
   tomcat:
     # 限制 post 表单最大为 30KB
@@ -32,6 +35,24 @@ server:
     max-part-count: 50
   compression:
     enabled: true
+
+management:
+  server:
+    # 蓝绿部署时由 slot 环境变量覆盖为 18080 / 18081；其他环境默认与应用端口一致。
+    # management.server.address 仅在蓝绿 slot env 中设置，因为它要求管理端口与应用端口不同。
+    port: ${MANAGEMENT_SERVER_PORT:${server.port}}
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,mongo,redis,diskSpace
 
 logging:
   file:
