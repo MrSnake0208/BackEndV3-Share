@@ -22,6 +22,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
@@ -62,24 +63,26 @@ jobs:
           echo "BACKEND_RELEASE_COMMIT=$release_commit" >> "$GITHUB_ENV"
           echo "Releasing $RELEASE_TAG (${release_commit::7})"
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Restore Gradle cache
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-provider: basic
-          cache-read-only: true
-
-      - name: Release gate
+      - name: Require successful CI for release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x ./gradlew
-          ./gradlew test --console=plain
+          ci_run_id="$(
+            gh run list \
+              --workflow ci.yml \
+              --commit "$BACKEND_RELEASE_COMMIT" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty'
+          )"
+          test -n "$ci_run_id" || {
+            echo "::error::No successful CI run exists for release commit $BACKEND_RELEASE_COMMIT"
+            exit 1
+          }
+          echo "Using successful CI run $ci_run_id for $BACKEND_RELEASE_COMMIT"
 
       - name: Resolve product version
         id: product-version
@@ -133,6 +136,50 @@ jobs:
           chmod 600 "$key_file"
           printf '%s\n' "$DEPLOY_KEY" > "$key_file"
           ssh-keygen -y -f "$key_file" >/dev/null
+
+      - name: Preflight deployment server
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          BACKEND_ROOT: ${{ vars.YUANHUB_BACKEND_DEPLOY_DIR }}
+          REPO_URL: git@github.com:${{ github.repository }}.git
+        with:
+          host: ${{ secrets.YUANHUB_BACKEND_VPS_HOST }}
+          username: ${{ secrets.YUANHUB_BACKEND_VPS_USER }}
+          key: ${{ secrets.YUANHUB_BACKEND_VPS_SSH_KEY }}
+          port: ${{ secrets.YUANHUB_BACKEND_VPS_PORT }}
+          command_timeout: 2m
+          envs: BACKEND_ROOT,REPO_URL
+          script: |
+            set -euo pipefail
+
+            for tool in git java javac curl python3; do
+              command -v "$tool" >/dev/null 2>&1 || {
+                echo "$tool is required on the deployment server" >&2
+                exit 1
+              }
+            done
+
+            java_major="$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+            javac_major="$(javac -version 2>&1 | sed -n 's/^javac \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+            [ "$java_major" = "21" ] || {
+              echo "Java 21 runtime is required; found $(java -version 2>&1 | head -n1)" >&2
+              exit 1
+            }
+            [ "$javac_major" = "21" ] || {
+              echo "Java 21 JDK compiler is required; found $(javac -version 2>&1 | head -n1)" >&2
+              exit 1
+            }
+
+            [ -f "$BACKEND_ROOT/shared/backend.env" ] || {
+              echo "Missing $BACKEND_ROOT/shared/backend.env" >&2
+              exit 1
+            }
+            command -v nginx >/dev/null 2>&1 || { echo "nginx is required on the deployment server" >&2; exit 1; }
+            command -v systemctl >/dev/null 2>&1 || { echo "systemctl is required on the deployment server" >&2; exit 1; }
+
+            export GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
+            git ls-remote "$REPO_URL" HEAD >/dev/null
+            echo "Deployment server preflight passed: Java/Javac 21 and repository access are ready."
 
       - name: Fetch, build and blue-green deploy on server B
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
