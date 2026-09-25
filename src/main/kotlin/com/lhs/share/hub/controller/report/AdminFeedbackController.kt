@@ -10,11 +10,13 @@ import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
 import com.lhs.share.hub.controller.report.request.FeedbackTypeUpdateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
+import com.lhs.share.hub.controller.report.response.FeedbackVersionOptionResponse
 import com.lhs.share.hub.service.report.FeedbackPublicAdministrationService
 import com.lhs.share.hub.service.report.FeedbackReportService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -79,6 +81,11 @@ class AdminFeedbackController(
         administrationService.updateType(userId, id, request)
         return success(feedbackReportService.getById(userId, id))
     }
+
+    @Operation(summary = "获取反馈可关联的版本")
+    @GetMapping("/version-options")
+    fun versionOptions(): ApiResult<List<FeedbackVersionOptionResponse>> =
+        success(administrationService.versionOptions(helper.requireUserId()))
 
     @Operation(summary = "关联目标/完成版本")
     @PatchMapping("/{id}/versions")
