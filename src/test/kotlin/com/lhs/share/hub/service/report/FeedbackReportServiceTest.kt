@@ -325,7 +325,7 @@ class FeedbackReportServiceTest {
 
         val response = service.create(
             "user",
-            FeedbackReportCreateRequest("BUG", "OPERATOR", null, "混合附件", listOf("med_image", "med_log")),
+            FeedbackReportCreateRequest("BUG", "OPERATOR", null, null, "混合附件", listOf("med_image", "med_log")),
         )
 
         assertEquals(listOf("med_image"), response.messages.single().images.map { it.id })
@@ -733,7 +733,7 @@ class FeedbackReportServiceTest {
         val ownershipException = assertThrows(ApiResultException::class.java) {
             service.create(
                 "user",
-                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "越权图片", listOf("med_other")),
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, null, "越权图片", listOf("med_other")),
             )
         }
         assertEquals(403, ownershipException.statusCode)
@@ -775,7 +775,7 @@ class FeedbackReportServiceTest {
         val missingException = assertThrows(ApiResultException::class.java) {
             service.create(
                 "user",
-                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "媒体缺失", listOf("med_missing")),
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, null, "媒体缺失", listOf("med_missing")),
             )
         }
         assertEquals(400, missingException.statusCode)
@@ -786,7 +786,7 @@ class FeedbackReportServiceTest {
         val deletedException = assertThrows(ApiResultException::class.java) {
             service.create(
                 "user",
-                FeedbackReportCreateRequest("BUG", "OPERATOR", null, "媒体已删除", listOf("med_deleted")),
+                FeedbackReportCreateRequest("BUG", "OPERATOR", null, null, "媒体已删除", listOf("med_deleted")),
             )
         }
         assertEquals(400, deletedException.statusCode)

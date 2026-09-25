@@ -38,6 +38,9 @@ import java.time.Instant
 @CompoundIndex(name = "idx_reporter_created", def = "{'reporterUserId': 1, 'createdAt': -1}")
 @CompoundIndex(name = "idx_status_area_created", def = "{'status': 1, 'area': 1, 'createdAt': -1}")
 @CompoundIndex(name = "idx_status_type_category_created", def = "{'status': 1, 'type': 1, 'category': 1, 'createdAt': -1}")
+@CompoundIndex(name = "idx_public_visibility_status_published", def = "{'visibility': 1, 'publicStatus': 1, 'publishedAt': -1}")
+@CompoundIndex(name = "idx_public_visibility_type_published", def = "{'visibility': 1, 'type': 1, 'publishedAt': -1}")
+@CompoundIndex(name = "idx_merged_into", def = "{'mergedIntoId': 1}")
 data class FeedbackTicket(
     @Id
     val id: String? = null,
@@ -72,6 +75,39 @@ data class FeedbackTicket(
 
     /** 首条正文(用于列表预览与搜索) */
     val content: String,
+
+    /** 用户提交的原始标题(仅用于提交前相似提示);旧工单为空 */
+    val title: String? = null,
+
+    /** 公开可见性: PRIVATE / PUBLIC;旧工单缺失该字段时一律视为 PRIVATE */
+    val visibility: String? = null,
+
+    /** 公开标题,由管理员整理后展示 */
+    val publicTitle: String? = null,
+
+    /** 公开摘要,由管理员整理后展示 */
+    val publicSummary: String? = null,
+
+    /** 公开开发状态: PublicFeedbackStatus;与内部 status 相互独立 */
+    val publicStatus: String? = null,
+
+    /** 支持数量,随 FeedbackSupport 原子增减 */
+    val supportCount: Int = 0,
+
+    /** 合并目标: 指向最终主反馈;null 表示非合并项 */
+    val mergedIntoId: String? = null,
+
+    /** 主反馈累计合并的重复反馈数量 */
+    val mergedCount: Int = 0,
+
+    /** 首次公开时间 */
+    val publishedAt: Instant? = null,
+
+    /** 公开字段最近更新时间 */
+    val publicUpdatedAt: Instant? = null,
+
+    /** 进入 COMPLETED 公开状态的时间 */
+    val completedAt: Instant? = null,
 
     /** 最近管理员回复预览 */
     val adminReply: String? = null,
