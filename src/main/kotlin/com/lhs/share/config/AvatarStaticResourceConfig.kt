@@ -18,6 +18,6 @@ class AvatarStaticResourceConfig(private val properties: ShareProperties) : WebM
         val location = if (base.endsWith('/')) base else base + '/'
         registry.addResourceHandler("/avatar/**")
             .addResourceLocations(location)
-            .setCachePeriod(3600)
+            .setCachePeriod(86400)
     }
 }
