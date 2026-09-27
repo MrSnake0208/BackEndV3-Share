@@ -210,7 +210,7 @@ object OperatorOddityRules {
     fun schema(rarity: Int, specialOddityName: String?): OperatorOdditySchemaResponse {
         val limits = when (rarity) {
             3 -> Triple(300, 1560, 9)
-            4 -> Triple(305, 1820, 11)
+            4 -> Triple(350, 1820, 11)
             5 -> Triple(500, 2600, 15)
             else -> throw IllegalArgumentException("Unsupported operator rarity: $rarity")
         }
