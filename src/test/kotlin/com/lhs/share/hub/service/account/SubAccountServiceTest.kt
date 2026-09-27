@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
+import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
@@ -44,6 +45,7 @@ class SubAccountServiceTest {
     private val accountRepository = mockk<SubAccountRepository>()
     private val inventoryCurrentRepository = mockk<InventoryCurrentRepository>()
     private val inventoryRecordRepository = mockk<InventoryRecordRepository>()
+    private val inventoryDeletedRecordRepository = mockk<InventoryDeletedRecordRepository>()
     private val favoriteRepository = mockk<InventoryAgentFavoriteRepository>()
     private val operatorCurrentRepository = mockk<OperatorCurrentRepository>()
     private val operatorRecordRepository = mockk<OperatorRecordRepository>()
@@ -71,6 +73,7 @@ class SubAccountServiceTest {
         accountRepository,
         inventoryCurrentRepository,
         inventoryRecordRepository,
+        inventoryDeletedRecordRepository,
         favoriteRepository,
         operatorCurrentRepository,
         operatorRecordRepository,
@@ -136,6 +139,7 @@ class SubAccountServiceTest {
         assertNotEquals(created.updatedAt, nameOnly.updatedAt)
         verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { inventoryRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { favoriteRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
@@ -205,6 +209,7 @@ class SubAccountServiceTest {
             SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
         every { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
@@ -228,6 +233,7 @@ class SubAccountServiceTest {
 
         verify(exactly = 1) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { inventoryRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { favoriteRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorCurrentRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }

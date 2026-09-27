@@ -228,6 +228,19 @@ class InventoryController(
         return success(true)
     }
 
+    @Operation(summary = "恢复已删除的库存记录并重放重建库存")
+    @InventoryWriteResponses
+    @RequireJwt
+    @AccessLimit(times = 100, second = 60)
+    @PostMapping("/records/{recordId}/restore")
+    fun restoreRecord(
+        @PathVariable(name = "recordId") recordId: String,
+        @RequestParam(name = "account_id") accountId: String,
+    ): ApiResult<Boolean> {
+        inventoryService.restoreRecord(helper.requireUserId(), accountId, recordId)
+        return success(true)
+    }
+
     /**
      * 对象目录(公开,无需登录;返回目录版本与全部 {entity_type, id, name})。
      */

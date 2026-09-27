@@ -24,7 +24,7 @@ class InventoryAcquiredSummaryMongoTest {
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val accounts = MongoRepositoryFactory(template).getRepository(SubAccountRepository::class.java)
-    private val service = InventoryService(accounts, mockk(), mockk(), mockk(), template, mockk())
+    private val service = InventoryService(accounts, mockk(), mockk(), mockk(), mockk(), template, mockk())
 
     @AfterEach
     fun cleanup() {
