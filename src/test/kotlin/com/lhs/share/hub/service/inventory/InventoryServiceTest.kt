@@ -11,10 +11,12 @@ import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
 import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.repository.InventoryCurrentRepository
+import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
+import com.lhs.share.hub.repository.entity.InventoryDeletedRecord
 import com.lhs.share.hub.repository.entity.InventoryRecord
 import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
@@ -48,12 +50,14 @@ class InventoryServiceTest {
     private val accountRepository = mockk<SubAccountRepository>()
     private val currentRepository = mockk<InventoryCurrentRepository>()
     private val recordRepository = mockk<InventoryRecordRepository>()
+    private val deletedRecordRepository = mockk<InventoryDeletedRecordRepository>()
     private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val catalogService = mockk<EntityCatalogService>()
     private val mongoTemplate = mockk<MongoTemplate>()
     private val accounts = mutableMapOf<Pair<String, String>, SubAccount>()
     private val currents = mutableMapOf<Triple<String, String, String>, InventoryCurrent>()
     private val records = mutableMapOf<Triple<String, String, String>, InventoryRecord>()
+    private val deletedRecords = mutableMapOf<Triple<String, String, String>, InventoryDeletedRecord>()
     private val revisions = mutableMapOf<Pair<String, String>, InventoryRevision>()
     private var nextRecordId = 1
 
@@ -73,6 +77,7 @@ class InventoryServiceTest {
     fun setUp() {
         currents.clear()
         records.clear()
+        deletedRecords.clear()
         accounts.clear()
         revisions.clear()
         accounts["u1" to "main"] = SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")
@@ -115,6 +120,19 @@ class InventoryServiceTest {
         every { recordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } answers {
             records[Triple(firstArg(), secondArg(), thirdArg())]
         }
+        every { deletedRecordRepository.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } answers {
+            deletedRecords[Triple(firstArg(), secondArg(), thirdArg())]
+        }
+        every { deletedRecordRepository.save(any()) } answers {
+            val value = firstArg<InventoryDeletedRecord>()
+            val saved = if (value.id == null) value.copy(id = "deleted:${value.recordId}") else value
+            deletedRecords[Triple(saved.userId, saved.accountId, saved.recordId)] = saved
+            saved
+        }
+        every { deletedRecordRepository.deleteById(any()) } answers {
+            val id = firstArg<String>()
+            deletedRecords.entries.removeIf { it.value.id == id }
+        }
         every { recordRepository.save(any()) } answers {
             val value = firstArg<InventoryRecord>()
             val saved = if (value.id == null) value.copy(id = "%024x".format(nextRecordId++)) else value
@@ -145,6 +163,7 @@ class InventoryServiceTest {
             accountRepository,
             currentRepository,
             recordRepository,
+            deletedRecordRepository,
             catalogService,
             mongoTemplate,
             transactionTemplate,
@@ -605,6 +624,50 @@ class InventoryServiceTest {
         assertEquals(0, count("u1", "baijinbi", "main"))
         assertEquals(7, count("u1", "baijinbi", "alt"))
         assertTrue(records.containsKey(Triple("u1", "alt", "keep")))
+    }
+
+    @Test
+    fun `deleted listed snapshot restores original scope and inventory`() {
+        service.import(
+            "u1",
+            document(
+                snapshotForAccount("baseline", "2026-08-16T09:00:00Z", "full", "main", entry("baijinbi", 8)),
+                snapshotForAccount("listed", "2026-08-16T10:00:00Z", "listed", "main", entry("baijinbi", 3)),
+            ),
+        )
+        val original = records.getValue(Triple("u1", "main", "listed"))
+        service.deleteRecord("u1", "main", "listed")
+        assertEquals(8, count("u1", "baijinbi"))
+        assertEquals(original, deletedRecords.getValue(Triple("u1", "main", "listed")).record)
+
+        service.restoreRecord("u1", "main", "listed")
+
+        assertEquals(3, count("u1", "baijinbi"))
+        assertEquals(original, records.getValue(Triple("u1", "main", "listed")))
+        assertTrue(deletedRecords.isEmpty())
+    }
+
+    @Test
+    fun `restore is scoped to owner and account and refuses an occupied record id`() {
+        service.import("u1", document(reward("deleted", "2026-08-16T10:00:00Z", "baijinbi", 4)))
+        service.deleteRecord("u1", "main", "deleted")
+        for ((user, account) in listOf("u2" to "main", "u1" to "alt")) {
+            val error = assertThrows(InventoryApiException::class.java) { service.restoreRecord(user, account, "deleted") }
+            assertEquals(404, error.status.value())
+        }
+        records[Triple("u1", "main", "deleted")] = storedRecord("replacement", "deleted", "2026-08-16T11:00:00Z")
+        val conflict = assertThrows(InventoryApiException::class.java) { service.restoreRecord("u1", "main", "deleted") }
+        assertEquals("record_already_exists", conflict.code)
+        assertTrue(deletedRecords.containsKey(Triple("u1", "main", "deleted")))
+        records.remove(Triple("u1", "main", "deleted"))
+        service.restoreRecord("u1", "main", "deleted")
+        assertEquals(4, count("u1", "baijinbi"))
+        assertEquals(
+            404,
+            assertThrows(InventoryApiException::class.java) {
+                service.restoreRecord("u1", "main", "deleted")
+            }.status.value(),
+        )
     }
 
     @Test

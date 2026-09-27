@@ -15,10 +15,12 @@ import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordListItemDto
 import com.lhs.share.hub.controller.inventory.response.InventoryRecordPageResponse
 import com.lhs.share.hub.repository.InventoryCurrentRepository
+import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryCurrent
+import com.lhs.share.hub.repository.entity.InventoryDeletedRecord
 import com.lhs.share.hub.repository.entity.InventoryRecord
 import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
@@ -58,6 +60,7 @@ class InventoryService(
     private val accountRepository: SubAccountRepository,
     private val currentRepository: InventoryCurrentRepository,
     private val recordRepository: InventoryRecordRepository,
+    private val deletedRecordRepository: InventoryDeletedRecordRepository,
     private val catalogService: EntityCatalogService,
     @param:Qualifier("hubMongoTemplate") private val hubMongoTemplate: MongoTemplate,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
@@ -553,29 +556,60 @@ class InventoryService(
         val entityType = record.entityType
 
         transactionTemplate.executeWithoutResult {
+            val previous = deletedRecordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
+            deletedRecordRepository.save(
+                InventoryDeletedRecord(
+                    id = previous?.id,
+                    userId = userId,
+                    accountId = accountId,
+                    recordId = recordId,
+                    record = record,
+                ),
+            )
             recordRepository.deleteById(record.checkId())
-            currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)?.let {
-                currentRepository.deleteById(it.checkId())
-            }
-            val remaining = recordRepository.findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId, accountId)
-                .filter { it.entityType == entityType }
-                .sortedWith(
-                    compareBy<InventoryRecord> { it.effectiveAt }
-                        .thenBy {
-                            when (it.recordType) {
-                                REWARD_DELTA -> 0
-                                STOCK_SNAPSHOT -> 1
-                                else -> 2
-                            }
-                        },
-                )
-            remaining.forEach { replayRecord(userId, accountId, it) }
+            val replayed = rebuildCurrent(userId, accountId, entityType)
             bumpInventoryRevision(userId, accountId)
             log.info {
                 "删除库存记录并重放完成: userId=$userId, accountId=$accountId, recordId=$recordId, " +
-                    "entityType=$entityType, 重放 ${remaining.size} 条"
+                    "entityType=$entityType, 重放 $replayed 条"
             }
         }
+    }
+
+    /** 恢复上次删除的原记录；若同一幂等键已重新导入，保留现有记录并返回冲突。 */
+    fun restoreRecord(userId: String, accountId: String, recordId: String) {
+        requireAccount(userId, accountId)
+        transactionTemplate.executeWithoutResult {
+            val deleted = deletedRecordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
+                ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "deleted_record_not_found", "Deleted record not found", recordId)
+            if (recordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId) != null) {
+                throw InventoryApiException(HttpStatus.CONFLICT, "record_already_exists", "Record already exists", recordId)
+            }
+            recordRepository.save(deleted.record)
+            rebuildCurrent(userId, accountId, deleted.record.entityType)
+            deletedRecordRepository.deleteById(checkNotNull(deleted.id))
+            bumpInventoryRevision(userId, accountId)
+        }
+    }
+
+    private fun rebuildCurrent(userId: String, accountId: String, entityType: String): Int {
+        currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)?.let {
+            currentRepository.deleteById(it.checkId())
+        }
+        val remaining = recordRepository.findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId, accountId)
+            .filter { it.entityType == entityType }
+            .sortedWith(
+                compareBy<InventoryRecord> { it.effectiveAt }
+                    .thenBy {
+                        when (it.recordType) {
+                            REWARD_DELTA -> 0
+                            STOCK_SNAPSHOT -> 1
+                            else -> 2
+                        }
+                    },
+            )
+        remaining.forEach { replayRecord(userId, accountId, it) }
+        return remaining.size
     }
 
     /**

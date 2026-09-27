@@ -74,6 +74,17 @@ class InventoryControllerContractTest {
     }
 
     @Test
+    fun `restore record uses authenticated owner and requested account`() {
+        every { helper.requireUserId() } returns "owner"
+        every { inventoryService.restoreRecord("owner", "main", "record:1") } just runs
+
+        mockMvc.perform(post("/v1/inventory/records/record:1/restore").param("account_id", "main"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").value(true))
+        verify(exactly = 1) { inventoryService.restoreRecord("owner", "main", "record:1") }
+    }
+
+    @Test
     fun `summary binds ISO local dates timezone and authenticated owner and returns active days`() {
         every { helper.requireUserId() } returns "owner"
         every {

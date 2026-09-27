@@ -245,7 +245,14 @@ GET  /v1/inventory/export?include=current,rewards&from=...&to=...
 GET  /v1/inventory/current?entity_type=item
 GET  /v1/inventory/acquired?entity_type=item&from=...&to=...
 GET  /v1/inventory/catalog
+DELETE /v1/inventory/records/{recordId}?account_id=...
+POST /v1/inventory/records/{recordId}/restore?account_id=...
 ```
+
+删除库存记录时，服务端在同一 Hub Mongo transaction 中把原记录保存到
+`inventory_deleted_records`，删除流水并重放当前库存。恢复接口只接受 JWT 所属用户和
+`account_id` 下存在的删除备份；若相同 `recordId` 已重新导入，返回 409 且不覆盖现有记录。
+恢复原始流水、清除备份与库存重放也在同一 transaction 中完成。删除子账号时一并清除备份。
 
 `POST /import` 与本地文件导入必须调用同一套校验和写入逻辑。建议响应：
 

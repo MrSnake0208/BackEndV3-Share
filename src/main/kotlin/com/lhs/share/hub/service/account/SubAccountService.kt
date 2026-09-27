@@ -3,6 +3,7 @@ package com.lhs.share.hub.service.account
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
+import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
@@ -41,6 +42,7 @@ class SubAccountService(
     private val accountRepository: SubAccountRepository,
     private val inventoryCurrentRepository: InventoryCurrentRepository,
     private val inventoryRecordRepository: InventoryRecordRepository,
+    private val inventoryDeletedRecordRepository: InventoryDeletedRecordRepository,
     private val favoriteRepository: InventoryAgentFavoriteRepository,
     private val operatorCurrentRepository: OperatorCurrentRepository,
     private val operatorRecordRepository: OperatorRecordRepository,
@@ -131,6 +133,7 @@ class SubAccountService(
         transactionTemplate.executeWithoutResult {
             inventoryCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             inventoryRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
