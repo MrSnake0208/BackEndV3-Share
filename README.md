@@ -308,7 +308,7 @@ Content-Type: application/json
 的首次 PATCH 会创建指定游戏 entry；非零 revision 的缺失 entry 返回 `409 operator_revision_conflict`。
 普通密探 `star_level` 允许 `0..31`，SP 依据公共图鉴
 `sp_of` 只允许直接星级 `0..5`。奇闻上限按 rarity 固定为 3 星 `300/1560/9`、4 星
-`305/1820/11`、5 星 `500/2600/15`；第三项展示名不写入用户数据。
+`350/1820/11`、5 星 `500/2600/15`；第三项展示名不写入用户数据。
 
 v2 listed/full 导入继续只更新旧字段：`discs` 更新第一套并保留第二套，新增战斗资料不会因 DTO 缺字段被清空；
 删除 v2 record 时会把独立的 `operator_correction_records` 校正审计与剩余 v2 record 按接收顺序重放。
@@ -431,7 +431,7 @@ DELETE /v1/admin/operator-catalog/{operatorId}    # 删除
 
 公共与管理员目录的每位密探都返回 `special_oddity_name`、`oddity_schema` 和 `incomplete_fields`。
 奇闻值的稳定键固定为 `attack / hp / special`；管理员只维护第三项显示名称，三个上限由服务端按
-rarity 派生：3 星 `300/1560/9`、4 星 `305/1820/11`、5 星 `500/2600/15`。新建目录条目必须提供
+rarity 派生：3 星 `300/1560/9`、4 星 `350/1820/11`、5 星 `500/2600/15`。新建目录条目必须提供
 `special_oddity_name`；更新缺失或传 null 时保留旧值。存量缺名时返回 null，
 `oddity_schema.special.name` 降级为“第三属性（图鉴待维护）”，且
 `incomplete_fields=["special_oddity_name"]`。目录改名只更新公共展示和 `catalog_version`，不会写入

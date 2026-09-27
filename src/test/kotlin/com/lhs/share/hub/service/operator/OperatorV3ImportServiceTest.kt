@@ -380,6 +380,42 @@ class OperatorV3ImportServiceTest {
     }
 
     @Test
+    fun `four star catalog accepts attack oddity 350 and flags any other reported max`() {
+        every { catalogService.getOperator("op1") } returns catalog().copy(rarity = 4)
+        every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
+            OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
+
+        fun preview(oddities: String) = service.previewBrowser(
+            "u1",
+            wrappedDocument().also { request ->
+                val entry = request.path("document").path("records").get(0).path("entries").get(0)
+                (entry.path("combat_stats") as com.fasterxml.jackson.databind.node.ObjectNode).set<com.fasterxml.jackson.databind.JsonNode>(
+                    "oddities",
+                    mapper.readTree(oddities),
+                )
+            },
+        )
+
+        val boundary = preview(
+            """{"attack":{"current":350,"max":350},"hp":{"current":1820,"max":1820},"special":{"current":11,"max":11}}""",
+        )
+        assertEquals(1, boundary.accepted)
+        assertEquals(emptyList<String>(), boundary.items.single().warnings.map { it.code })
+
+        val overflow = preview(
+            """{"attack":{"current":351},"hp":{"current":1820},"special":{"current":11}}""",
+        )
+        assertEquals(1, overflow.rejected)
+        assertEquals("invalid_combat_stats", overflow.items.single().blockingErrors.single().code)
+
+        val staleMax = preview(
+            """{"attack":{"current":0,"max":305},"hp":{"current":1820,"max":1820},"special":{"current":11,"max":11}}""",
+        )
+        assertEquals(1, staleMax.accepted)
+        assertEquals(listOf("oddity_max_mismatch"), staleMax.items.single().warnings.map { it.code })
+    }
+
+    @Test
     fun `universal record materializes through the account game`() {
         val request = wrappedDocument().also {
             (it.path("document").path("records").get(0) as com.fasterxml.jackson.databind.node.ObjectNode).put("game", "universal")

@@ -68,7 +68,6 @@ class OperatorCatalogServiceTest {
         assertEquals(emptyList<String>(), entity.incompleteFields)
         assertEquals(saved.captured.catalogVersion, entity.catalogVersion)
         assertNotEquals("", entity.catalogVersion)
-
     }
 
     @Test
@@ -156,7 +155,7 @@ class OperatorCatalogServiceTest {
         val five = OperatorOddityRules.schema(5, "治疗加成")
 
         assertEquals(listOf(300, 1560, 9), listOf(three.attack.max, three.hp.max, three.special.max))
-        assertEquals(listOf(305, 1820, 11), listOf(four.attack.max, four.hp.max, four.special.max))
+        assertEquals(listOf(350, 1820, 11), listOf(four.attack.max, four.hp.max, four.special.max))
         assertEquals(listOf(500, 2600, 15), listOf(five.attack.max, five.hp.max, five.special.max))
     }
 

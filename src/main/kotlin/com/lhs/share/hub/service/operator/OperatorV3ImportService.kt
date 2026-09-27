@@ -764,7 +764,7 @@ class OperatorV3ImportService(
 
     private fun oddityLimits(rarity: Int): Map<String, Int> = when (rarity) {
         3 -> mapOf("attack" to 300, "hp" to 1560, "special" to 9)
-        4 -> mapOf("attack" to 305, "hp" to 1820, "special" to 11)
+        4 -> mapOf("attack" to 350, "hp" to 1820, "special" to 11)
         5 -> mapOf("attack" to 500, "hp" to 2600, "special" to 15)
         else -> emptyMap()
     }

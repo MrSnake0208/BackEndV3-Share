@@ -227,7 +227,7 @@ class OperatorCurrentFoundationServiceTest {
 
     @Test
     fun `rarity limits and stable oddity keys are enforced`() {
-        val limits = mapOf(3 to Triple(300, 1560, 9), 4 to Triple(305, 1820, 11), 5 to Triple(500, 2600, 15))
+        val limits = mapOf(3 to Triple(300, 1560, 9), 4 to Triple(350, 1820, 11), 5 to Triple(500, 2600, 15))
         limits.forEach { (testedRarity, values) ->
             rarity = testedRarity
             stored = stored.copy(entries = mapOf("op1" to baseEntry()))
@@ -239,7 +239,7 @@ class OperatorCurrentFoundationServiceTest {
         }
         rarity = 4
         stored = stored.copy(entries = mapOf("op1" to baseEntry()))
-        val overflow = patch(""""combat_stats":{"oddities":{"attack":{"current":306}}}""")
+        val overflow = patch(""""combat_stats":{"oddities":{"attack":{"current":351}}}""")
         val unknown = patch(""""combat_stats":{"oddities":{"damage":{"current":1}}}""")
 
         assertEquals(
@@ -823,8 +823,13 @@ class OperatorCurrentFoundationServiceTest {
         val target = history("remove", "2026-08-21T00:00:00Z", "2026-08-21T00:00:01Z")
         val remaining = history("keep", "2026-08-21T00:01:00Z", "2026-08-21T00:01:01Z")
         val correction = OperatorCorrectionRecord(
-            userId = "u1", accountId = "acc1", game = "代号鸢", operatorId = "op1",
-            reason = "catalog_removed", fields = emptySet(), createdAt = Instant.parse("2026-08-21T00:02:00Z"),
+            userId = "u1",
+            accountId = "acc1",
+            game = "代号鸢",
+            operatorId = "op1",
+            reason = "catalog_removed",
+            fields = emptySet(),
+            createdAt = Instant.parse("2026-08-21T00:02:00Z"),
         )
         var replayed: OperatorCurrent? = stored
         every { catalogService.getOperator("op1") } returns null
