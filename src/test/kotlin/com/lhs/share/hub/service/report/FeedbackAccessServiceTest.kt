@@ -56,6 +56,7 @@ class FeedbackAccessServiceTest {
 
     init {
         every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(any(), any()) } returns emptyList()
+        every { authorizationService.operatorAreasFor(any()) } returns emptySet()
         every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
         every { categories.keys() } returns FeedbackArea.all
@@ -328,6 +329,42 @@ class FeedbackAccessServiceTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `超级管理员修改程序板块或删除显式授权不退回已接单工单`() {
+        val grant = FeedbackAccessGrant(userId = "root", updatedBy = "root")
+        val assigned = FeedbackTicket(
+            id = "rpt_1",
+            type = "BUG",
+            workArea = "STAR",
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "root",
+            reporterUserId = "reporter",
+            content = "反馈",
+        )
+        every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
+        every { authorizationService.operatorAreasFor("root") } returns FeedbackArea.all
+        every { userService.getRequired("root") } returns MaaUserInfo("root", "超级管理员", activated = true)
+        every { userService.get("root") } returns MaaUserInfo("root", "超级管理员", activated = true)
+        every { repository.findById("root") } returns Optional.of(grant)
+        every { repository.save(any()) } answers { firstArg() }
+        every { repository.deleteById("root") } returns Unit
+        every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull("root", "OPEN") } returns listOf(assigned)
+
+        service.updateGrant(
+            "root",
+            "root",
+            FeedbackAccessUpdateRequest(
+                feedbackRoles = setOf("DEVELOPER"),
+                developerAreas = setOf("STAR"),
+                operatorAreas = emptySet(),
+            ),
+        )
+        service.deleteGrant("root", "root")
+
+        verify(exactly = 0) { ticketQueries.saveIfUnchanged(any(), any()) }
+        verify(exactly = 0) { events.save(any()) }
     }
 
     @Test
