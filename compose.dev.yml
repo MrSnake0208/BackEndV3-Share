@@ -2,10 +2,10 @@ name: backendv3-share-dev
 
 services:
   mongodb:
-    image: mongo:8.0.28-noble
+    image: mongo:8.2.3-noble
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
-      - "127.0.0.1:27017:27017"
+      - "127.0.0.1:27018:27017"
     volumes:
       - mongodb_data:/data/db
     healthcheck:
