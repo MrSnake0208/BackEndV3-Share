@@ -9,23 +9,23 @@ import com.lhs.share.hub.controller.report.request.FeedbackPublicStatusRequest
 import com.lhs.share.hub.controller.report.request.FeedbackPublishRequest
 import com.lhs.share.hub.controller.report.request.FeedbackTypeUpdateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackVersionRequest
+import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
 import com.lhs.share.hub.controller.report.response.FeedbackVersionOptionResponse
+import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.report.FeedbackPublicAdministrationService
 import com.lhs.share.hub.service.report.FeedbackReportService
 import com.lhs.share.hub.service.report.FeedbackWorkflowService
-import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
-import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 /**
@@ -61,9 +61,11 @@ class AdminFeedbackController(
         @RequestParam(required = false) workArea: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) q: String?,
-    ): ApiResult<FeedbackReportListResponse> = success(feedbackReportService.list(
-        helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, "updatedAt", "desc", queue,
-    ))
+    ): ApiResult<FeedbackReportListResponse> = success(
+        feedbackReportService.list(
+            helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, "updatedAt", "desc", queue,
+        ),
+    )
 
     @PostMapping("/{id}/claim")
     fun claim(@PathVariable id: String): ApiResult<FeedbackReportResponse> {

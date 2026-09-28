@@ -80,8 +80,13 @@ class FeedbackWorkflowServiceTest {
 
     @Test
     fun `管理员改类同步用户分类并保留旧工单的反馈类型`() {
-        val old = ticket().copy(type = FeedbackType.LEGACY_FEEDBACK, category = FeedbackType.BUG,
-            workArea = FeedbackArea.OPERATOR, workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "alice")
+        val old = ticket().copy(
+            type = FeedbackType.LEGACY_FEEDBACK,
+            category = FeedbackType.BUG,
+            workArea = FeedbackArea.OPERATOR,
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+        )
         every { tickets.findById("rpt_1") } returns Optional.of(old)
         every { access.canControlTicket("alice", old) } returns true
         every { access.operatorAreas("alice") } returns setOf(FeedbackArea.STAR)
@@ -98,7 +103,11 @@ class FeedbackWorkflowServiceTest {
 
     @Test
     fun `转程序指定新板块时用户分类同步更新`() {
-        val old = ticket().copy(workArea = FeedbackArea.OPERATOR, workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "alice")
+        val old = ticket().copy(
+            workArea = FeedbackArea.OPERATOR,
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+        )
         every { tickets.findById("rpt_1") } returns Optional.of(old)
         every { access.canControlTicket("alice", old) } returns true
         every { access.operatorAreas("alice") } returns setOf(FeedbackArea.MAAYUAN)
@@ -140,10 +149,12 @@ class FeedbackWorkflowServiceTest {
 
     @Test
     fun `阅读仅推进请求对应的用户消息边界`() {
-        val old = ticket().copy(messages = listOf(
-            FeedbackMessage("rpm_old", "REPORTER", "reporter", "旧消息"),
-            FeedbackMessage("rpm_new", "REPORTER", "reporter", "新消息"),
-        ))
+        val old = ticket().copy(
+            messages = listOf(
+                FeedbackMessage("rpm_old", "REPORTER", "reporter", "旧消息"),
+                FeedbackMessage("rpm_new", "REPORTER", "reporter", "新消息"),
+            ),
+        )
         every { tickets.findById("rpt_1") } returns Optional.of(old)
         every { access.canViewTicket("alice", old) } returns true
         every { query.advanceTeamRead("rpt_1", 0) } returns old.copy(teamReadReporterIndex = 0)
@@ -160,9 +171,12 @@ class FeedbackWorkflowServiceTest {
         every { tickets.findById("rpt_1") } returns Optional.of(old)
         every { access.canViewTicket("alice", old) } returns true
 
-        assertEquals(400, assertThrows(ApiResultException::class.java) {
-            service.markRead("alice", "rpt_1", "rpm_missing")
-        }.statusCode)
+        assertEquals(
+            400,
+            assertThrows(ApiResultException::class.java) {
+                service.markRead("alice", "rpt_1", "rpm_missing")
+            }.statusCode,
+        )
         verify(exactly = 0) { query.advanceTeamRead(any(), any()) }
     }
 }

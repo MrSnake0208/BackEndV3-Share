@@ -29,9 +29,8 @@ class FeedbackWorkflowService(
         if (!FeedbackWorkflow.isActive(ticket)) throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已结束或合并")
     }
 
-    private fun save(previous: FeedbackTicket, updated: FeedbackTicket): FeedbackTicket =
-        query.saveIfUnchanged(previous, updated)
-            ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已被其他管理员更新，请刷新后重试")
+    private fun save(previous: FeedbackTicket, updated: FeedbackTicket): FeedbackTicket = query.saveIfUnchanged(previous, updated)
+        ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已被其他管理员更新，请刷新后重试")
 
     private fun reclassified(ticket: FeedbackTicket, area: String, now: Instant): FeedbackTicket = ticket.copy(
         type = if (ticket.type.equals(FeedbackType.LEGACY_FEEDBACK, ignoreCase = true)) {
@@ -54,7 +53,16 @@ class FeedbackWorkflowService(
             throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已被接单，请刷新")
         }
         val now = Instant.now()
-        val updated = save(previous, previous.copy(workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = actor, operatorAssignedAt = now, updatedAt = now))
+        val updated =
+            save(
+                previous,
+                previous.copy(
+                    workflowStage = FeedbackWorkflow.PROCESSING,
+                    operatorAssigneeUserId = actor,
+                    operatorAssignedAt = now,
+                    updatedAt = now,
+                ),
+            )
         events.save(FeedbackWorkflowEvent(ticketId = id, action = "CLAIM", actorUserId = actor, note = "接单"))
         notifications.clearFeedbackKinds(id, setOf("FEEDBACK_ASSIGNED"))
         return updated
@@ -91,7 +99,11 @@ class FeedbackWorkflowService(
         val previous = ticket(id)
         active(previous)
         if (!access.canControlTicket(actor, previous)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "只有当前运营负责人可转程序")
-        if (FeedbackWorkflow.stage(previous) != FeedbackWorkflow.PROCESSING) throw ApiResultException(HttpStatus.CONFLICT.value(), "工单当前不可转程序")
+        if (FeedbackWorkflow.stage(previous) !=
+            FeedbackWorkflow.PROCESSING
+        ) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "工单当前不可转程序")
+        }
         val area = workArea.trim().uppercase()
         if (area !in categories.keys() || area !in access.operatorAreas(checkNotNull(previous.operatorAssigneeUserId))) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "负责人没有目标板块运营权限")
@@ -100,7 +112,11 @@ class FeedbackWorkflowService(
         if (developers.isEmpty()) throw ApiResultException(HttpStatus.CONFLICT.value(), "目标板块尚无程序负责人")
         val reason = note.trim().takeIf { it.isNotEmpty() }
             ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "请填写交接说明")
-        val updated = save(previous, reclassified(previous, area, Instant.now()).copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, developerReturnedAt = null))
+        val updated =
+            save(
+                previous,
+                reclassified(previous, area, Instant.now()).copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, developerReturnedAt = null),
+            )
         events.save(FeedbackWorkflowEvent(ticketId = id, action = "HANDOFF", actorUserId = actor, note = reason))
         developers.forEach { notifications.create(it, "FEEDBACK_DEV_HANDOFF", "反馈转程序处理", reason.take(100), "FEEDBACK", id) }
         return updated
@@ -111,7 +127,11 @@ class FeedbackWorkflowService(
         val previous = ticket(id)
         active(previous)
         if (!access.canControlTicket(actor, previous)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "只有当前运营负责人可调整板块")
-        if (FeedbackWorkflow.stage(previous) == FeedbackWorkflow.DEV_HANDOFF) throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
+        if (FeedbackWorkflow.stage(previous) ==
+            FeedbackWorkflow.DEV_HANDOFF
+        ) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
+        }
         val area = workArea.trim().uppercase()
         if (area !in categories.keys()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
         if (previous.operatorAssigneeUserId != null && area !in access.operatorAreas(previous.operatorAssigneeUserId)) {
@@ -135,7 +155,11 @@ class FeedbackWorkflowService(
     fun returnToOperator(actor: String, id: String, note: String, mode: String): FeedbackTicket {
         val previous = ticket(id)
         active(previous)
-        if (FeedbackWorkflow.stage(previous) != FeedbackWorkflow.DEV_HANDOFF) throw ApiResultException(HttpStatus.CONFLICT.value(), "工单未转程序")
+        if (FeedbackWorkflow.stage(previous) !=
+            FeedbackWorkflow.DEV_HANDOFF
+        ) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "工单未转程序")
+        }
         val isDeveloper = FeedbackWorkflow.area(previous) in access.developerAreas(actor)
         val isOperator = access.canControlTicket(actor, previous)
         if ((mode != "RETURN" || !isDeveloper) && (mode != "WITHDRAW" || !isOperator)) {
@@ -143,11 +167,14 @@ class FeedbackWorkflowService(
         }
         val reason = note.trim().takeIf { it.isNotEmpty() }
             ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "请填写处理结果或撤回原因")
-        val updated = save(previous, previous.copy(
-            workflowStage = FeedbackWorkflow.PROCESSING,
-            developerReturnedAt = if (mode == "RETURN") Instant.now() else null,
-            updatedAt = Instant.now(),
-        ))
+        val updated = save(
+            previous,
+            previous.copy(
+                workflowStage = FeedbackWorkflow.PROCESSING,
+                developerReturnedAt = if (mode == "RETURN") Instant.now() else null,
+                updatedAt = Instant.now(),
+            ),
+        )
         events.save(FeedbackWorkflowEvent(ticketId = id, action = mode, actorUserId = actor, note = reason))
         notifications.clearFeedbackKinds(id, setOf("FEEDBACK_DEV_HANDOFF"))
         previous.operatorAssigneeUserId?.let {

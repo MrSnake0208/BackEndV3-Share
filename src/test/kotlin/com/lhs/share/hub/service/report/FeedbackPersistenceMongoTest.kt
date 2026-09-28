@@ -25,8 +25,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
-import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.MongoTransactionManager
+import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.Optional
@@ -46,7 +46,8 @@ class FeedbackPersistenceMongoTest {
     private val notifications = mockk<NotificationService>(relaxed = true)
     private val users = mockk<HubUserInfoService>()
     private val categories = mockk<FeedbackCategoryService>()
-    private val service = FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties(), mockk(relaxed = true), categories)
+    private val service =
+        FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties(), mockk(relaxed = true), categories)
 
     init {
         every { categories.keys() } returns FeedbackArea.all
@@ -118,16 +119,26 @@ class FeedbackPersistenceMongoTest {
 
     @Test
     fun `工作队列按内部板块和阶段过滤且隐藏合并来源`() {
-        mongo.insert(ticket("star_pool").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
+        mongo.insert(
+            ticket("star_pool").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null),
+        )
         mongo.insert(ticket("operator_pool").copy(workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
-        mongo.insert(ticket("merged_pool").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null, mergedIntoId = "main"))
+        mongo.insert(
+            ticket(
+                "merged_pool",
+            ).copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null, mergedIntoId = "main"),
+        )
         mongo.insert(ticket("star_dev").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.DEV_HANDOFF))
         val pageable = PageRequest.of(0, 100)
 
-        val pool = queries.search(null, null, null, null, null, null, pageable,
-            workAreas = setOf("STAR"), queue = "UNASSIGNED", actorUserId = "alice")
-        val developer = queries.search(null, null, null, null, null, null, pageable,
-            workAreas = emptySet(), queue = "DEV", actorUserId = "dev", developerAreas = setOf("STAR"))
+        val pool = queries.search(
+            null, null, null, null, null, null, pageable,
+            workAreas = setOf("STAR"), queue = "UNASSIGNED", actorUserId = "alice",
+        )
+        val developer = queries.search(
+            null, null, null, null, null, null, pageable,
+            workAreas = emptySet(), queue = "DEV", actorUserId = "dev", developerAreas = setOf("STAR"),
+        )
 
         assertEquals(setOf("star_pool"), pool.content.mapNotNull { it.id }.toSet())
         assertEquals(setOf("star_dev"), developer.content.mapNotNull { it.id }.toSet())
@@ -151,7 +162,12 @@ class FeedbackPersistenceMongoTest {
         val known = FeedbackArea.all + "CUSTOM_TEST"
         val pageable = PageRequest.of(0, 100)
 
-        assertEquals(setOf("custom"), queries.search("reporter", null, null, null, "CUSTOM_TEST", null, pageable, knownAreas = known).content.mapNotNull { it.id }.toSet())
+        assertEquals(
+            setOf("custom"),
+            queries.search("reporter", null, null, null, "CUSTOM_TEST", null, pageable, knownAreas = known).content.mapNotNull {
+                it.id
+            }.toSet(),
+        )
         assertTrue(queries.search("reporter", null, null, null, FeedbackArea.OTHER, null, pageable, knownAreas = known).isEmpty)
     }
 

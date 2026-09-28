@@ -5,11 +5,11 @@ import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.controller.report.response.CurrentFeedbackAccessResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
-import com.lhs.share.hub.controller.report.response.FeedbackAssigneeResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAreaOptionResponse
+import com.lhs.share.hub.controller.report.response.FeedbackAssigneeResponse
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
-import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
+import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.AdminAuditAction
 import com.lhs.share.hub.repository.entity.AdminAuditLog
@@ -79,15 +79,16 @@ class FeedbackAccessService(
     fun canViewTicket(userId: String, ticket: FeedbackTicket): Boolean {
         val area = FeedbackWorkflow.area(ticket)
         return area in operatorAreas(userId) ||
-            ((FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.DEV_HANDOFF || ticket.developerReturnedAt != null) && area in developerAreas(userId))
+            (
+                (FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.DEV_HANDOFF || ticket.developerReturnedAt != null) &&
+                    area in developerAreas(userId)
+                )
     }
 
-    fun canControlTicket(userId: String, ticket: FeedbackTicket): Boolean =
-        authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN) ||
-            (ticket.operatorAssigneeUserId == userId && FeedbackWorkflow.area(ticket) in operatorAreas(userId))
+    fun canControlTicket(userId: String, ticket: FeedbackTicket): Boolean = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN) ||
+        (ticket.operatorAssigneeUserId == userId && FeedbackWorkflow.area(ticket) in operatorAreas(userId))
 
-    fun canClaimTicket(userId: String, ticket: FeedbackTicket): Boolean =
-        FeedbackWorkflow.area(ticket) in operatorAreas(userId)
+    fun canClaimTicket(userId: String, ticket: FeedbackTicket): Boolean = FeedbackWorkflow.area(ticket) in operatorAreas(userId)
 
     fun developerUserIds(area: String): Set<String> = repository.findByDeveloperAreasContaining(area)
         .filter { "DEVELOPER" in it.feedbackRoles && userService.get(it.userId)?.activated == true }
@@ -135,13 +136,15 @@ class FeedbackAccessService(
     }
 
     private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {
-        auditService.record(AdminAuditLog(
-            actorUserId = actor,
-            action = action,
-            targetResource = "feedback_categories/${category.key}",
-            before = before?.let { AdminAuditSnapshot(feedbackCategoryLabel = it.label) },
-            after = AdminAuditSnapshot(feedbackCategoryLabel = category.label),
-        ))
+        auditService.record(
+            AdminAuditLog(
+                actorUserId = actor,
+                action = action,
+                targetResource = "feedback_categories/${category.key}",
+                before = before?.let { AdminAuditSnapshot(feedbackCategoryLabel = it.label) },
+                after = AdminAuditSnapshot(feedbackCategoryLabel = category.label),
+            ),
+        )
     }
 
     fun searchUserCandidates(adminUserId: String, query: String, page: Int, size: Int): List<FeedbackAccessUserCandidateResponse> {
@@ -244,17 +247,25 @@ class FeedbackAccessService(
         ticketRepository.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(userId, "OPEN")
             .filter { FeedbackWorkflow.area(it) !in retainedAreas }
             .forEach { ticket ->
-                ticketQueryRepository.saveIfUnchanged(ticket, ticket.copy(
-                    workflowStage = FeedbackWorkflow.UNASSIGNED,
-                    operatorAssigneeUserId = null,
-                    operatorAssignedAt = null,
-                    developerReturnedAt = null,
-                    updatedAt = Instant.now(),
-                )) ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "负责人工单已变化，请刷新授权后重试")
+                ticketQueryRepository.saveIfUnchanged(
+                    ticket,
+                    ticket.copy(
+                        workflowStage = FeedbackWorkflow.UNASSIGNED,
+                        operatorAssigneeUserId = null,
+                        operatorAssignedAt = null,
+                        developerReturnedAt = null,
+                        updatedAt = Instant.now(),
+                    ),
+                ) ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "负责人工单已变化，请刷新授权后重试")
                 notificationService.clearFeedbackTasks(checkNotNull(ticket.id))
-                workflowEvents.save(FeedbackWorkflowEvent(
-                    ticketId = checkNotNull(ticket.id), action = "REQUEUE", actorUserId = actorUserId, note = "运营权限已撤销，返回待接单池",
-                ))
+                workflowEvents.save(
+                    FeedbackWorkflowEvent(
+                        ticketId = checkNotNull(ticket.id),
+                        action = "REQUEUE",
+                        actorUserId = actorUserId,
+                        note = "运营权限已撤销，返回待接单池",
+                    ),
+                )
             }
     }
 

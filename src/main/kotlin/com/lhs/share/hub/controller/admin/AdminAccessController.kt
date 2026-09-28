@@ -49,20 +49,15 @@ class AdminAccessController(
     }
 
     @GetMapping("/roles/users")
-    fun listRoleUsers(): ApiResult<List<AdminRoleUserResponse>> =
-        success(roleService.listUsers(helper.requireUserId()))
+    fun listRoleUsers(): ApiResult<List<AdminRoleUserResponse>> = success(roleService.listUsers(helper.requireUserId()))
 
     @PutMapping("/roles/users/{userId}")
-    fun replaceRoles(
-        @PathVariable userId: String,
-        @RequestBody request: AdminRoleUpdateRequest,
-    ): ApiResult<AdminRoleUserResponse> =
+    fun replaceRoles(@PathVariable userId: String, @RequestBody request: AdminRoleUpdateRequest): ApiResult<AdminRoleUserResponse> =
         success(roleService.replaceRoles(helper.requireUserId(), userId, request))
 
     @GetMapping("/audit-logs")
     fun listAuditLogs(
         @RequestParam(defaultValue = "1") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
-    ): ApiResult<PagedDTO<AdminAuditLogResponse>> =
-        success(auditService.list(helper.requireUserId(), page, size))
+    ): ApiResult<PagedDTO<AdminAuditLogResponse>> = success(auditService.list(helper.requireUserId(), page, size))
 }
