@@ -30,15 +30,63 @@ class FeedbackTicketQueryRepository(
         category: String?,
         keyword: String?,
         pageable: Pageable,
+        workAreas: Set<String>? = null,
+        queue: String? = null,
+        actorUserId: String? = null,
+        developerAreas: Set<String> = emptySet(),
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>()
         reporterUserId?.let { filters += Criteria.where("reporterUserId").`is`(it) }
-        manageableCategories
-            ?.takeUnless { it == FeedbackArea.all }
-            ?.let { filters += categorySetCriteria(it) }
+        manageableCategories?.let { filters += workAreaSetCriteria(it) }
+        if (developerAreas.isEmpty()) workAreas?.let { filters += workAreaSetCriteria(it) }
+        if (developerAreas.isNotEmpty()) {
+            filters += Criteria().orOperator(
+                workAreaSetCriteria(workAreas.orEmpty()),
+                Criteria().andOperator(
+                    workAreaSetCriteria(developerAreas),
+                    Criteria().orOperator(
+                        Criteria.where("workflowStage").`is`("DEV_HANDOFF"),
+                        Criteria.where("developerReturnedAt").ne(null),
+                    ),
+                ),
+            )
+        }
+        when (queue) {
+            "UNASSIGNED" -> filters += Criteria().andOperator(
+                Criteria.where("status").`is`("OPEN"),
+                Criteria.where("workflowStage").`in`(null, "UNASSIGNED"),
+                Criteria.where("operatorAssigneeUserId").`is`(null),
+                Criteria.where("mergedIntoId").`is`(null),
+            )
+            "MINE" -> filters += Criteria().andOperator(
+                Criteria.where("status").`is`("OPEN"),
+                Criteria.where("operatorAssigneeUserId").`is`(actorUserId),
+                Criteria.where("mergedIntoId").`is`(null),
+            )
+            "DEV" -> filters += Criteria().andOperator(
+                Criteria.where("status").`is`("OPEN"),
+                Criteria.where("workflowStage").`is`("DEV_HANDOFF"),
+                workAreaSetCriteria(developerAreas),
+                Criteria.where("mergedIntoId").`is`(null),
+            )
+            "CLOSED" -> filters += Criteria().andOperator(
+                Criteria.where("status").ne("OPEN"),
+                Criteria.where("mergedIntoId").`is`(null),
+            )
+            "RETURNED" -> filters += Criteria().andOperator(
+                Criteria.where("status").`is`("OPEN"),
+                Criteria.where("workflowStage").`is`("PROCESSING"),
+                Criteria.where("developerReturnedAt").ne(null),
+                workAreaSetCriteria(developerAreas),
+                Criteria.where("mergedIntoId").`is`(null),
+            )
+            "ALL" -> if (keyword.isNullOrBlank()) filters += Criteria.where("mergedIntoId").`is`(null)
+            null -> Unit
+            else -> throw IllegalArgumentException("Unknown workflow queue: $queue")
+        }
         status?.let { filters += Criteria.where("status").`is`(it) }
         type?.let { filters += typeCriteria(it) }
-        category?.let { filters += categorySetCriteria(setOf(it)) }
+        category?.let { filters += if (queue == null && reporterUserId != null) categorySetCriteria(setOf(it)) else workAreaSetCriteria(setOf(it)) }
         keyword?.takeIf { it.isNotBlank() }?.let { value ->
             val pattern = Pattern.compile(Pattern.quote(value.trim()), Pattern.CASE_INSENSITIVE)
             filters += Criteria().orOperator(
@@ -142,7 +190,7 @@ class FeedbackTicketQueryRepository(
         publishedAt: Instant?,
         publicUpdatedAt: Instant,
     ): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId)),
+        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
         Update()
             .set("visibility", visibility)
             .set("publicTitle", publicTitle)
@@ -157,7 +205,7 @@ class FeedbackTicketQueryRepository(
     /** 定向更新公开状态与完成时间。 */
     fun setPublicStatus(ticketId: String, publicStatus: String, publicUpdatedAt: Instant, completedAt: Instant?): FeedbackTicket? =
         template.findAndModify(
-            Query(Criteria.where("_id").`is`(ticketId)),
+            Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
             Update()
                 .set("publicStatus", publicStatus)
                 .set("publicUpdatedAt", publicUpdatedAt)
@@ -168,7 +216,12 @@ class FeedbackTicketQueryRepository(
 
     /** 定向写入合并指向;源记录保留。 */
     fun setMergedInto(ticketId: String, targetTicketId: String): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId)),
+        Query(Criteria().andOperator(
+            Criteria.where("_id").`is`(ticketId),
+            Criteria.where("mergedIntoId").`is`(null),
+            Criteria.where("mergedCount").`in`(0, null),
+            Criteria.where("status").`is`("OPEN"),
+        )),
         Update().set("mergedIntoId", targetTicketId),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
@@ -176,7 +229,7 @@ class FeedbackTicketQueryRepository(
 
     /** 定向修改反馈类型。 */
     fun setType(ticketId: String, type: String): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId)),
+        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
         Update().set("type", type),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
@@ -190,7 +243,7 @@ class FeedbackTicketQueryRepository(
         completedVersionId: String?,
         completedVersionLabel: String?,
     ): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId)),
+        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
         Update()
             .set("targetVersionId", targetVersionId)
             .set("targetVersionLabel", targetVersionLabel)
@@ -202,7 +255,7 @@ class FeedbackTicketQueryRepository(
 
     /** 原子累加主反馈的合并数量。 */
     fun incrementMergedCount(ticketId: String): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId)),
+        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null).and("status").`is`("OPEN")),
         Update().inc("mergedCount", 1),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
@@ -227,6 +280,14 @@ class FeedbackTicketQueryRepository(
             )
         }
         return Criteria().orOperator(*branches.toTypedArray())
+    }
+
+    private fun workAreaSetCriteria(areas: Set<String>): Criteria {
+        if (areas.isEmpty()) return Criteria.where("_id").`in`(emptyList<String>())
+        return Criteria().orOperator(
+            Criteria.where("workArea").`in`(areas),
+            Criteria().andOperator(Criteria.where("workArea").`is`(null), categorySetCriteria(areas.intersect(FeedbackArea.all))),
+        )
     }
 
     private fun typeCriteria(type: String): Criteria {
@@ -265,6 +326,9 @@ class FeedbackTicketQueryRepository(
             Criteria().andOperator(
                 Criteria.where("_id").`is`(checkNotNull(previous.id)),
                 Criteria.where("status").`is`(previous.status),
+                Criteria.where("mergedIntoId").`is`(previous.mergedIntoId),
+                Criteria.where("workflowStage").`is`(previous.workflowStage),
+                Criteria.where("operatorAssigneeUserId").`is`(previous.operatorAssigneeUserId),
                 messageBoundary,
                 Criteria().orOperator(
                     Criteria.where("updatedAt").`is`(previous.updatedAt),
@@ -278,9 +342,25 @@ class FeedbackTicketQueryRepository(
             .set("hasAdminReply", updated.hasAdminReply)
             .set("adminReply", updated.adminReply)
             .set("status", updated.status)
+            .set("workflowStage", updated.workflowStage)
+            .set("workArea", updated.workArea)
+            .set("operatorAssigneeUserId", updated.operatorAssigneeUserId)
+            .set("operatorAssignedAt", updated.operatorAssignedAt)
+            .set("developerReturnedAt", updated.developerReturnedAt)
             .set("handlerUserId", updated.handlerUserId)
             .set("handledAt", updated.handledAt)
             .set("updatedAt", updated.updatedAt)
+        if (updated.teamReadReporterIndex != null &&
+            (previous.teamReadReporterIndex == null || updated.teamReadReporterIndex > previous.teamReadReporterIndex)) {
+            update.max("teamReadReporterIndex", updated.teamReadReporterIndex)
+        }
         return template.findAndModify(query, update, FindAndModifyOptions.options().returnNew(true), FeedbackTicket::class.java)
     }
+
+    fun advanceTeamRead(ticketId: String, messageIndex: Int): FeedbackTicket? = template.findAndModify(
+        Query(Criteria.where("_id").`is`(ticketId)),
+        Update().max("teamReadReporterIndex", messageIndex),
+        FindAndModifyOptions.options().returnNew(true),
+        FeedbackTicket::class.java,
+    )
 }

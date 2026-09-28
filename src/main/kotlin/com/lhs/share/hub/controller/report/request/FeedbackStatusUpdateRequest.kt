@@ -15,4 +15,5 @@ data class FeedbackStatusUpdateRequest(
         allowableValues = ["REPORTER", "ADMIN"],
     )
     val actorMode: String? = null,
+    val reason: String? = null,
 )

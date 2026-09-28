@@ -12,6 +12,7 @@ import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
+import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.FeedbackClientInfo
 import com.lhs.share.hub.repository.entity.FeedbackDiagnostics
@@ -19,6 +20,7 @@ import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.repository.entity.MediaAsset
 import com.lhs.share.hub.repository.entity.MediaKind
 import com.lhs.share.hub.repository.entity.effectiveKind
@@ -29,6 +31,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.context.request.ServletRequestAttributes
 import java.security.SecureRandom
@@ -48,6 +51,7 @@ class FeedbackReportService(
     private val notificationService: NotificationService,
     private val hubUserInfoService: HubUserInfoService,
     private val properties: ShareProperties,
+    private val workflowEvents: FeedbackWorkflowEventRepository,
 ) {
     private val log = KotlinLogging.logger { }
     private val random = SecureRandom()
@@ -208,6 +212,9 @@ class FeedbackReportService(
             category = fields.category,
             area = fields.category,
             status = "OPEN",
+            workflowStage = FeedbackWorkflow.UNASSIGNED,
+            workArea = fields.category,
+            teamReadReporterIndex = -1,
             reporterUserId = userId,
             content = request.content,
             title = request.title?.trim()?.takeIf { it.isNotEmpty() },
@@ -242,6 +249,7 @@ class FeedbackReportService(
         keyword: String?,
         sortBy: String,
         sortOrder: String,
+        queue: String? = null,
     ): FeedbackReportListResponse {
         if (page < 1) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
@@ -255,7 +263,15 @@ class FeedbackReportService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的状态: $status")
         }
         val normalizedType = type?.let(::normalizeTypeFilter)
-        val normalizedCategory = normalizeCategoryFilter(category, area)
+        val normalizedCategory = if (mine) normalizeCategoryFilter(category, area) else {
+            val selected = category ?: area
+            selected?.trim()?.uppercase()?.also {
+                if (it !in FeedbackWorkflow.areas) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的内部负责板块")
+            }
+        }
+        if (!mine && queue != null && queue !in setOf("UNASSIGNED", "MINE", "DEV", "RETURNED", "CLOSED", "ALL")) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的工作队列")
+        }
         if (sortBy !in setOf("createdAt", "updatedAt")) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortBy 只允许 createdAt 或 updatedAt")
         }
@@ -263,11 +279,12 @@ class FeedbackReportService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortOrder 只允许 asc 或 desc")
         }
 
-        val grantedAreas = feedbackAccessService.manageableAreas(currentUserId)
-        if (!mine && grantedAreas.isEmpty()) {
+        val grantedAreas = feedbackAccessService.operatorAreas(currentUserId)
+        val developerAreas = if (mine) emptySet() else feedbackAccessService.developerAreas(currentUserId)
+        if (!mine && grantedAreas.isEmpty() && developerAreas.isEmpty()) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有任何反馈模块的管理权限")
         }
-        if (!mine && normalizedCategory != null && normalizedCategory !in grantedAreas) {
+        if (!mine && normalizedCategory != null && normalizedCategory !in grantedAreas && normalizedCategory !in developerAreas) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有 $normalizedCategory 模块的管理权限")
         }
 
@@ -279,14 +296,18 @@ class FeedbackReportService(
         )
         val resultPage = feedbackTicketQueryRepository.search(
             reporterUserId = if (mine) currentUserId else reporterUserId,
-            manageableCategories = if (mine) null else grantedAreas,
+            manageableCategories = null,
             status = normalizedStatus,
             type = normalizedType,
             category = normalizedCategory,
             keyword = keyword,
             pageable = pageable,
+            workAreas = if (mine) null else grantedAreas,
+            queue = if (mine) null else queue ?: "ALL",
+            actorUserId = currentUserId,
+            developerAreas = developerAreas,
         )
-        val userDict = hubUserInfoService.getDict(resultPage.content.map { it.reporterUserId }.toSet())
+        val userDict = hubUserInfoService.getDict(resultPage.content.flatMap { listOfNotNull(it.reporterUserId, it.operatorAssigneeUserId) }.toSet())
         val items = resultPage.content.map { ticket ->
             val fields = normalizedTicketFields(ticket)
             val reporterBoundary = lastReporterMessageBoundary(ticket)
@@ -296,6 +317,15 @@ class FeedbackReportService(
                 category = fields.category,
                 area = fields.category,
                 status = ticket.status,
+                workflowStage = if (mine) "UNASSIGNED" else FeedbackWorkflow.stage(ticket),
+                workArea = if (mine) null else FeedbackWorkflow.area(ticket),
+                operatorAssigneeUserId = if (mine) null else ticket.operatorAssigneeUserId,
+                operatorAssigneeName = if (mine) null else ticket.operatorAssigneeUserId?.let { userDict[it]?.userName },
+                mergedIntoId = ticket.mergedIntoId,
+                mergedCount = ticket.mergedCount,
+                teamUnread = !mine && ticket.status == "OPEN" && ticket.mergedIntoId == null &&
+                    reporterBoundary != null && reporterBoundary.index > (ticket.teamReadReporterIndex ?: reporterBoundary.index),
+                needsReply = !mine && FeedbackWorkflow.needsReply(ticket),
                 content = ticket.content.take(100),
                 hasAdminReply = ticket.hasAdminReply || ticket.messages.any { it.senderKind == "ADMIN" },
                 lastMessageSender = ticket.lastMessageSender,
@@ -322,9 +352,24 @@ class FeedbackReportService(
     /**
      * 获取工单详情
      */
-    fun getById(currentUserId: String, ticketId: String): FeedbackReportResponse {
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun getById(currentUserId: String, ticketId: String, adminMode: Boolean = false): FeedbackReportResponse {
         val ticket = requireViewableTicket(currentUserId, ticketId)
-        return toResponse(ticket, currentUserId)
+        if (adminMode && !feedbackAccessService.canViewTicket(currentUserId, ticket)) {
+            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有后台查看权限")
+        }
+        val showWorkflow = adminMode || ticket.reporterUserId != currentUserId
+        val viewed = if (showWorkflow && feedbackAccessService.canViewTicket(currentUserId, ticket)) {
+            val boundary = FeedbackWorkflow.lastReporterIndex(ticket)
+            feedbackTicketQueryRepository.advanceTeamRead(ticketId, boundary)
+                ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已变化，请刷新")
+            if (boundary >= 0) notificationService.clearFeedbackReminders(ticketId, boundary)
+            ticket.copy(teamReadReporterIndex = maxOf(ticket.teamReadReporterIndex ?: -1, boundary))
+        } else ticket
+        return toResponse(viewed, currentUserId, showWorkflow).copy(
+            mergedSourceIds = if (showWorkflow && viewed.mergedCount > 0 && feedbackAccessService.canViewTicket(currentUserId, viewed))
+                feedbackTicketRepository.findByMergedIntoId(ticketId).mapNotNull { it.id } else emptyList(),
+        )
     }
 
     /** 返回经过工单范围授权且仍可用的普通文件元数据。 */
@@ -345,6 +390,7 @@ class FeedbackReportService(
     /**
      * 追加消息
      */
+    @Transactional(transactionManager = "hubTransactionManager")
     fun appendMessage(currentUserId: String, ticketId: String, request: FeedbackMessageAppendRequest): FeedbackReportResponse {
         val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
             ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
@@ -352,10 +398,14 @@ class FeedbackReportService(
 
         val isReporter = ticket.reporterUserId == currentUserId
         val fields = normalizedTicketFields(ticket)
-        val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
+        val isManager = feedbackAccessService.canControlTicket(currentUserId, ticket) ||
+            (FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED && feedbackAccessService.canClaimTicket(currentUserId, ticket))
         val actorMode = resolveActorMode(request.actorMode, isReporter, isManager)
 
         // 仅 OPEN 工单可追加
+        if (ticket.mergedIntoId != null) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "该反馈已合并至 ${ticket.mergedIntoId}，不能继续向来源追加消息")
+        }
         if (ticket.status != "OPEN") {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "仅 OPEN 状态的工单可追加消息")
         }
@@ -394,6 +444,11 @@ class FeedbackReportService(
             updatedAt = now,
             hasAdminReply = if (senderKind == "ADMIN") true else ticket.hasAdminReply,
             adminReply = if (senderKind == "ADMIN") request.content.take(200) else ticket.adminReply,
+            workflowStage = if (senderKind == "ADMIN" && FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED) FeedbackWorkflow.PROCESSING else ticket.workflowStage,
+            operatorAssigneeUserId = if (senderKind == "ADMIN" && FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED) currentUserId else ticket.operatorAssigneeUserId,
+            operatorAssignedAt = if (senderKind == "ADMIN" && FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED) now else ticket.operatorAssignedAt,
+            teamReadReporterIndex = if (senderKind == "ADMIN") FeedbackWorkflow.lastReporterIndex(ticket)
+                else ticket.teamReadReporterIndex ?: FeedbackWorkflow.lastReporterIndex(ticket),
         )
 
         val saved = feedbackTicketQueryRepository.saveIfUnchanged(ticket, updatedTicket)
@@ -402,7 +457,9 @@ class FeedbackReportService(
 
         // 提交人追加后, 给有该模块管理权限的管理员逐个生成通知
         if (actorMode == ActorMode.REPORTER) {
-            feedbackAccessService.managerUserIds(fields.category)
+            (if (FeedbackWorkflow.stage(saved) == FeedbackWorkflow.UNASSIGNED) feedbackAccessService.operatorUserIds(FeedbackWorkflow.area(saved))
+            else setOfNotNull(saved.operatorAssigneeUserId) +
+                (if (FeedbackWorkflow.stage(saved) == FeedbackWorkflow.DEV_HANDOFF) feedbackAccessService.developerUserIds(FeedbackWorkflow.area(saved)) else emptySet()))
                 .filter { it != currentUserId }
                 .forEach { managerId ->
                     notificationService.create(
@@ -412,12 +469,14 @@ class FeedbackReportService(
                         body = "用户追加了反馈消息: \"${request.content.take(100)}\"",
                         refType = "FEEDBACK",
                         refId = ticketId,
+                        messageIndex = FeedbackWorkflow.lastReporterIndex(saved),
                     )
                 }
         }
 
         // 管理员回复后, 给提交人生成通知, 包括管理员与提交人为同一账号的场景
         if (actorMode == ActorMode.ADMIN) {
+            notificationService.clearFeedbackReminders(ticketId, FeedbackWorkflow.lastReporterIndex(ticket))
             notificationService.create(
                 userId = ticket.reporterUserId,
                 kind = "FEEDBACK_REPLY",
@@ -428,12 +487,13 @@ class FeedbackReportService(
             )
         }
 
-        return toResponse(saved, currentUserId)
+        return toResponse(saved, currentUserId, actorMode == ActorMode.ADMIN)
     }
 
     /**
      * 更新工单状态
      */
+    @Transactional(transactionManager = "hubTransactionManager")
     fun updateStatus(currentUserId: String, ticketId: String, request: FeedbackStatusUpdateRequest): FeedbackReportResponse {
         val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
             ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
@@ -441,8 +501,10 @@ class FeedbackReportService(
 
         val isReporter = ticket.reporterUserId == currentUserId
         val fields = normalizedTicketFields(ticket)
-        val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
+        val isManager = feedbackAccessService.canControlTicket(currentUserId, ticket) ||
+            (FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED && feedbackAccessService.canClaimTicket(currentUserId, ticket))
         val actorMode = resolveActorMode(request.actorMode, isReporter, isManager)
+        if (ticket.mergedIntoId != null) throw ApiResultException(HttpStatus.CONFLICT.value(), "已合并来源不能独立处理")
 
         val newStatus = request.status.trim().uppercase()
         if (newStatus !in VALID_STATUSES) {
@@ -453,6 +515,15 @@ class FeedbackReportService(
         if (actorMode == ActorMode.ADMIN) {
             if (newStatus !in ADMIN_ALLOWED_STATUSES) {
                 throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "管理员不允许设置状态: $newStatus")
+            }
+            if (newStatus == "RESOLVED" && FeedbackWorkflow.stage(ticket) != FeedbackWorkflow.PROCESSING) {
+                throw ApiResultException(HttpStatus.CONFLICT.value(), "只有处理中工单可标记完成")
+            }
+            if (newStatus == "DISMISSED" && FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.DEV_HANDOFF) {
+                throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
+            }
+            if (newStatus == "DISMISSED" && FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED && request.reason.isNullOrBlank()) {
+                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "未接单工单驳回须填写原因")
             }
         } else {
             // 提交人只能关闭自己的 OPEN 工单
@@ -466,12 +537,20 @@ class FeedbackReportService(
 
         // 状态无变化, 不更新
         if (ticket.status == newStatus) {
-            return toResponse(ticket, currentUserId)
+            return toResponse(ticket, currentUserId, actorMode == ActorMode.ADMIN)
         }
 
         val now = Instant.now()
         val updatedTicket = ticket.copy(
             status = newStatus,
+            workflowStage = if (actorMode == ActorMode.ADMIN && newStatus == "OPEN" && ticket.status != "OPEN") {
+                if (ticket.operatorAssigneeUserId != null &&
+                    FeedbackWorkflow.area(ticket) in feedbackAccessService.operatorAreas(ticket.operatorAssigneeUserId)) FeedbackWorkflow.PROCESSING
+                else FeedbackWorkflow.UNASSIGNED
+            } else ticket.workflowStage,
+            operatorAssigneeUserId = if (actorMode == ActorMode.ADMIN && newStatus == "OPEN" && ticket.status != "OPEN" &&
+                (ticket.operatorAssigneeUserId == null || FeedbackWorkflow.area(ticket) !in feedbackAccessService.operatorAreas(ticket.operatorAssigneeUserId))) null
+                else ticket.operatorAssigneeUserId,
             handlerUserId = if (actorMode == ActorMode.ADMIN) currentUserId else ticket.handlerUserId,
             handledAt = if (actorMode == ActorMode.ADMIN) now else ticket.handledAt,
             updatedAt = now,
@@ -480,9 +559,13 @@ class FeedbackReportService(
         val saved = feedbackTicketQueryRepository.saveIfUnchanged(ticket, updatedTicket)
             ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已更新，请重新打开详情后重试")
         log.info { "反馈工单状态更新: ticketId=$ticketId, ${ticket.status} → $newStatus, by=$currentUserId" }
+        if (newStatus != "OPEN") notificationService.clearFeedbackTasks(ticketId)
 
         // 管理员改状态后, 给提交人生成通知 (状态有实际变化), 包括同账号场景
         if (actorMode == ActorMode.ADMIN) {
+            if (newStatus == "DISMISSED") workflowEvents.save(FeedbackWorkflowEvent(
+                ticketId = ticketId, action = "DISMISS", actorUserId = currentUserId, note = request.reason?.trim().orEmpty(),
+            ))
             val statusLabel = when (newStatus) {
                 "RESOLVED" -> "已处理"
                 "DISMISSED" -> "已忽略"
@@ -498,7 +581,7 @@ class FeedbackReportService(
             )
         }
 
-        return toResponse(saved, currentUserId)
+        return toResponse(saved, currentUserId, actorMode == ActorMode.ADMIN)
     }
 
     // ========== 内部方法 ==========
@@ -556,7 +639,7 @@ class FeedbackReportService(
         val ticketId = checkNotNull(ticket.id)
         val category = normalizedTicketFields(ticket).category
         val categoryLabel = FeedbackArea.labels[category] ?: category
-        feedbackAccessService.receiverUserIds(category)
+        feedbackAccessService.operatorUserIds(category)
             .filter { it != ticket.reporterUserId }
             .forEach { receiverId ->
                 notificationService.create(
@@ -566,6 +649,7 @@ class FeedbackReportService(
                     body = ticket.content.take(100),
                     refType = "FEEDBACK",
                     refId = ticketId,
+                    messageIndex = 0,
                 )
             }
     }
@@ -576,7 +660,7 @@ class FeedbackReportService(
         }
         val isReporter = ticket.reporterUserId == currentUserId
         val fields = normalizedTicketFields(ticket)
-        if (!isReporter && !feedbackAccessService.canView(currentUserId, fields.category)) {
+        if (!isReporter && !feedbackAccessService.canViewTicket(currentUserId, ticket)) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的查看权限")
         }
         return ticket
@@ -686,7 +770,7 @@ class FeedbackReportService(
     /**
      * 将实体转换为响应 DTO
      */
-    private fun toResponse(ticket: FeedbackTicket, currentUserId: String): FeedbackReportResponse {
+    private fun toResponse(ticket: FeedbackTicket, currentUserId: String, adminMode: Boolean = false): FeedbackReportResponse {
         val fields = normalizedTicketFields(ticket)
         val isReporter = ticket.reporterUserId == currentUserId
         val reporterInfo = hubUserInfoService.get(ticket.reporterUserId)
@@ -697,8 +781,10 @@ class FeedbackReportService(
         } else {
             0
         }
-        val isManager = feedbackAccessService.canManage(currentUserId, fields.category)
-        val canAppend = ticket.status == "OPEN" && isReporter && pendingCount < PENDING_LIMIT
+        val isManager = adminMode && (feedbackAccessService.canControlTicket(currentUserId, ticket) ||
+            (FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.UNASSIGNED && feedbackAccessService.canClaimTicket(currentUserId, ticket))
+        )
+        val canAppend = ticket.status == "OPEN" && ticket.mergedIntoId == null && isReporter && pendingCount < PENDING_LIMIT
 
         val messageResponses = ticket.messages.map { msg ->
             val authorInfo = hubUserInfoService.get(msg.authorUserId)
@@ -732,6 +818,12 @@ class FeedbackReportService(
             category = fields.category,
             area = fields.category,
             status = ticket.status,
+            workflowStage = if (adminMode) FeedbackWorkflow.stage(ticket) else "UNASSIGNED",
+            workArea = if (adminMode) FeedbackWorkflow.area(ticket) else null,
+            operatorAssigneeUserId = if (adminMode) ticket.operatorAssigneeUserId else null,
+            operatorAssigneeName = if (adminMode) ticket.operatorAssigneeUserId?.let { hubUserInfoService.get(it)?.userName } else null,
+            teamUnread = adminMode && FeedbackWorkflow.lastReporterIndex(ticket).let { it >= 0 && it > (ticket.teamReadReporterIndex ?: it) },
+            needsReply = adminMode && FeedbackWorkflow.needsReply(ticket),
             content = ticket.content,
             title = ticket.title,
             visibility = FeedbackVisibility.normalize(ticket.visibility),
@@ -757,6 +849,12 @@ class FeedbackReportService(
             ),
             viewerIsReporter = isReporter,
             viewerCanManage = isManager,
+            viewerCanTakeOver = adminMode && ticket.status == "OPEN" && ticket.mergedIntoId == null &&
+                FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.PROCESSING &&
+                ticket.operatorAssigneeUserId != currentUserId && feedbackAccessService.canClaimTicket(currentUserId, ticket),
+            viewerCanDevelop = adminMode && ticket.status == "OPEN" && ticket.mergedIntoId == null &&
+                FeedbackWorkflow.stage(ticket) == FeedbackWorkflow.DEV_HANDOFF &&
+                FeedbackWorkflow.area(ticket) in feedbackAccessService.developerAreas(currentUserId),
             clientInfo = ticket.clientInfo?.let {
                 FeedbackReportResponse.ClientInfoResponse(
                     consent = ticket.clientInfoConsent,

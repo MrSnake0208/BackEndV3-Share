@@ -11,6 +11,9 @@ data class AdminAccessResponse(
     val receiveAreas: Set<String>,
     val manageAreas: Set<String>,
     val superAdmin: Boolean,
+    val feedbackRoles: Set<String> = emptySet(),
+    val operatorAreas: Set<String> = emptySet(),
+    val developerAreas: Set<String> = emptySet(),
 )
 
 data class AdminRoleUserResponse(

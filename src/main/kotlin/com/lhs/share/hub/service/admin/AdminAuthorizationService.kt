@@ -5,6 +5,7 @@ import com.lhs.share.hub.repository.AdminRoleBindingRepository
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.service.report.FeedbackArea
+import com.lhs.share.hub.service.report.FeedbackWorkflow
 import com.lhs.share.service.UserService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -38,7 +39,8 @@ class AdminAuthorizationService(
         if (userService.get(userId)?.activated != true) return false
         val roles = roleRepository.findById(userId).orElse(null)?.roles.orEmpty()
         if (roles.isNotEmpty()) return true
-        return feedbackAccessRepository.findById(userId).orElse(null)?.manageAreas.orEmpty().isNotEmpty()
+        val grant = feedbackAccessRepository.findById(userId).orElse(null)
+        return grant?.manageAreas.orEmpty().isNotEmpty() || grant?.feedbackRoles.orEmpty().isNotEmpty()
     }
 
     fun hasPermission(userId: String, permission: AdminPermission): Boolean {
@@ -71,6 +73,23 @@ class AdminAuthorizationService(
         val roles = roleRepository.findById(userId).orElse(null)?.roles.orEmpty()
         if (AdminRole.SUPER_ADMIN in roles) return FeedbackArea.all
         return feedbackAccessRepository.findById(userId).orElse(null)?.manageAreas.orEmpty()
+    }
+
+    fun feedbackRolesFor(userId: String): Set<String> {
+        if (userService.get(userId)?.activated != true) return emptySet()
+        return feedbackAccessRepository.findById(userId).orElse(null)?.feedbackRoles.orEmpty()
+    }
+
+    fun operatorAreasFor(userId: String): Set<String> {
+        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return FeedbackWorkflow.areas
+        if ("OPERATOR" !in feedbackRolesFor(userId)) return emptySet()
+        return feedbackAccessRepository.findById(userId).orElse(null)?.operatorAreas.orEmpty()
+    }
+
+    fun developerAreasFor(userId: String): Set<String> {
+        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return FeedbackWorkflow.areas
+        if ("DEVELOPER" !in feedbackRolesFor(userId)) return emptySet()
+        return feedbackAccessRepository.findById(userId).orElse(null)?.developerAreas.orEmpty()
     }
 
     fun managerUserIdsFor(area: String): Set<String> {

@@ -9,6 +9,7 @@ import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
 import com.lhs.share.hub.controller.report.request.FeedbackStatusUpdateRequest
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
+import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
 import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackMessageFile
@@ -35,9 +36,10 @@ import java.util.Optional
 class FeedbackReportServiceTest {
     private val ticketRepository = mockk<FeedbackTicketRepository>()
     private val queryRepository = mockk<FeedbackTicketQueryRepository>()
-    private val accessService = mockk<FeedbackAccessService>()
+    private val accessService = mockk<FeedbackAccessService>(relaxed = true)
     private val mediaRepository = mockk<MediaAssetRepository>()
     private val notificationService = mockk<NotificationService>(relaxed = true)
+    private val workflowEvents = mockk<FeedbackWorkflowEventRepository>(relaxed = true)
     private val userInfoService = mockk<HubUserInfoService>()
     private val properties = ShareProperties().apply { info.publicBaseUrl = "https://api.example.test/" }
     private val service = FeedbackReportService(
@@ -48,11 +50,24 @@ class FeedbackReportServiceTest {
         notificationService,
         userInfoService,
         properties,
+        workflowEvents,
     )
 
     init {
         every { queryRepository.saveIfUnchanged(any(), any()) } answers { secondArg() }
         every { accessService.managerUserIds(any()) } returns emptySet()
+        every { accessService.operatorUserIds(any()) } returns emptySet()
+        every { accessService.developerAreas(any()) } returns emptySet()
+        every { accessService.operatorAreas(any()) } answers { accessService.manageableAreas(firstArg()) }
+        every { accessService.canControlTicket(any(), any()) } answers {
+            accessService.canManage(firstArg(), FeedbackWorkflow.area(secondArg()))
+        }
+        every { accessService.canClaimTicket(any(), any()) } answers {
+            accessService.canManage(firstArg(), FeedbackWorkflow.area(secondArg()))
+        }
+        every { accessService.canViewTicket(any(), any()) } answers {
+            accessService.canView(firstArg(), FeedbackWorkflow.area(secondArg()))
+        }
     }
 
     private fun prepareCreate() {
@@ -214,7 +229,7 @@ class FeedbackReportServiceTest {
         )
         val ticket = openTicket().copy(messages = listOf(firstReporter, adminReply, latestReporter))
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -245,7 +260,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -266,7 +281,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -426,7 +441,7 @@ class FeedbackReportServiceTest {
                 ),
             ),
         )
-        every { accessService.managerUserIds(FeedbackArea.OPERATOR) } returns setOf("manager", "user")
+        every { accessService.operatorUserIds(FeedbackArea.OPERATOR) } returns setOf("manager", "user")
 
         service.appendMessage(
             "user",
@@ -447,6 +462,7 @@ class FeedbackReportServiceTest {
                 body = any(),
                 refType = "FEEDBACK",
                 refId = "rpt_1",
+                messageIndex = any(),
             )
         }
         verify(exactly = 0) {
@@ -457,6 +473,7 @@ class FeedbackReportServiceTest {
                 body = any(),
                 refType = "FEEDBACK",
                 refId = "rpt_1",
+                messageIndex = any(),
             )
         }
     }
@@ -618,7 +635,7 @@ class FeedbackReportServiceTest {
         val response = service.updateStatus(
             "user",
             "rpt_1",
-            FeedbackStatusUpdateRequest("DISMISSED", actorMode = "ADMIN"),
+            FeedbackStatusUpdateRequest("DISMISSED", actorMode = "ADMIN", reason = "明显无效"),
         )
 
         assertEquals("DISMISSED", response.status)
@@ -645,7 +662,7 @@ class FeedbackReportServiceTest {
 
     @Test
     fun `管理员处理他人工单会通知且状态不变时不重复保存`() {
-        val ticket = openTicket()
+        val ticket = openTicket().copy(workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "admin")
         prepareTicket(ticket, "admin", canManage = true)
 
         val response = service.updateStatus(
@@ -845,6 +862,49 @@ class FeedbackReportServiceTest {
         assertEquals("0.0.2", detail.targetVersionLabel)
         assertEquals("chg_done", detail.completedVersionId)
         assertEquals("0.0.1-beta.5", detail.completedVersionLabel)
+    }
+
+    @Test
+    fun `管理员回复未接单工单时原子接单并推进已处理消息边界`() {
+        val ticket = openTicket()
+        prepareTicket(ticket, "admin", canManage = true)
+
+        service.appendMessage("admin", "rpt_1", FeedbackMessageAppendRequest("已收到", actorMode = "ADMIN"))
+
+        verify { queryRepository.saveIfUnchanged(ticket, match {
+            it.workflowStage == FeedbackWorkflow.PROCESSING &&
+                it.operatorAssigneeUserId == "admin" &&
+                it.teamReadReporterIndex == 0
+        }) }
+    }
+
+    @Test
+    fun `已合并来源拒绝用户继续追加消息`() {
+        val ticket = openTicket().copy(mergedIntoId = "rpt_main")
+        prepareTicket(ticket, "user", canManage = false)
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.appendMessage("user", "rpt_1", FeedbackMessageAppendRequest("后续补充", actorMode = "REPORTER"))
+        }
+
+        assertEquals(409, error.statusCode)
+        verify(exactly = 0) { queryRepository.saveIfUnchanged(any(), any()) }
+    }
+
+    @Test
+    fun `兼任运营的提交人仅在明确后台详情中看到内部阶段`() {
+        val ticket = openTicket().copy(workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "user")
+        prepareTicket(ticket, "user", canManage = true)
+        every { accessService.canView("user", FeedbackArea.OPERATOR) } returns true
+        every { queryRepository.advanceTeamRead("rpt_1", 0) } returns ticket.copy(teamReadReporterIndex = 0)
+
+        val personal = service.getById("user", "rpt_1")
+        val managed = service.getById("user", "rpt_1", adminMode = true)
+
+        assertNull(personal.operatorAssigneeUserId)
+        assertFalse(personal.viewerCanManage)
+        assertEquals("user", managed.operatorAssigneeUserId)
+        assertTrue(managed.viewerCanManage)
     }
 
     private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {

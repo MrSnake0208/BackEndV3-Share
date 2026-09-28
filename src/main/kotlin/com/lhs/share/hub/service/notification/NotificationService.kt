@@ -45,6 +45,7 @@ class NotificationService(
         body: String,
         refType: String,
         refId: String,
+        messageIndex: Int? = null,
     ): Notification {
         val notification = Notification(
             id = generateId(),
@@ -54,8 +55,27 @@ class NotificationService(
             body = body,
             refType = refType,
             refId = refId,
+            messageIndex = messageIndex,
         )
         return notificationRepository.save(notification)
+    }
+
+    fun clearFeedbackReminders(ticketId: String, throughIndex: Int) {
+        val reminders = notificationRepository.findByRefTypeAndRefIdAndReadAtIsNull("FEEDBACK", ticketId)
+            .filter { it.messageIndex != null && it.messageIndex <= throughIndex }
+        if (reminders.isNotEmpty()) notificationRepository.saveAll(reminders.map { it.copy(readAt = Instant.now()) })
+    }
+
+    fun clearFeedbackTasks(ticketId: String) {
+        val reminders = notificationRepository.findByRefTypeAndRefIdAndReadAtIsNull("FEEDBACK", ticketId)
+            .filter { it.kind != "FEEDBACK_REPLY" && it.kind != "FEEDBACK_STATUS_UPDATED" }
+        if (reminders.isNotEmpty()) notificationRepository.saveAll(reminders.map { it.copy(readAt = Instant.now()) })
+    }
+
+    fun clearFeedbackKinds(ticketId: String, kinds: Set<String>) {
+        val reminders = notificationRepository.findByRefTypeAndRefIdAndReadAtIsNull("FEEDBACK", ticketId)
+            .filter { it.kind in kinds }
+        if (reminders.isNotEmpty()) notificationRepository.saveAll(reminders.map { it.copy(readAt = Instant.now()) })
     }
 
     /**

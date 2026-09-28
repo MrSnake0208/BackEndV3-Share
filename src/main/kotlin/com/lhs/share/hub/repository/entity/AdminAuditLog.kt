@@ -21,6 +21,9 @@ data class AdminAuditSnapshot(
     val roles: Set<String>? = null,
     val receiveAreas: Set<String>? = null,
     val manageAreas: Set<String>? = null,
+    val feedbackRoles: Set<String>? = null,
+    val operatorAreas: Set<String>? = null,
+    val developerAreas: Set<String>? = null,
 )
 
 @Document("admin_audit_logs")
