@@ -7,6 +7,11 @@ data class FeedbackAreaOptionResponse(
     val label: String,
 )
 
+data class FeedbackAssigneeResponse(
+    val id: String,
+    val userName: String,
+)
+
 data class CurrentFeedbackAccessResponse(
     val superAdmin: Boolean,
     val receiveAreas: Set<String>,

@@ -5,6 +5,7 @@ import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.controller.report.response.CurrentFeedbackAccessResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
+import com.lhs.share.hub.controller.report.response.FeedbackAssigneeResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAreaOptionResponse
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
@@ -92,6 +93,20 @@ class FeedbackAccessService(
     fun operatorUserIds(area: String): Set<String> = repository.findByOperatorAreasContaining(area)
         .filter { "OPERATOR" in it.feedbackRoles && userService.get(it.userId)?.activated == true }
         .mapTo(linkedSetOf()) { it.userId }
+
+    fun assignees(actor: String, ticketId: String): List<FeedbackAssigneeResponse> {
+        val ticket = ticketRepository.findById(ticketId).orElseThrow {
+            ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
+        }
+        if (!canControlTicket(actor, ticket)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "无权转交该工单")
+        if (!FeedbackWorkflow.isActive(ticket) || FeedbackWorkflow.stage(ticket) != FeedbackWorkflow.PROCESSING) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "工单当前不可转交")
+        }
+        return (operatorUserIds(FeedbackWorkflow.area(ticket)) + authorizationService.superAdminUserIds())
+            .filter { it != ticket.operatorAssigneeUserId }
+            .mapNotNull { userId -> userService.get(userId)?.let { FeedbackAssigneeResponse(userId, it.userName) } }
+            .sortedWith(compareBy({ it.userName }, { it.id }))
+    }
 
     fun listGrants(adminUserId: String): List<FeedbackAccessGrantResponse> {
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)

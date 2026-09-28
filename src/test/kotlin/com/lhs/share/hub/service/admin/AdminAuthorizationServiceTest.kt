@@ -80,6 +80,7 @@ class AdminAuthorizationServiceTest {
             setOf("manager", "root"),
             service.managerUserIdsFor(FeedbackArea.OPERATOR),
         )
+        assertEquals(setOf("root"), service.superAdminUserIds())
     }
 
     @Test

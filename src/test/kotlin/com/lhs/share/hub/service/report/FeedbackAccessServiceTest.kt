@@ -117,6 +117,41 @@ class FeedbackAccessServiceTest {
     }
 
     @Test
+    fun `转交候选人只包含当前板块已激活的其他运营`() {
+        val ticket = FeedbackTicket(id = "rpt_1", type = "BUG", category = "OPERATOR", workArea = "STAR", workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "owner", reporterUserId = "reporter", content = "反馈")
+        every { tickets.findById("rpt_1") } returns Optional.of(ticket)
+        every { authorizationService.hasRole("owner", AdminRole.SUPER_ADMIN) } returns false
+        every { authorizationService.operatorAreasFor("owner") } returns setOf("STAR")
+        every { authorizationService.superAdminUserIds() } returns setOf("root")
+        every { repository.findByOperatorAreasContaining("STAR") } returns listOf(
+            FeedbackAccessGrant(userId = "owner", feedbackRoles = setOf("OPERATOR"), operatorAreas = setOf("STAR"), updatedBy = "root"),
+            FeedbackAccessGrant(userId = "active", feedbackRoles = setOf("OPERATOR"), operatorAreas = setOf("STAR"), updatedBy = "root"),
+            FeedbackAccessGrant(userId = "disabled", feedbackRoles = setOf("OPERATOR"), operatorAreas = setOf("STAR"), updatedBy = "root"),
+            FeedbackAccessGrant(userId = "developer", feedbackRoles = setOf("DEVELOPER"), operatorAreas = setOf("STAR"), updatedBy = "root"),
+        )
+        every { userService.get("owner") } returns MaaUserInfo("owner", "原负责人", activated = true)
+        every { userService.get("active") } returns MaaUserInfo("active", "新负责人", activated = true)
+        every { userService.get("disabled") } returns MaaUserInfo("disabled", "已停用", activated = false)
+        every { userService.get("root") } returns MaaUserInfo("root", "超级管理员", activated = true)
+
+        assertEquals(setOf("active", "root"), service.assignees("owner", "rpt_1").map { it.id }.toSet())
+        verify(exactly = 0) { ticketQueries.saveIfUnchanged(any(), any()) }
+    }
+
+    @Test
+    fun `转交候选人拒绝非负责人和已结束工单`() {
+        val ticket = FeedbackTicket(id = "rpt_1", type = "BUG", category = "OPERATOR", workArea = "STAR", workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "owner", reporterUserId = "reporter", content = "反馈")
+        every { tickets.findById("rpt_1") } returns Optional.of(ticket)
+        every { authorizationService.hasRole("other", AdminRole.SUPER_ADMIN) } returns false
+
+        assertEquals(403, assertThrows(ApiResultException::class.java) { service.assignees("other", "rpt_1") }.statusCode)
+
+        every { tickets.findById("rpt_1") } returns Optional.of(ticket.copy(status = "RESOLVED"))
+        every { authorizationService.hasRole("owner", AdminRole.SUPER_ADMIN) } returns true
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.assignees("owner", "rpt_1") }.statusCode)
+    }
+
+    @Test
     fun `更新授权分别保存接收与管理模块`() {
         every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
         every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)

@@ -92,12 +92,15 @@ class AdminAuthorizationService(
         return feedbackAccessRepository.findById(userId).orElse(null)?.developerAreas.orEmpty()
     }
 
+    fun superAdminUserIds(): Set<String> = roleRepository.findByRolesContaining(AdminRole.SUPER_ADMIN)
+        .map { it.userId }
+        .filter { userService.get(it)?.activated == true }
+        .toSet()
+
     fun managerUserIdsFor(area: String): Set<String> {
         val grantUserIds = feedbackAccessRepository.findByManageAreasContaining(area)
             .map { it.userId }
-        val superAdminUserIds = roleRepository.findByRolesContaining(AdminRole.SUPER_ADMIN)
-            .map { it.userId }
-        return (grantUserIds + superAdminUserIds)
+        return (grantUserIds + superAdminUserIds())
             .filter { userService.get(it)?.activated == true }
             .toSet()
     }
