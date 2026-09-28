@@ -69,20 +69,12 @@ interface FeedbackTicketRepository : MongoRepository<FeedbackTicket, String> {
     /**
      * 按提交人+状态查询(按创建时间倒序)
      */
-    fun findByReporterUserIdAndStatusOrderByCreatedAtDesc(
-        reporterUserId: String,
-        status: String,
-        pageable: Pageable,
-    ): Page<FeedbackTicket>
+    fun findByReporterUserIdAndStatusOrderByCreatedAtDesc(reporterUserId: String, status: String, pageable: Pageable): Page<FeedbackTicket>
 
     /**
      * 按提交人+类型查询(按创建时间倒序)
      */
-    fun findByReporterUserIdAndTypeOrderByCreatedAtDesc(
-        reporterUserId: String,
-        type: String,
-        pageable: Pageable,
-    ): Page<FeedbackTicket>
+    fun findByReporterUserIdAndTypeOrderByCreatedAtDesc(reporterUserId: String, type: String, pageable: Pageable): Page<FeedbackTicket>
 
     /**
      * 按提交人+状态+类型查询(按创建时间倒序)
@@ -104,7 +96,9 @@ interface FeedbackTicketRepository : MongoRepository<FeedbackTicket, String> {
      * 按提交人搜索 content 或 id 包含关键词
      */
     @Query(
-        value = "{ \$and: [ { 'reporterUserId': ?0 }, { \$or: [ { 'content': { \$regex: ?1, \$options: 'i' } }, { '_id': { \$regex: ?1, \$options: 'i' } } ] } ] }",
+        value = "{ \$and: [ { 'reporterUserId': ?0 }, " +
+            "{ \$or: [ { 'content': { \$regex: ?1, \$options: 'i' } }, " +
+            "{ '_id': { \$regex: ?1, \$options: 'i' } } ] } ] }",
     )
     fun searchByReporterUserIdAndKeywordOrderByCreatedAtDesc(
         reporterUserId: String,

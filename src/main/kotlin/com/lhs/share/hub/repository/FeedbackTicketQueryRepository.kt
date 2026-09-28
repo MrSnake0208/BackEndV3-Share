@@ -217,12 +217,14 @@ class FeedbackTicketQueryRepository(
 
     /** 定向写入合并指向;源记录保留。 */
     fun setMergedInto(ticketId: String, targetTicketId: String): FeedbackTicket? = template.findAndModify(
-        Query(Criteria().andOperator(
-            Criteria.where("_id").`is`(ticketId),
-            Criteria.where("mergedIntoId").`is`(null),
-            Criteria.where("mergedCount").`in`(0, null),
-            Criteria.where("status").`is`("OPEN"),
-        )),
+        Query(
+            Criteria().andOperator(
+                Criteria.where("_id").`is`(ticketId),
+                Criteria.where("mergedIntoId").`is`(null),
+                Criteria.where("mergedCount").`in`(0, null),
+                Criteria.where("status").`is`("OPEN"),
+            ),
+        ),
         Update().set("mergedIntoId", targetTicketId),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
@@ -352,7 +354,8 @@ class FeedbackTicketQueryRepository(
             .set("handledAt", updated.handledAt)
             .set("updatedAt", updated.updatedAt)
         if (updated.teamReadReporterIndex != null &&
-            (previous.teamReadReporterIndex == null || updated.teamReadReporterIndex > previous.teamReadReporterIndex)) {
+            (previous.teamReadReporterIndex == null || updated.teamReadReporterIndex > previous.teamReadReporterIndex)
+        ) {
             update.max("teamReadReporterIndex", updated.teamReadReporterIndex)
         }
         return template.findAndModify(query, update, FindAndModifyOptions.options().returnNew(true), FeedbackTicket::class.java)

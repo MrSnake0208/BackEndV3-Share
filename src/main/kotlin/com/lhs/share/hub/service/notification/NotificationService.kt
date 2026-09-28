@@ -86,12 +86,7 @@ class NotificationService(
      * @param pageSize 每页大小
      * @param unreadOnly 是否仅查未读
      */
-    fun list(
-        userId: String,
-        page: Int = 1,
-        pageSize: Int = 20,
-        unreadOnly: Boolean = false,
-    ): NotificationListResponse {
+    fun list(userId: String, page: Int = 1, pageSize: Int = 20, unreadOnly: Boolean = false): NotificationListResponse {
         val pageable = PageRequest.of(
             (page - 1).coerceAtLeast(0),
             pageSize.coerceIn(1, 100),

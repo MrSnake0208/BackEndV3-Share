@@ -256,7 +256,8 @@ class FeedbackReportServiceTest {
         )
         val ticket = openTicket().copy(messages = listOf(firstReporter, adminReply, latestReporter))
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -287,7 +288,8 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -308,7 +310,8 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -898,11 +901,16 @@ class FeedbackReportServiceTest {
 
         service.appendMessage("admin", "rpt_1", FeedbackMessageAppendRequest("已收到", actorMode = "ADMIN"))
 
-        verify { queryRepository.saveIfUnchanged(ticket, match {
-            it.workflowStage == FeedbackWorkflow.PROCESSING &&
-                it.operatorAssigneeUserId == "admin" &&
-                it.teamReadReporterIndex == 0
-        }) }
+        verify {
+            queryRepository.saveIfUnchanged(
+                ticket,
+                match {
+                    it.workflowStage == FeedbackWorkflow.PROCESSING &&
+                        it.operatorAssigneeUserId == "admin" &&
+                        it.teamReadReporterIndex == 0
+                },
+            )
+        }
     }
 
     @Test
