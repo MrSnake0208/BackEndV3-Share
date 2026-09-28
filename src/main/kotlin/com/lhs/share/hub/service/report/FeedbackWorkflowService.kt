@@ -32,6 +32,18 @@ class FeedbackWorkflowService(
         query.saveIfUnchanged(previous, updated)
             ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "工单已被其他管理员更新，请刷新后重试")
 
+    private fun reclassified(ticket: FeedbackTicket, area: String, now: Instant): FeedbackTicket = ticket.copy(
+        type = if (ticket.type.equals(FeedbackType.LEGACY_FEEDBACK, ignoreCase = true)) {
+            ticket.category?.trim()?.uppercase()?.takeIf { it in FeedbackType.all } ?: ticket.type
+        } else {
+            ticket.type
+        },
+        category = area,
+        area = area,
+        workArea = area,
+        updatedAt = now,
+    )
+
     @Transactional(transactionManager = "hubTransactionManager")
     fun claim(actor: String, id: String): FeedbackTicket {
         val previous = ticket(id)
@@ -87,7 +99,7 @@ class FeedbackWorkflowService(
         if (developers.isEmpty()) throw ApiResultException(HttpStatus.CONFLICT.value(), "目标板块尚无程序负责人")
         val reason = note.trim().takeIf { it.isNotEmpty() }
             ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "请填写交接说明")
-        val updated = save(previous, previous.copy(workArea = area, workflowStage = FeedbackWorkflow.DEV_HANDOFF, developerReturnedAt = null, updatedAt = Instant.now()))
+        val updated = save(previous, reclassified(previous, area, Instant.now()).copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, developerReturnedAt = null))
         events.save(FeedbackWorkflowEvent(ticketId = id, action = "HANDOFF", actorUserId = actor, note = reason))
         developers.forEach { notifications.create(it, "FEEDBACK_DEV_HANDOFF", "反馈转程序处理", reason.take(100), "FEEDBACK", id) }
         return updated
@@ -100,14 +112,14 @@ class FeedbackWorkflowService(
         if (!access.canControlTicket(actor, previous)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "只有当前运营负责人可调整板块")
         if (FeedbackWorkflow.stage(previous) == FeedbackWorkflow.DEV_HANDOFF) throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
         val area = workArea.trim().uppercase()
-        if (area !in FeedbackWorkflow.areas) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的内部负责板块")
+        if (area !in FeedbackWorkflow.areas) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
         if (previous.operatorAssigneeUserId != null && area !in access.operatorAreas(previous.operatorAssigneeUserId)) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "当前负责人没有目标板块权限，请先转交")
         }
         val reason = note.trim().takeIf { it.isNotEmpty() }
             ?: throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "请填写调整原因")
-        if (FeedbackWorkflow.area(previous) == area) return previous
-        val updated = save(previous, previous.copy(workArea = area, updatedAt = Instant.now()))
+        if (FeedbackWorkflow.area(previous) == area && previous.category == area && previous.area == area) return previous
+        val updated = save(previous, reclassified(previous, area, Instant.now()))
         events.save(FeedbackWorkflowEvent(ticketId = id, action = "CHANGE_AREA", actorUserId = actor, note = reason))
         if (FeedbackWorkflow.stage(updated) == FeedbackWorkflow.UNASSIGNED) {
             notifications.clearFeedbackTasks(id)

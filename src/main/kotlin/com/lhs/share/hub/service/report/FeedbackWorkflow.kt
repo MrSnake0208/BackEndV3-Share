@@ -8,8 +8,8 @@ object FeedbackWorkflow {
     const val DEV_HANDOFF = "DEV_HANDOFF"
     val stages = setOf(UNASSIGNED, PROCESSING, DEV_HANDOFF)
 
-    val areas = FeedbackArea.all + setOf("STAR", "MAAYUAN")
-    val labels = FeedbackArea.labels + mapOf("STAR" to "星石", "MAAYUAN" to "麻圆")
+    val areas = FeedbackArea.all
+    val labels = FeedbackArea.labels
 
     fun stage(ticket: FeedbackTicket): String = ticket.workflowStage ?: UNASSIGNED
 

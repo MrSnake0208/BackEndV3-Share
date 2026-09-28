@@ -101,6 +101,17 @@ class FeedbackReportServiceTest {
     }
 
     @Test
+    fun `星石和麻圆可直接作为用户反馈板块`() {
+        prepareCreate()
+
+        for (area in listOf(FeedbackArea.STAR, FeedbackArea.MAAYUAN)) {
+            val response = service.create("user", FeedbackReportCreateRequest(type = "BUG", category = area, content = "反馈"))
+            assertEquals(area, response.category)
+            verify { ticketRepository.save(match { it.category == area && it.area == area && it.workArea == area }) }
+        }
+    }
+
+    @Test
     fun `旧 FEEDBACK category area 请求映射到新语义`() {
         prepareCreate()
 
@@ -905,6 +916,19 @@ class FeedbackReportServiceTest {
         assertFalse(personal.viewerCanManage)
         assertEquals("user", managed.operatorAssigneeUserId)
         assertTrue(managed.viewerCanManage)
+    }
+
+    @Test
+    fun `历史不一致板块在用户和管理员详情中显示同一有效分类`() {
+        val ticket = openTicket().copy(workArea = FeedbackArea.STAR)
+        prepareTicket(ticket, "user", canManage = true)
+        every { accessService.canView("user", FeedbackArea.STAR) } returns true
+        every { queryRepository.advanceTeamRead("rpt_1", 0) } returns ticket.copy(teamReadReporterIndex = 0)
+
+        assertEquals(FeedbackArea.STAR, service.getById("user", "rpt_1").category)
+        val managed = service.getById("user", "rpt_1", adminMode = true)
+        assertEquals(FeedbackArea.STAR, managed.category)
+        assertEquals(FeedbackArea.STAR, managed.workArea)
     }
 
     private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {

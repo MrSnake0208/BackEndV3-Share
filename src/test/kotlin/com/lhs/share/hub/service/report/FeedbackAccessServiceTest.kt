@@ -45,6 +45,21 @@ class FeedbackAccessServiceTest {
     }
 
     @Test
+    fun `用户与管理员获取同一反馈板块目录`() {
+        every { authorizationService.hasRole("user", AdminRole.SUPER_ADMIN) } returns false
+        every { repository.findById("user") } returns Optional.empty()
+        every { authorizationService.manageableAreasFor("user") } returns emptySet()
+        every { authorizationService.feedbackRolesFor("user") } returns emptySet()
+        every { authorizationService.operatorAreasFor("user") } returns emptySet()
+        every { authorizationService.developerAreasFor("user") } returns emptySet()
+
+        val current = service.current("user")
+        assertEquals(current.availableAreas, current.availableWorkAreas)
+        assertTrue(current.availableAreas.any { it.key == FeedbackArea.STAR && it.label == "星石" })
+        assertTrue(current.availableAreas.any { it.key == FeedbackArea.MAAYUAN && it.label == "麻圆" })
+    }
+
+    @Test
     fun `程序岗只可查看转交至本人板块的工单且不能执行运营控制`() {
         val ticket = FeedbackTicket(id = "rpt_1", type = "BUG", category = "OPERATOR", workArea = "STAR", reporterUserId = "reporter", content = "反馈")
         every { authorizationService.operatorAreasFor("dev") } returns emptySet()

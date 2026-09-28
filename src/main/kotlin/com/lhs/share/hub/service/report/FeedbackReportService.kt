@@ -161,9 +161,7 @@ class FeedbackReportService(
     private fun normalizedTicketFields(ticket: FeedbackTicket): NormalizedFields {
         val rawType = ticket.type.trim().uppercase()
         val rawCategory = ticket.category?.trim()?.uppercase()
-        val board = ticket.area?.trim()?.uppercase()?.takeIf { it in FeedbackArea.all }
-            ?: rawCategory?.takeIf { it in FeedbackArea.all }
-            ?: FeedbackArea.OTHER
+        val board = FeedbackWorkflow.area(ticket)
         val type = if (rawType == FeedbackType.LEGACY_FEEDBACK) {
             rawCategory?.takeIf { it in FeedbackType.all } ?: FeedbackType.LEGACY_FEEDBACK
         } else {

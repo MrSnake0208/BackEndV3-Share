@@ -10,9 +10,11 @@ object FeedbackArea {
     const val PLAZA = "PLAZA"
     const val ACCOUNT = "ACCOUNT"
     const val UI = "UI"
+    const val STAR = "STAR"
+    const val MAAYUAN = "MAAYUAN"
     const val OTHER = "OTHER"
 
-    val all = linkedSetOf(INVENTORY, OPERATOR, LEDGER, PLAZA, ACCOUNT, UI, OTHER)
+    val all = linkedSetOf(INVENTORY, OPERATOR, LEDGER, PLAZA, ACCOUNT, UI, STAR, MAAYUAN, OTHER)
 
     val labels = linkedMapOf(
         INVENTORY to "库存管理",
@@ -21,6 +23,8 @@ object FeedbackArea {
         PLAZA to "作业广场",
         ACCOUNT to "账号与连接",
         UI to "界面与交互",
+        STAR to "星石",
+        MAAYUAN to "麻圆",
         OTHER to "其他模块",
     )
 

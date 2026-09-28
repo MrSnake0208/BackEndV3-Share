@@ -131,6 +131,18 @@ class FeedbackPersistenceMongoTest {
     }
 
     @Test
+    fun `用户按有效板块筛选历史改类工单`() {
+        mongo.insert(ticket("reclassified").copy(workArea = FeedbackArea.STAR))
+        val pageable = PageRequest.of(0, 100)
+
+        val star = queries.search("reporter", null, null, null, FeedbackArea.STAR, null, pageable)
+        val operator = queries.search("reporter", null, null, null, FeedbackArea.OPERATOR, null, pageable)
+
+        assertEquals(setOf("reclassified"), star.content.mapNotNull { it.id }.toSet())
+        assertTrue(operator.isEmpty)
+    }
+
+    @Test
     fun `合并来源条件更新只能成功一次且拒绝已有子反馈`() {
         mongo.insert(ticket("source").copy(workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
         mongo.insert(ticket("has_children").copy(mergedCount = 1))
