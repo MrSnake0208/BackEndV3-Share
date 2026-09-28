@@ -59,6 +59,21 @@ class FeedbackWorkflowServiceTest {
     }
 
     @Test
+    fun `接单保存处理中阶段并阻止重复接单`() {
+        var stored = ticket()
+        every { tickets.findById("rpt_1") } answers { Optional.of(stored) }
+        every { access.canClaimTicket("alice", any()) } returns true
+        every { query.saveIfUnchanged(any(), any()) } answers { secondArg<FeedbackTicket>().also { stored = it } }
+
+        val claimed = service.claim("alice", "rpt_1")
+
+        assertEquals(FeedbackWorkflow.PROCESSING, claimed.workflowStage)
+        assertEquals("alice", claimed.operatorAssigneeUserId)
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.claim("alice", "rpt_1") }.statusCode)
+        verify(exactly = 1) { query.saveIfUnchanged(any(), any()) }
+    }
+
+    @Test
     fun `无程序板块权限不能读取内部处理记录`() {
         val old = ticket().copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, workArea = "STAR")
         every { tickets.findById("rpt_1") } returns Optional.of(old)
