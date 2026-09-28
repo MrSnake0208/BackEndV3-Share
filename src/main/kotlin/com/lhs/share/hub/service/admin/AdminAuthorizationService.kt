@@ -5,6 +5,7 @@ import com.lhs.share.hub.repository.AdminRoleBindingRepository
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.service.report.FeedbackArea
+import com.lhs.share.hub.service.report.FeedbackCategoryService
 import com.lhs.share.hub.service.report.FeedbackWorkflow
 import com.lhs.share.service.UserService
 import org.springframework.http.HttpStatus
@@ -26,6 +27,7 @@ class AdminAuthorizationService(
     private val roleRepository: AdminRoleBindingRepository,
     private val feedbackAccessRepository: FeedbackAccessGrantRepository,
     private val userService: UserService,
+    private val categories: FeedbackCategoryService,
 ) {
     fun rolesFor(userId: String): Set<AdminRole> {
         if (userService.get(userId)?.activated != true) return emptySet()
@@ -71,7 +73,7 @@ class AdminAuthorizationService(
     fun manageableAreasFor(userId: String): Set<String> {
         if (userService.get(userId)?.activated != true) return emptySet()
         val roles = roleRepository.findById(userId).orElse(null)?.roles.orEmpty()
-        if (AdminRole.SUPER_ADMIN in roles) return FeedbackArea.all
+        if (AdminRole.SUPER_ADMIN in roles) return categories.keys()
         return feedbackAccessRepository.findById(userId).orElse(null)?.manageAreas.orEmpty()
     }
 
@@ -81,13 +83,13 @@ class AdminAuthorizationService(
     }
 
     fun operatorAreasFor(userId: String): Set<String> {
-        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return FeedbackWorkflow.areas
+        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return categories.keys()
         if ("OPERATOR" !in feedbackRolesFor(userId)) return emptySet()
         return feedbackAccessRepository.findById(userId).orElse(null)?.operatorAreas.orEmpty()
     }
 
     fun developerAreasFor(userId: String): Set<String> {
-        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return FeedbackWorkflow.areas
+        if (hasRole(userId, AdminRole.SUPER_ADMIN)) return categories.keys()
         if ("DEVELOPER" !in feedbackRolesFor(userId)) return emptySet()
         return feedbackAccessRepository.findById(userId).orElse(null)?.developerAreas.orEmpty()
     }

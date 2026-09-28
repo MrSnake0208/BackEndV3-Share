@@ -10,6 +10,7 @@ import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.AdminAuditAction
 import com.lhs.share.hub.repository.entity.AdminAuditLog
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
+import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.service.admin.AdminAuditService
@@ -38,10 +39,14 @@ class FeedbackAccessServiceTest {
     private val ticketQueries = mockk<FeedbackTicketQueryRepository>()
     private val events = mockk<FeedbackWorkflowEventRepository>(relaxed = true)
     private val notifications = mockk<NotificationService>(relaxed = true)
-    private val service = FeedbackAccessService(repository, userService, authorizationService, auditService, tickets, ticketQueries, events, notifications)
+    private val categories = mockk<FeedbackCategoryService>()
+    private val service = FeedbackAccessService(repository, userService, authorizationService, auditService, tickets, ticketQueries, events, notifications, categories)
 
     init {
         every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(any(), any()) } returns emptyList()
+        every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
+        every { categories.keys() } returns FeedbackArea.all
+        every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
     }
 
     @Test
@@ -57,6 +62,33 @@ class FeedbackAccessServiceTest {
         assertEquals(current.availableAreas, current.availableWorkAreas)
         assertTrue(current.availableAreas.any { it.key == FeedbackArea.STAR && it.label == "星石" })
         assertTrue(current.availableAreas.any { it.key == FeedbackArea.MAAYUAN && it.label == "麻圆" })
+    }
+
+    @Test
+    fun `新增板块只允许超级管理员且写入审计`() {
+        every { authorizationService.requirePermission("manager", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } throws
+            ApiResultException(403, "权限不足")
+        assertEquals(403, assertThrows(ApiResultException::class.java) {
+            service.createCategory("manager", "新板块")
+        }.statusCode)
+        assertEquals(403, assertThrows(ApiResultException::class.java) {
+            service.renameCategory("manager", "CUSTOM_TEST", "新名称")
+        }.statusCode)
+        verify(exactly = 0) { categories.create(any()) }
+        verify(exactly = 0) { categories.rename(any(), any()) }
+
+        every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
+        every { categories.create("新板块") } returns FeedbackCategory("CUSTOM_TEST", "新板块")
+        assertEquals("CUSTOM_TEST", service.createCategory("root", "新板块").key)
+        verify { auditService.record(match { it.action == AdminAuditAction.FEEDBACK_CATEGORY_CREATED && it.after?.feedbackCategoryLabel == "新板块" }) }
+
+        every { categories.rename("CUSTOM_TEST", "新名称") } returns
+            (FeedbackCategory("CUSTOM_TEST", "新板块") to FeedbackCategory("CUSTOM_TEST", "新名称"))
+        assertEquals("新名称", service.renameCategory("root", "CUSTOM_TEST", "新名称").label)
+        verify { auditService.record(match {
+            it.action == AdminAuditAction.FEEDBACK_CATEGORY_RENAMED &&
+                it.before?.feedbackCategoryLabel == "新板块" && it.after?.feedbackCategoryLabel == "新名称"
+        }) }
     }
 
     @Test

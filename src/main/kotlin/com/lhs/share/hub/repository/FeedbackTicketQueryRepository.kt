@@ -34,16 +34,17 @@ class FeedbackTicketQueryRepository(
         queue: String? = null,
         actorUserId: String? = null,
         developerAreas: Set<String> = emptySet(),
+        knownAreas: Set<String> = FeedbackArea.all,
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>()
         reporterUserId?.let { filters += Criteria.where("reporterUserId").`is`(it) }
-        manageableCategories?.let { filters += workAreaSetCriteria(it) }
-        if (developerAreas.isEmpty()) workAreas?.let { filters += workAreaSetCriteria(it) }
+        manageableCategories?.let { filters += workAreaSetCriteria(it, knownAreas) }
+        if (developerAreas.isEmpty()) workAreas?.let { filters += workAreaSetCriteria(it, knownAreas) }
         if (developerAreas.isNotEmpty()) {
             filters += Criteria().orOperator(
-                workAreaSetCriteria(workAreas.orEmpty()),
+                workAreaSetCriteria(workAreas.orEmpty(), knownAreas),
                 Criteria().andOperator(
-                    workAreaSetCriteria(developerAreas),
+                    workAreaSetCriteria(developerAreas, knownAreas),
                     Criteria().orOperator(
                         Criteria.where("workflowStage").`is`("DEV_HANDOFF"),
                         Criteria.where("developerReturnedAt").ne(null),
@@ -66,7 +67,7 @@ class FeedbackTicketQueryRepository(
             "DEV" -> filters += Criteria().andOperator(
                 Criteria.where("status").`is`("OPEN"),
                 Criteria.where("workflowStage").`is`("DEV_HANDOFF"),
-                workAreaSetCriteria(developerAreas),
+                workAreaSetCriteria(developerAreas, knownAreas),
                 Criteria.where("mergedIntoId").`is`(null),
             )
             "CLOSED" -> filters += Criteria().andOperator(
@@ -77,7 +78,7 @@ class FeedbackTicketQueryRepository(
                 Criteria.where("status").`is`("OPEN"),
                 Criteria.where("workflowStage").`is`("PROCESSING"),
                 Criteria.where("developerReturnedAt").ne(null),
-                workAreaSetCriteria(developerAreas),
+                workAreaSetCriteria(developerAreas, knownAreas),
                 Criteria.where("mergedIntoId").`is`(null),
             )
             "ALL" -> if (keyword.isNullOrBlank()) filters += Criteria.where("mergedIntoId").`is`(null)
@@ -86,7 +87,7 @@ class FeedbackTicketQueryRepository(
         }
         status?.let { filters += Criteria.where("status").`is`(it) }
         type?.let { filters += typeCriteria(it) }
-        category?.let { filters += workAreaSetCriteria(setOf(it)) }
+        category?.let { filters += workAreaSetCriteria(setOf(it), knownAreas) }
         keyword?.takeIf { it.isNotBlank() }?.let { value ->
             val pattern = Pattern.compile(Pattern.quote(value.trim()), Pattern.CASE_INSENSITIVE)
             filters += Criteria().orOperator(
@@ -262,9 +263,9 @@ class FeedbackTicketQueryRepository(
     )
 
     /** Match the same valid-area, valid-category, OTHER precedence as detail authorization. */
-    private fun categorySetCriteria(categories: Set<String>): Criteria {
+    private fun categorySetCriteria(categories: Set<String>, knownAreaKeys: Set<String>): Criteria {
         if (categories.isEmpty()) return Criteria.where("_id").`in`(emptyList<String>())
-        val knownAreas = normalizedValues(FeedbackArea.all)
+        val knownAreas = normalizedValues(knownAreaKeys)
         val requested = normalizedValues(categories)
         val branches = mutableListOf(
             Criteria.where("area").regex(requested),
@@ -282,11 +283,11 @@ class FeedbackTicketQueryRepository(
         return Criteria().orOperator(*branches.toTypedArray())
     }
 
-    private fun workAreaSetCriteria(areas: Set<String>): Criteria {
+    private fun workAreaSetCriteria(areas: Set<String>, knownAreas: Set<String>): Criteria {
         if (areas.isEmpty()) return Criteria.where("_id").`in`(emptyList<String>())
         return Criteria().orOperator(
             Criteria.where("workArea").`in`(areas),
-            Criteria().andOperator(Criteria.where("workArea").`is`(null), categorySetCriteria(areas.intersect(FeedbackArea.all))),
+            Criteria().andOperator(Criteria.where("workArea").`is`(null), categorySetCriteria(areas.intersect(knownAreas), knownAreas)),
         )
     }
 

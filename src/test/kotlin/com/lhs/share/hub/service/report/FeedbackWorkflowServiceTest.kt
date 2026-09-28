@@ -23,7 +23,12 @@ class FeedbackWorkflowServiceTest {
     private val events = mockk<FeedbackWorkflowEventRepository>(relaxed = true)
     private val access = mockk<FeedbackAccessService>(relaxed = true)
     private val notifications = mockk<NotificationService>(relaxed = true)
-    private val service = FeedbackWorkflowService(tickets, query, events, access, notifications)
+    private val categories = mockk<FeedbackCategoryService>()
+    private val service = FeedbackWorkflowService(tickets, query, events, access, notifications, categories)
+
+    init {
+        every { categories.keys() } returns FeedbackArea.all
+    }
 
     private fun ticket(id: String = "rpt_1") = FeedbackTicket(
         id = id,
@@ -106,6 +111,21 @@ class FeedbackWorkflowServiceTest {
         assertEquals(FeedbackArea.MAAYUAN, updated.area)
         assertEquals(FeedbackArea.MAAYUAN, updated.workArea)
         assertEquals(FeedbackWorkflow.DEV_HANDOFF, updated.workflowStage)
+    }
+
+    @Test
+    fun `自定义板块可被管理员用于改类`() {
+        val old = ticket().copy(workArea = FeedbackArea.OPERATOR)
+        every { categories.keys() } returns FeedbackArea.all + "CUSTOM_TEST"
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("root", old) } returns true
+        every { access.operatorUserIds("CUSTOM_TEST") } returns emptySet()
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        val updated = service.changeArea("root", "rpt_1", "CUSTOM_TEST", "原板块填错")
+
+        assertEquals("CUSTOM_TEST", FeedbackWorkflow.area(updated))
+        assertEquals("CUSTOM_TEST", updated.category)
     }
 
     @Test

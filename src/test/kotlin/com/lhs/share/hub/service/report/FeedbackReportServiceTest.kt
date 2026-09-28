@@ -42,6 +42,7 @@ class FeedbackReportServiceTest {
     private val workflowEvents = mockk<FeedbackWorkflowEventRepository>(relaxed = true)
     private val userInfoService = mockk<HubUserInfoService>()
     private val properties = ShareProperties().apply { info.publicBaseUrl = "https://api.example.test/" }
+    private val categories = mockk<FeedbackCategoryService>()
     private val service = FeedbackReportService(
         ticketRepository,
         queryRepository,
@@ -51,9 +52,13 @@ class FeedbackReportServiceTest {
         userInfoService,
         properties,
         workflowEvents,
+        categories,
     )
 
     init {
+        every { categories.keys() } returns FeedbackArea.all
+        every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
+        every { categories.label(any()) } answers { FeedbackArea.labels[firstArg()] }
         every { queryRepository.saveIfUnchanged(any(), any()) } answers { secondArg() }
         every { accessService.managerUserIds(any()) } returns emptySet()
         every { accessService.operatorUserIds(any()) } returns emptySet()
@@ -109,6 +114,17 @@ class FeedbackReportServiceTest {
             assertEquals(area, response.category)
             verify { ticketRepository.save(match { it.category == area && it.area == area && it.workArea == area }) }
         }
+    }
+
+    @Test
+    fun `新增的自定义板块可直接提交并保持三处标识一致`() {
+        prepareCreate()
+        every { categories.keys() } returns FeedbackArea.all + "CUSTOM_TEST"
+
+        val response = service.create("user", FeedbackReportCreateRequest(type = "BUG", category = "CUSTOM_TEST", content = "反馈"))
+
+        assertEquals("CUSTOM_TEST", response.category)
+        verify { ticketRepository.save(match { it.category == "CUSTOM_TEST" && it.area == "CUSTOM_TEST" && it.workArea == "CUSTOM_TEST" }) }
     }
 
     @Test
@@ -240,7 +256,7 @@ class FeedbackReportServiceTest {
         )
         val ticket = openTicket().copy(messages = listOf(firstReporter, adminReply, latestReporter))
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -271,7 +287,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(
@@ -292,7 +308,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
         val item = service.list(

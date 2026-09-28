@@ -7,6 +7,7 @@ import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.AdminRoleBinding
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.hub.service.report.FeedbackArea
+import com.lhs.share.hub.service.report.FeedbackCategoryService
 import com.lhs.share.service.UserService
 import io.mockk.every
 import io.mockk.mockk
@@ -21,7 +22,12 @@ class AdminAuthorizationServiceTest {
     private val roleRepository = mockk<AdminRoleBindingRepository>()
     private val feedbackRepository = mockk<FeedbackAccessGrantRepository>()
     private val userService = mockk<UserService>()
-    private val service = AdminAuthorizationService(roleRepository, feedbackRepository, userService)
+    private val categories = mockk<FeedbackCategoryService>()
+    private val service = AdminAuthorizationService(roleRepository, feedbackRepository, userService, categories)
+
+    init {
+        every { categories.keys() } returns FeedbackArea.all
+    }
 
     @Test
     fun `平台管理员只能获得公共图鉴权限`() {
@@ -46,6 +52,17 @@ class AdminAuthorizationServiceTest {
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_REVIEW))
         assertEquals(FeedbackArea.all, service.manageableAreasFor("root"))
+    }
+
+    @Test
+    fun `超级管理员自动获得新板块的管理和岗位权限`() {
+        activeUser("root")
+        every { roleRepository.findById("root") } returns Optional.of(binding("root", AdminRole.SUPER_ADMIN))
+        every { categories.keys() } returns FeedbackArea.all + "CUSTOM_TEST"
+
+        assertTrue("CUSTOM_TEST" in service.manageableAreasFor("root"))
+        assertTrue("CUSTOM_TEST" in service.operatorAreasFor("root"))
+        assertTrue("CUSTOM_TEST" in service.developerAreasFor("root"))
     }
 
     @Test

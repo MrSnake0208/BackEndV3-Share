@@ -19,6 +19,7 @@ class FeedbackWorkflowService(
     private val events: FeedbackWorkflowEventRepository,
     private val access: FeedbackAccessService,
     private val notifications: NotificationService,
+    private val categories: FeedbackCategoryService,
 ) {
     private fun ticket(id: String): FeedbackTicket = tickets.findById(id).orElseThrow {
         ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $id")
@@ -92,7 +93,7 @@ class FeedbackWorkflowService(
         if (!access.canControlTicket(actor, previous)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "只有当前运营负责人可转程序")
         if (FeedbackWorkflow.stage(previous) != FeedbackWorkflow.PROCESSING) throw ApiResultException(HttpStatus.CONFLICT.value(), "工单当前不可转程序")
         val area = workArea.trim().uppercase()
-        if (area !in FeedbackWorkflow.areas || area !in access.operatorAreas(checkNotNull(previous.operatorAssigneeUserId))) {
+        if (area !in categories.keys() || area !in access.operatorAreas(checkNotNull(previous.operatorAssigneeUserId))) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "负责人没有目标板块运营权限")
         }
         val developers = access.developerUserIds(area)
@@ -112,7 +113,7 @@ class FeedbackWorkflowService(
         if (!access.canControlTicket(actor, previous)) throw ApiResultException(HttpStatus.FORBIDDEN.value(), "只有当前运营负责人可调整板块")
         if (FeedbackWorkflow.stage(previous) == FeedbackWorkflow.DEV_HANDOFF) throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
         val area = workArea.trim().uppercase()
-        if (area !in FeedbackWorkflow.areas) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
+        if (area !in categories.keys()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
         if (previous.operatorAssigneeUserId != null && area !in access.operatorAreas(previous.operatorAssigneeUserId)) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "当前负责人没有目标板块权限，请先转交")
         }
