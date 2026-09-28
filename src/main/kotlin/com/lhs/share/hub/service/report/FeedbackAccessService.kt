@@ -16,6 +16,7 @@ import com.lhs.share.hub.repository.entity.AdminAuditLog
 import com.lhs.share.hub.repository.entity.AdminAuditSnapshot
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
+import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.admin.AdminAuditService
@@ -40,19 +41,21 @@ class FeedbackAccessService(
     private val ticketQueryRepository: FeedbackTicketQueryRepository,
     private val workflowEvents: FeedbackWorkflowEventRepository,
     private val notificationService: NotificationService,
+    private val categories: FeedbackCategoryService,
 ) {
     fun current(userId: String): CurrentFeedbackAccessResponse {
         val superAdmin = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)
         val grant = repository.findById(userId).orElse(null)
+        val availableAreas = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label) }
         return CurrentFeedbackAccessResponse(
             superAdmin = superAdmin,
             receiveAreas = grant?.receiveAreas.orEmpty(),
             manageAreas = authorizationService.manageableAreasFor(userId),
-            availableAreas = FeedbackArea.labels.map { (key, label) -> FeedbackAreaOptionResponse(key, label) },
+            availableAreas = availableAreas,
             feedbackRoles = authorizationService.feedbackRolesFor(userId),
             operatorAreas = authorizationService.operatorAreasFor(userId),
             developerAreas = authorizationService.developerAreasFor(userId),
-            availableWorkAreas = FeedbackWorkflow.labels.map { (key, label) -> FeedbackAreaOptionResponse(key, label) },
+            availableWorkAreas = availableAreas,
         )
     }
 
@@ -113,6 +116,32 @@ class FeedbackAccessService(
         return repository.findAll()
             .sortedBy { userService.get(it.userId)?.userName ?: it.userId }
             .map(::toResponse)
+    }
+
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun createCategory(adminUserId: String, label: String): FeedbackAreaOptionResponse {
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val created = categories.create(label)
+        auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_CREATED, created, null)
+        return FeedbackAreaOptionResponse(created.key, created.label)
+    }
+
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun renameCategory(adminUserId: String, key: String, label: String): FeedbackAreaOptionResponse {
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val (before, renamed) = categories.rename(key, label)
+        if (renamed != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_RENAMED, renamed, before)
+        return FeedbackAreaOptionResponse(renamed.key, renamed.label)
+    }
+
+    private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {
+        auditService.record(AdminAuditLog(
+            actorUserId = actor,
+            action = action,
+            targetResource = "feedback_categories/${category.key}",
+            before = before?.let { AdminAuditSnapshot(feedbackCategoryLabel = it.label) },
+            after = AdminAuditSnapshot(feedbackCategoryLabel = category.label),
+        ))
     }
 
     fun searchUserCandidates(adminUserId: String, query: String, page: Int, size: Int): List<FeedbackAccessUserCandidateResponse> {
@@ -205,7 +234,7 @@ class FeedbackAccessService(
 
     private fun validateAreas(areas: Set<String>): Set<String> = areas.map { area ->
         try {
-            FeedbackArea.requireValid(area)
+            categories.requireValid(area)
         } catch (e: IllegalArgumentException) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), e.message)
         }
@@ -231,8 +260,8 @@ class FeedbackAccessService(
 
     private fun validateWorkAreas(areas: Set<String>): Set<String> = areas.map { it.trim().uppercase() }
         .also { normalized ->
-            if (normalized.any { it !in FeedbackWorkflow.areas }) {
-                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的内部负责板块")
+            if (normalized.any { it !in categories.keys() }) {
+                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
             }
         }.toSet()
 

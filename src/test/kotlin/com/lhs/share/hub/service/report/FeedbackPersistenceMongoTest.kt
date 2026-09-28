@@ -45,9 +45,12 @@ class FeedbackPersistenceMongoTest {
     private val access = mockk<FeedbackAccessService>(relaxed = true)
     private val notifications = mockk<NotificationService>(relaxed = true)
     private val users = mockk<HubUserInfoService>()
-    private val service = FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties(), mockk(relaxed = true))
+    private val categories = mockk<FeedbackCategoryService>()
+    private val service = FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties(), mockk(relaxed = true), categories)
 
     init {
+        every { categories.keys() } returns FeedbackArea.all
+        every { categories.label(any()) } answers { FeedbackArea.labels[firstArg()] }
         // Production legacy repository.save is MongoTemplate.save. Reads can be
         // held at the same snapshot to deterministically reproduce overlap.
         every { tickets.save(any()) } answers { mongo.save(firstArg<FeedbackTicket>()) }
@@ -140,6 +143,16 @@ class FeedbackPersistenceMongoTest {
 
         assertEquals(setOf("reclassified"), star.content.mapNotNull { it.id }.toSet())
         assertTrue(operator.isEmpty)
+    }
+
+    @Test
+    fun `自定义板块的工单可按目录筛选且不会落入其他板块`() {
+        mongo.insert(ticket("custom").copy(category = "CUSTOM_TEST", area = "CUSTOM_TEST", workArea = "CUSTOM_TEST"))
+        val known = FeedbackArea.all + "CUSTOM_TEST"
+        val pageable = PageRequest.of(0, 100)
+
+        assertEquals(setOf("custom"), queries.search("reporter", null, null, null, "CUSTOM_TEST", null, pageable, knownAreas = known).content.mapNotNull { it.id }.toSet())
+        assertTrue(queries.search("reporter", null, null, null, FeedbackArea.OTHER, null, pageable, knownAreas = known).isEmpty)
     }
 
     @Test

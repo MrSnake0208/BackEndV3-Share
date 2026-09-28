@@ -11,6 +11,8 @@ enum class AdminAuditAction {
     ROLE_REPLACED,
     FEEDBACK_ACCESS_UPDATED,
     FEEDBACK_ACCESS_DELETED,
+    FEEDBACK_CATEGORY_CREATED,
+    FEEDBACK_CATEGORY_RENAMED,
     CHANGELOG_PUBLISHED,
     CHANGELOG_REJECTED,
     CHANGELOG_WITHDRAWN,
@@ -24,6 +26,7 @@ data class AdminAuditSnapshot(
     val feedbackRoles: Set<String>? = null,
     val operatorAreas: Set<String>? = null,
     val developerAreas: Set<String>? = null,
+    val feedbackCategoryLabel: String? = null,
 )
 
 @Document("admin_audit_logs")

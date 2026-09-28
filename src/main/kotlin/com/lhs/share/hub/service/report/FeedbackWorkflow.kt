@@ -13,7 +13,7 @@ object FeedbackWorkflow {
 
     fun stage(ticket: FeedbackTicket): String = ticket.workflowStage ?: UNASSIGNED
 
-    fun area(ticket: FeedbackTicket): String = ticket.workArea?.takeIf { it in areas }
+    fun area(ticket: FeedbackTicket): String = ticket.workArea?.takeIf { it.isNotBlank() }
         ?: ticket.area?.trim()?.uppercase()?.takeIf { it in FeedbackArea.all }
         ?: ticket.category?.trim()?.uppercase()?.takeIf { it in FeedbackArea.all }
         ?: FeedbackArea.OTHER

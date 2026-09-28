@@ -52,6 +52,7 @@ class FeedbackReportService(
     private val hubUserInfoService: HubUserInfoService,
     private val properties: ShareProperties,
     private val workflowEvents: FeedbackWorkflowEventRepository,
+    private val categories: FeedbackCategoryService,
 ) {
     private val log = KotlinLogging.logger { }
     private val random = SecureRandom()
@@ -91,7 +92,7 @@ class FeedbackReportService(
 
     private fun validateArea(area: String): String {
         return try {
-            FeedbackArea.requireValid(area)
+            categories.requireValid(area)
         } catch (e: IllegalArgumentException) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), e.message)
         }
@@ -109,7 +110,7 @@ class FeedbackReportService(
         if (type == FeedbackType.LEGACY_FEEDBACK) {
             val legacyType = rawCategory?.takeIf { it in FeedbackType.all }
             val category = legacyArea
-                ?: rawCategory?.takeIf { it in FeedbackArea.all }
+                ?: rawCategory?.takeIf { it in categories.keys() }
                 ?: FeedbackArea.OTHER
             return NormalizedFields(legacyType ?: FeedbackType.LEGACY_FEEDBACK, category)
         }
@@ -123,7 +124,7 @@ class FeedbackReportService(
             } else {
                 FeedbackArea.OTHER
             }
-            rawCategory in FeedbackArea.all -> {
+            rawCategory in categories.keys() -> {
                 if (legacyArea != null && legacyArea != rawCategory) {
                     throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "反馈板块参数冲突: category=$rawCategory, area=$legacyArea")
                 }
@@ -134,7 +135,7 @@ class FeedbackReportService(
                 throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "反馈类型和板块参数冲突: type=$type, category=$rawCategory")
             }
             else -> {
-                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块: $rawCategory, 可选: ${FeedbackArea.all}")
+                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块: $rawCategory")
             }
         }
         return NormalizedFields(type, category)
@@ -264,7 +265,7 @@ class FeedbackReportService(
         val normalizedCategory = if (mine) normalizeCategoryFilter(category, area) else {
             val selected = category ?: area
             selected?.trim()?.uppercase()?.also {
-                if (it !in FeedbackWorkflow.areas) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的内部负责板块")
+                if (it !in categories.keys()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
             }
         }
         if (!mine && queue != null && queue !in setOf("UNASSIGNED", "MINE", "DEV", "RETURNED", "CLOSED", "ALL")) {
@@ -304,6 +305,7 @@ class FeedbackReportService(
             queue = if (mine) null else queue ?: "ALL",
             actorUserId = currentUserId,
             developerAreas = developerAreas,
+            knownAreas = categories.keys(),
         )
         val userDict = hubUserInfoService.getDict(resultPage.content.flatMap { listOfNotNull(it.reporterUserId, it.operatorAssigneeUserId) }.toSet())
         val items = resultPage.content.map { ticket ->
@@ -636,7 +638,7 @@ class FeedbackReportService(
     private fun notifyCategoryReceivers(ticket: FeedbackTicket) {
         val ticketId = checkNotNull(ticket.id)
         val category = normalizedTicketFields(ticket).category
-        val categoryLabel = FeedbackArea.labels[category] ?: category
+        val categoryLabel = categories.label(category) ?: category
         feedbackAccessService.operatorUserIds(category)
             .filter { it != ticket.reporterUserId }
             .forEach { receiverId ->
