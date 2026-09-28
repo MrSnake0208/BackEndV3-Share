@@ -26,6 +26,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.MongoTemplate
+import org.springframework.data.mongodb.MongoTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.Optional
 import java.util.concurrent.Callable
@@ -43,7 +45,7 @@ class FeedbackPersistenceMongoTest {
     private val access = mockk<FeedbackAccessService>(relaxed = true)
     private val notifications = mockk<NotificationService>(relaxed = true)
     private val users = mockk<HubUserInfoService>()
-    private val service = FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties())
+    private val service = FeedbackReportService(tickets, queries, access, mockk(), notifications, users, ShareProperties(), mockk(relaxed = true))
 
     init {
         // Production legacy repository.save is MongoTemplate.save. Reads can be
@@ -53,6 +55,9 @@ class FeedbackPersistenceMongoTest {
             Optional.ofNullable(mongo.findById(firstArg<String>(), FeedbackTicket::class.java))
         }
         every { access.canManage("admin", any()) } returns true
+        every { access.canControlTicket("admin", any()) } returns true
+        every { access.canClaimTicket("admin", any()) } returns true
+        every { access.operatorAreas("admin") } returns FeedbackWorkflow.areas
         every { users.get(any()) } answers { MaaUserInfo(firstArg(), "Synthetic feedback user") }
     }
 
@@ -106,6 +111,65 @@ class FeedbackPersistenceMongoTest {
         mongo.insert(ticket("feature").copy(type = "FEATURE", category = "INVENTORY", area = "INVENTORY"))
 
         assertEquals(setOf("bug", "feature"), ids(FeedbackArea.all))
+    }
+
+    @Test
+    fun `工作队列按内部板块和阶段过滤且隐藏合并来源`() {
+        mongo.insert(ticket("star_pool").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
+        mongo.insert(ticket("operator_pool").copy(workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
+        mongo.insert(ticket("merged_pool").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null, mergedIntoId = "main"))
+        mongo.insert(ticket("star_dev").copy(workArea = "STAR", workflowStage = FeedbackWorkflow.DEV_HANDOFF))
+        val pageable = PageRequest.of(0, 100)
+
+        val pool = queries.search(null, null, null, null, null, null, pageable,
+            workAreas = setOf("STAR"), queue = "UNASSIGNED", actorUserId = "alice")
+        val developer = queries.search(null, null, null, null, null, null, pageable,
+            workAreas = emptySet(), queue = "DEV", actorUserId = "dev", developerAreas = setOf("STAR"))
+
+        assertEquals(setOf("star_pool"), pool.content.mapNotNull { it.id }.toSet())
+        assertEquals(setOf("star_dev"), developer.content.mapNotNull { it.id }.toSet())
+    }
+
+    @Test
+    fun `合并来源条件更新只能成功一次且拒绝已有子反馈`() {
+        mongo.insert(ticket("source").copy(workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
+        mongo.insert(ticket("has_children").copy(mergedCount = 1))
+
+        assertEquals("target", queries.setMergedInto("source", "target")?.mergedIntoId)
+        assertEquals(null, queries.setMergedInto("source", "another"))
+        assertEquals(null, queries.setMergedInto("has_children", "target"))
+        assertEquals("target", mongo.findById("source", FeedbackTicket::class.java)?.mergedIntoId)
+    }
+
+    @Test
+    fun `团队阅读游标单调前进且旧单新增消息只标记新边界`() {
+        val old = mongo.insert(ticket("read").copy(workflowStage = null, operatorAssigneeUserId = null, teamReadReporterIndex = null))
+        val withNewMessage = old.copy(
+            messages = old.messages + message("new"),
+            teamReadReporterIndex = 0,
+            updatedAt = old.updatedAt.plusSeconds(1),
+        )
+        assertEquals(0, queries.saveIfUnchanged(old, withNewMessage)?.teamReadReporterIndex)
+        assertEquals(1, queries.advanceTeamRead("read", 1)?.teamReadReporterIndex)
+        assertEquals(1, queries.advanceTeamRead("read", 0)?.teamReadReporterIndex)
+    }
+
+    @Test
+    fun `合并事务失败会回滚来源指向与主单计数`() {
+        mongo.insert(ticket("source").copy(workflowStage = FeedbackWorkflow.UNASSIGNED, operatorAssigneeUserId = null))
+        mongo.insert(ticket("target"))
+        val tx = TransactionTemplate(MongoTransactionManager(mongo.mongoDatabaseFactory))
+
+        assertThrows(IllegalStateException::class.java) {
+            tx.execute {
+                queries.setMergedInto("source", "target")
+                queries.incrementMergedCount("target")
+                throw IllegalStateException("synthetic failure")
+            }
+        }
+
+        assertEquals(null, mongo.findById("source", FeedbackTicket::class.java)?.mergedIntoId)
+        assertEquals(0, mongo.findById("target", FeedbackTicket::class.java)?.mergedCount)
     }
 
     @Test
@@ -212,6 +276,8 @@ class FeedbackPersistenceMongoTest {
         type = "BUG",
         category = "OPERATOR",
         area = "OPERATOR",
+        workflowStage = FeedbackWorkflow.PROCESSING,
+        operatorAssigneeUserId = "admin",
         reporterUserId = "reporter",
         content = "Synthetic feedback",
         messages = listOf(message("initial")),

@@ -58,6 +58,15 @@ data class FeedbackTicket(
     /** 状态: OPEN / RESOLVED / DISMISSED */
     val status: String = "OPEN",
 
+    /** 内部处理阶段；旧 OPEN 工单缺失时按 UNASSIGNED 读取。 */
+    val workflowStage: String? = null,
+    val workArea: String? = null,
+    val operatorAssigneeUserId: String? = null,
+    val operatorAssignedAt: Instant? = null,
+    val developerReturnedAt: Instant? = null,
+    /** 团队已读至用户消息在 messages 中的索引；旧单为空时读取逻辑以最后一条历史用户消息为基线。 */
+    val teamReadReporterIndex: Int? = null,
+
     /** 提交人用户 id */
     @Indexed
     val reporterUserId: String,

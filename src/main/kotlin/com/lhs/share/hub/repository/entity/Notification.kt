@@ -39,6 +39,8 @@ data class Notification(
      * 关联对象 id：rpt_<hex>
      */
     val refId: String,
+    /** 用户消息提醒对应的 messages 索引；流程事件通知为空。 */
+    val messageIndex: Int? = null,
     /**
      * 阅读时间，null 表示未读
      */

@@ -13,6 +13,8 @@ import org.springframework.data.mongodb.repository.Query
  * 与主库(MaaBackend)仓储互不影响。
  */
 interface FeedbackTicketRepository : MongoRepository<FeedbackTicket, String> {
+    fun findByMergedIntoId(mergedIntoId: String): List<FeedbackTicket>
+    fun findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(userId: String, status: String): List<FeedbackTicket>
 
     /**
      * 按提交人查询(按创建时间倒序)

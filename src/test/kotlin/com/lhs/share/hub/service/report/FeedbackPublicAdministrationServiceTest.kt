@@ -15,6 +15,7 @@ import com.lhs.share.hub.repository.entity.ChangelogPublishedRevision
 import com.lhs.share.hub.repository.entity.ChangelogRevisionState
 import com.lhs.share.hub.repository.entity.ChangelogWorkingRevision
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.service.notification.NotificationService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -29,13 +30,15 @@ class FeedbackPublicAdministrationServiceTest {
     private val queryRepository = mockk<FeedbackTicketQueryRepository>()
     private val supportRepository = mockk<FeedbackSupportRepository>()
     private val changelogEntryRepository = mockk<ChangelogEntryRepository>()
-    private val accessService = mockk<FeedbackAccessService>()
+    private val accessService = mockk<FeedbackAccessService>(relaxed = true)
+    private val notificationService = mockk<NotificationService>(relaxed = true)
     private val service = FeedbackPublicAdministrationService(
         ticketRepository,
         queryRepository,
         supportRepository,
         changelogEntryRepository,
         accessService,
+        notificationService,
     )
 
     private fun changelogEntry(id: String, publishedLabel: String? = null, workingLabel: String? = null) = ChangelogEntry(
@@ -96,6 +99,7 @@ class FeedbackPublicAdministrationServiceTest {
 
     private fun allowManage() {
         every { accessService.canManage(any(), any()) } returns true
+        every { accessService.canControlTicket(any(), any()) } returns true
     }
 
     @Test
@@ -211,11 +215,11 @@ class FeedbackPublicAdministrationServiceTest {
             service.merge("admin", "rpt_a", FeedbackMergeRequest(targetFeedbackId = "rpt_b"))
         }
 
-        assertEquals(400, error.statusCode)
+        assertEquals(409, error.statusCode)
     }
 
     @Test
-    fun `合并解析到最终主反馈`() {
+    fun `不允许将反馈并入已合并来源`() {
         allowManage()
         val sourceC = ticket("rpt_c")
         val targetB = ticket("rpt_b", mergedIntoId = "rpt_a")
@@ -223,14 +227,12 @@ class FeedbackPublicAdministrationServiceTest {
         every { ticketRepository.findById("rpt_c") } returns Optional.of(sourceC)
         every { ticketRepository.findById("rpt_b") } returns Optional.of(targetB)
         every { ticketRepository.findById("rpt_a") } returns Optional.of(rootA)
-        every { queryRepository.setMergedInto("rpt_c", "rpt_a") } returns sourceC.copy(mergedIntoId = "rpt_a")
-        every { queryRepository.incrementMergedCount("rpt_a") } returns rootA.copy(mergedCount = 1)
-        every { supportRepository.existsByFeedbackIdAndUserId("rpt_a", any()) } returns true
+        val error = assertThrows(ApiResultException::class.java) {
+            service.merge("admin", "rpt_c", FeedbackMergeRequest(targetFeedbackId = "rpt_b"))
+        }
 
-        service.merge("admin", "rpt_c", FeedbackMergeRequest(targetFeedbackId = "rpt_b"))
-
-        verify(exactly = 1) { queryRepository.setMergedInto("rpt_c", "rpt_a") }
-        verify(exactly = 1) { queryRepository.incrementMergedCount("rpt_a") }
+        assertEquals(409, error.statusCode)
+        verify(exactly = 0) { queryRepository.setMergedInto(any(), any()) }
     }
 
     @Test
@@ -252,7 +254,7 @@ class FeedbackPublicAdministrationServiceTest {
     fun `合并后源提交人自动支持主反馈一次`() {
         allowManage()
         val source = ticket("rpt_source", reporterUserId = "reporter")
-        val target = ticket("rpt_main")
+        val target = ticket("rpt_main", visibility = FeedbackVisibility.PUBLIC)
         every { ticketRepository.findById("rpt_source") } returns Optional.of(source)
         every { ticketRepository.findById("rpt_main") } returns Optional.of(target)
         every { queryRepository.setMergedInto("rpt_source", "rpt_main") } returns source.copy(mergedIntoId = "rpt_main")
@@ -271,7 +273,7 @@ class FeedbackPublicAdministrationServiceTest {
     fun `合并后源提交人已支持时不重复计票`() {
         allowManage()
         val source = ticket("rpt_source", reporterUserId = "reporter")
-        val target = ticket("rpt_main")
+        val target = ticket("rpt_main", visibility = FeedbackVisibility.PUBLIC)
         every { ticketRepository.findById("rpt_source") } returns Optional.of(source)
         every { ticketRepository.findById("rpt_main") } returns Optional.of(target)
         every { queryRepository.setMergedInto("rpt_source", "rpt_main") } returns source.copy(mergedIntoId = "rpt_main")
@@ -282,6 +284,34 @@ class FeedbackPublicAdministrationServiceTest {
 
         verify(exactly = 0) { supportRepository.save(any()) }
         verify(exactly = 0) { queryRepository.incrementSupportCount(any()) }
+    }
+
+    @Test
+    fun `已有子反馈的来源不能再次合并`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_source") } returns Optional.of(ticket("rpt_source").copy(mergedCount = 2))
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.merge("admin", "rpt_source", FeedbackMergeRequest(targetFeedbackId = "rpt_target"))
+        }
+
+        assertEquals(409, error.statusCode)
+        verify(exactly = 0) { queryRepository.setMergedInto(any(), any()) }
+    }
+
+    @Test
+    fun `原子合并竞争失败不会增加主单计数`() {
+        allowManage()
+        every { ticketRepository.findById("rpt_source") } returns Optional.of(ticket("rpt_source"))
+        every { ticketRepository.findById("rpt_target") } returns Optional.of(ticket("rpt_target"))
+        every { queryRepository.setMergedInto("rpt_source", "rpt_target") } returns null
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.merge("admin", "rpt_source", FeedbackMergeRequest(targetFeedbackId = "rpt_target"))
+        }
+
+        assertEquals(409, error.statusCode)
+        verify(exactly = 0) { queryRepository.incrementMergedCount(any()) }
     }
 
     @Test
@@ -327,7 +357,7 @@ class FeedbackPublicAdministrationServiceTest {
 
     @Test
     fun `反馈管理员可读取草稿与已发布版本选项但看不到正文`() {
-        every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
+        every { accessService.operatorAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
         every { changelogEntryRepository.findAll() } returns listOf(
             changelogEntry("chg_pub", publishedLabel = "0.0.1-beta.7"),
             changelogEntry("chg_draft", workingLabel = "0.0.1-beta.8"),
@@ -346,7 +376,7 @@ class FeedbackPublicAdministrationServiceTest {
 
     @Test
     fun `无反馈管理权限不能读取版本选项`() {
-        every { accessService.manageableAreas("user") } returns emptySet()
+        every { accessService.operatorAreas("user") } returns emptySet()
 
         val error = assertThrows(ApiResultException::class.java) {
             service.versionOptions("user")

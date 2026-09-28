@@ -4,12 +4,18 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.controller.response.user.MaaUserInfo
 import com.lhs.share.hub.controller.report.request.FeedbackAccessUpdateRequest
 import com.lhs.share.hub.repository.FeedbackAccessGrantRepository
+import com.lhs.share.hub.repository.FeedbackTicketRepository
+import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
+import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.AdminAuditAction
 import com.lhs.share.hub.repository.entity.AdminAuditLog
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
+import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.service.admin.AdminAuditService
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
+import com.lhs.share.hub.service.notification.NotificationService
 import com.lhs.share.repository.entity.MaaUser
 import com.lhs.share.service.UserService
 import io.mockk.every
@@ -28,7 +34,37 @@ class FeedbackAccessServiceTest {
     private val userService = mockk<UserService>()
     private val authorizationService = mockk<AdminAuthorizationService>()
     private val auditService = mockk<AdminAuditService>(relaxed = true)
-    private val service = FeedbackAccessService(repository, userService, authorizationService, auditService)
+    private val tickets = mockk<FeedbackTicketRepository>()
+    private val ticketQueries = mockk<FeedbackTicketQueryRepository>()
+    private val events = mockk<FeedbackWorkflowEventRepository>(relaxed = true)
+    private val notifications = mockk<NotificationService>(relaxed = true)
+    private val service = FeedbackAccessService(repository, userService, authorizationService, auditService, tickets, ticketQueries, events, notifications)
+
+    init {
+        every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(any(), any()) } returns emptyList()
+    }
+
+    @Test
+    fun `程序岗只可查看转交至本人板块的工单且不能执行运营控制`() {
+        val ticket = FeedbackTicket(id = "rpt_1", type = "BUG", category = "OPERATOR", workArea = "STAR", reporterUserId = "reporter", content = "反馈")
+        every { authorizationService.operatorAreasFor("dev") } returns emptySet()
+        every { authorizationService.developerAreasFor("dev") } returns setOf("STAR")
+        every { authorizationService.hasRole("dev", AdminRole.SUPER_ADMIN) } returns false
+
+        assertFalse(service.canViewTicket("dev", ticket))
+        assertTrue(service.canViewTicket("dev", ticket.copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF)))
+        assertFalse(service.canControlTicket("dev", ticket.copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF)))
+    }
+
+    @Test
+    fun `旧管理授权不自动授予新岗位`() {
+        every { authorizationService.operatorAreasFor("legacy") } returns emptySet()
+        every { authorizationService.developerAreasFor("legacy") } returns emptySet()
+        val ticket = FeedbackTicket(id = "rpt_1", type = "BUG", category = "OPERATOR", reporterUserId = "reporter", content = "反馈")
+
+        assertFalse(service.canViewTicket("legacy", ticket))
+        assertFalse(service.canClaimTicket("legacy", ticket))
+    }
 
     @Test
     fun `反馈模块管理员只能查看和管理 manageAreas`() {
@@ -109,6 +145,30 @@ class FeedbackAccessServiceTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `撤销运营板块时活动工单返回待接单池`() {
+        val oldGrant = FeedbackAccessGrant(
+            userId = "manager", feedbackRoles = setOf("OPERATOR"), operatorAreas = setOf("STAR"), updatedBy = "root",
+        )
+        val assigned = FeedbackTicket(
+            id = "rpt_1", type = "BUG", category = "OPERATOR", workArea = "STAR", workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "manager", reporterUserId = "reporter", content = "反馈",
+        )
+        every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
+        every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
+        every { userService.get("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
+        every { repository.findById("manager") } returns Optional.of(oldGrant)
+        every { repository.save(any()) } answers { firstArg() }
+        every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull("manager", "OPEN") } returns listOf(assigned)
+        every { ticketQueries.saveIfUnchanged(assigned, any()) } answers { secondArg() }
+
+        service.updateGrant("root", "manager", FeedbackAccessUpdateRequest(feedbackRoles = emptySet(), operatorAreas = emptySet()))
+
+        verify { ticketQueries.saveIfUnchanged(assigned, match {
+            it.workflowStage == FeedbackWorkflow.UNASSIGNED && it.operatorAssigneeUserId == null
+        }) }
     }
 
     @Test

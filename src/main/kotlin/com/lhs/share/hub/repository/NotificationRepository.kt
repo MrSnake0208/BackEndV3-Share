@@ -32,4 +32,6 @@ interface NotificationRepository : MongoRepository<Notification, String> {
      * 查询用户全部未读通知
      */
     fun findByUserIdAndReadAtIsNull(userId: String): List<Notification>
+
+    fun findByRefTypeAndRefIdAndReadAtIsNull(refType: String, refId: String): List<Notification>
 }
