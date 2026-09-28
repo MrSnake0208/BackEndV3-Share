@@ -202,7 +202,7 @@ class FeedbackAccessService(
                 updatedAt = now,
             ),
         )
-        requeueUnqualified(userId, operatorAreas, adminUserId)
+        requeueUnqualified(userId, adminUserId)
         auditService.record(
             AdminAuditLog(
                 actorUserId = adminUserId,
@@ -222,7 +222,7 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val before = repository.findById(userId).orElse(null) ?: return
         repository.deleteById(userId)
-        requeueUnqualified(userId, emptySet(), adminUserId)
+        requeueUnqualified(userId, adminUserId)
         auditService.record(
             AdminAuditLog(
                 actorUserId = adminUserId,
@@ -243,7 +243,8 @@ class FeedbackAccessService(
         }
     }.toSet()
 
-    private fun requeueUnqualified(userId: String, retainedAreas: Set<String>, actorUserId: String) {
+    private fun requeueUnqualified(userId: String, actorUserId: String) {
+        val retainedAreas = authorizationService.operatorAreasFor(userId)
         ticketRepository.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(userId, "OPEN")
             .filter { FeedbackWorkflow.area(it) !in retainedAreas }
             .forEach { ticket ->
