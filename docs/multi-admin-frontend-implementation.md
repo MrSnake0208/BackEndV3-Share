@@ -66,6 +66,8 @@ export type FeedbackArea =
   | "PLAZA"
   | "ACCOUNT"
   | "UI"
+  | "STAR"
+  | "MAAYUAN"
   | "OTHER";
 
 export type FeedbackPermission =

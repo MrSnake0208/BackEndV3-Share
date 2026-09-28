@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size
  * 创建反馈工单请求
  *
  * @property type 反馈类型: BUG / FEATURE / CONTENT / ACCOUNT / REPORT / OTHER
- * @property category 反馈归属板块: INVENTORY / OPERATOR / LEDGER / PLAZA / ACCOUNT / UI / OTHER
+ * @property category 反馈归属板块: INVENTORY / OPERATOR / LEDGER / PLAZA / ACCOUNT / UI / STAR / MAAYUAN / OTHER
  * @property area 旧版兼容字段；新请求使用 category 表示板块
  * @property title 用户提交的原始标题(可选,最多 120 字符);仅用于提交前相似提示
  * @property content 正文(1..1000 字符)

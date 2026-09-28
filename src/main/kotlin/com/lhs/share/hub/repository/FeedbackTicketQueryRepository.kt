@@ -86,7 +86,7 @@ class FeedbackTicketQueryRepository(
         }
         status?.let { filters += Criteria.where("status").`is`(it) }
         type?.let { filters += typeCriteria(it) }
-        category?.let { filters += if (queue == null && reporterUserId != null) categorySetCriteria(setOf(it)) else workAreaSetCriteria(setOf(it)) }
+        category?.let { filters += workAreaSetCriteria(setOf(it)) }
         keyword?.takeIf { it.isNotBlank() }?.let { value ->
             val pattern = Pattern.compile(Pattern.quote(value.trim()), Pattern.CASE_INSENSITIVE)
             filters += Criteria().orOperator(

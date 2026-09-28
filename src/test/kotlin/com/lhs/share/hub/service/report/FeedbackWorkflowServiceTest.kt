@@ -74,6 +74,41 @@ class FeedbackWorkflowServiceTest {
     }
 
     @Test
+    fun `管理员改类同步用户分类并保留旧工单的反馈类型`() {
+        val old = ticket().copy(type = FeedbackType.LEGACY_FEEDBACK, category = FeedbackType.BUG,
+            workArea = FeedbackArea.OPERATOR, workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "alice")
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("alice", old) } returns true
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.STAR)
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        val updated = service.changeArea("alice", "rpt_1", FeedbackArea.STAR, "原板块填错")
+
+        assertEquals(FeedbackType.BUG, updated.type)
+        assertEquals(FeedbackArea.STAR, updated.category)
+        assertEquals(FeedbackArea.STAR, updated.area)
+        assertEquals(FeedbackArea.STAR, updated.workArea)
+        verify(exactly = 1) { events.save(match { it.action == "CHANGE_AREA" }) }
+    }
+
+    @Test
+    fun `转程序指定新板块时用户分类同步更新`() {
+        val old = ticket().copy(workArea = FeedbackArea.OPERATOR, workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "alice")
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("alice", old) } returns true
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.MAAYUAN)
+        every { access.developerUserIds(FeedbackArea.MAAYUAN) } returns setOf("developer")
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        val updated = service.handoff("alice", "rpt_1", FeedbackArea.MAAYUAN, "交由麻圆处理")
+
+        assertEquals(FeedbackArea.MAAYUAN, updated.category)
+        assertEquals(FeedbackArea.MAAYUAN, updated.area)
+        assertEquals(FeedbackArea.MAAYUAN, updated.workArea)
+        assertEquals(FeedbackWorkflow.DEV_HANDOFF, updated.workflowStage)
+    }
+
+    @Test
     fun `无程序板块权限不能读取内部处理记录`() {
         val old = ticket().copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, workArea = "STAR")
         every { tickets.findById("rpt_1") } returns Optional.of(old)
