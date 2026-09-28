@@ -15,6 +15,7 @@ import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.repository.entity.MediaAsset
 import com.lhs.share.hub.repository.entity.MediaKind
 import com.lhs.share.hub.service.HubUserInfoService
@@ -56,6 +57,7 @@ class FeedbackReportServiceTest {
     )
 
     init {
+        every { workflowEvents.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.keys() } returns FeedbackArea.all
         every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
         every { categories.label(any()) } answers { FeedbackArea.labels[firstArg()] }
