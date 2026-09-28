@@ -13,6 +13,7 @@ import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.admin.AdminAuditService
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
@@ -55,6 +56,7 @@ class FeedbackAccessServiceTest {
 
     init {
         every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(any(), any()) } returns emptyList()
+        every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
         every { categories.keys() } returns FeedbackArea.all
         every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
@@ -332,6 +334,7 @@ class FeedbackAccessServiceTest {
     fun `更新授权拒绝未知模块`() {
         every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
         every { userService.getRequired("manager") } returns MaaUserInfo("manager", "处理人", activated = true)
+        every { repository.findById("manager") } returns Optional.empty()
 
         assertThrows(ApiResultException::class.java) {
             service.updateGrant(

@@ -6,6 +6,7 @@ import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
+import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.notification.NotificationService
 import io.mockk.every
 import io.mockk.mockk
@@ -27,6 +28,7 @@ class FeedbackWorkflowServiceTest {
     private val service = FeedbackWorkflowService(tickets, query, events, access, notifications, categories)
 
     init {
+        every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.keys() } returns FeedbackArea.all
     }
 
