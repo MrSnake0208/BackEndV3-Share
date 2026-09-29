@@ -96,10 +96,11 @@ class InventoryService(
             throw schemaError("catalog_version must not be empty")
         }
 
-        val ordered = validateAndSort(userId, request, restrictedAccountId)
+        val accountGames = validateAccounts(userId, request, restrictedAccountId)
+        val ordered = validateAndSort(request)
         repeat(MAX_TRANSACTION_ATTEMPTS) { attempt ->
             try {
-                val prepared = prepareRecords(userId, ordered)
+                val prepared = prepareRecords(userId, ordered, accountGames)
                 return checkNotNull(
                     transactionTemplate.execute {
                         var accepted = 0
@@ -140,7 +141,7 @@ class InventoryService(
         error("Unreachable")
     }
 
-    private fun prepareRecords(userId: String, ordered: List<ValidatedRecord>): List<PreparedRecord> {
+    private fun prepareRecords(userId: String, ordered: List<ValidatedRecord>, accountGames: Map<String, String>): List<PreparedRecord> {
         val requestRecords = mutableMapOf<Pair<String, String>, ValidatedRecord>()
         return ordered.map { validated ->
             val record = validated.record
@@ -153,7 +154,7 @@ class InventoryService(
                 requestRecords[key] = validated
                 val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
                 if (existing != null && !sameBody(existing, record)) throw recordConflict(record.recordId)
-                if (existing == null) validateCatalogEntries(record)
+                if (existing == null) validateCatalogEntries(record, accountGames.getValue(record.accountId))
                 PreparedRecord(validated, duplicate = existing != null)
             }
         }
@@ -163,10 +164,9 @@ class InventoryService(
      * 校验并排序:枚举/catalog/entries 唯一性/count 范围/时间解析,全通过后按
      * effective_at 升序(同时间 reward_delta 优先,让快照成为同一时间的最终权威)。
      */
-    private fun validateAndSort(userId: String, request: InventoryImportRequest, restrictedAccountId: String?): List<ValidatedRecord> {
+    private fun validateAndSort(request: InventoryImportRequest): List<ValidatedRecord> {
         val records = request.records
         if (records.isEmpty()) throw schemaError("records must contain at least one record")
-        validateAccounts(userId, request, restrictedAccountId)
         records.forEach { record ->
             if (record.recordId.isBlank() || record.recordId.length > 128) {
                 throw schemaError("record_id length must be 1..128", record.recordId.takeIf { it.isNotBlank() })
@@ -190,7 +190,7 @@ class InventoryService(
             )
     }
 
-    private fun validateAccounts(userId: String, request: InventoryImportRequest, restrictedAccountId: String?) {
+    private fun validateAccounts(userId: String, request: InventoryImportRequest, restrictedAccountId: String?): Map<String, String> {
         val ids = request.accounts.orEmpty().map { account ->
             if (!ACCOUNT_ID.matches(account.id)) throw schemaError("accounts[].id is invalid")
             if (account.name != null && (account.name.isEmpty() || account.name.length > 64)) {
@@ -214,11 +214,10 @@ class InventoryService(
             )
         }
         val owned = accountRepository.findAllByUserIdAndAccountIdIn(userId, referenced)
-            .map { it.accountId }
-            .toSet()
+            .associate { it.accountId to it.game }
         val unknown = referenced.firstOrNull { it !in owned }
         if (unknown == null) {
-            return
+            return owned
         }
         throw InventoryApiException(
             HttpStatus.UNPROCESSABLE_ENTITY,
@@ -290,13 +289,22 @@ class InventoryService(
     }
 
     // 已接收的同正文记录仍需幂等成功，即使其密探后来被公共图鉴删除。
-    private fun validateCatalogEntries(record: InventoryRecordRequest) {
+    private fun validateCatalogEntries(record: InventoryRecordRequest, accountGame: String) {
         record.entries.forEach { entry ->
             if (!catalogService.exists(record.entityType, entry.id)) {
                 throw InventoryApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     "unknown_entity_id",
                     "Unknown ${record.entityType} id: ${entry.id}",
+                    record.recordId,
+                    entry.id,
+                )
+            }
+            if (record.entityType == "agent" && !catalogService.agentMatchesGame(entry.id, accountGame)) {
+                throw InventoryApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "agent_game_mismatch",
+                    "Agent ${entry.id} is not available in $accountGame",
                     record.recordId,
                     entry.id,
                 )

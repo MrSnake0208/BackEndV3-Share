@@ -155,6 +155,7 @@ GET /v1/inventory/catalog
 1. 验证 JSON Schema 和协议版本。
 2. 通过认证上下文确定 `user_id`。
 3. 验证 `(entity_type, id)` 存在于对象目录。
+   对新导入的 `agent` 条目，还需确认公共密探图鉴的 `games` 包含目标子账号的游戏版本；已接收的相同记录仍按幂等规则处理。
 4. 验证同一 record 的 `entries` 中没有重复 ID。
 5. 同一批记录按 `effective_at` 升序处理；相同时间先处理 `reward_delta`，后处理 `stock_snapshot`，让快照成为最终权威值。
 6. 同一用户的 `record_id` 已存在时按重复记录返回成功，不再更新库存。
@@ -274,6 +275,7 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 | 409     | `record_conflict`            | 相同 `record_id` 已存在，但内容不同。 |
 | 422     | `schema_validation_failed`   | 字段或类型不符合协议。                |
 | 422     | `unknown_entity_id`          | 对象目录中不存在该 ID。               |
+| 422     | `agent_game_mismatch`        | 密探不属于目标子账号的游戏版本。       |
 | 422     | `unsupported_version`        | 不支持该协议 major version。          |
 
 建议先完整校验一份导入文档，再开始写入；格式错误时整份拒绝，避免用户不知道哪些条目已经生效。

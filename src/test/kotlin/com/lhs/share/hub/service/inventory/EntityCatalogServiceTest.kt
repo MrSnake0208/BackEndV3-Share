@@ -34,6 +34,7 @@ class EntityCatalogServiceTest {
             OperatorCatalogResponse(catalogVersion = "2026-09-19T10:00:00Z", operators = operators.map(OperatorCatalogEntryResponse::of))
         }
         every { operatorCatalog.exists(any()) } answers { operators.any { it.operatorId == firstArg<String>() } }
+        every { operatorCatalog.getOperator(any()) } answers { operators.find { it.operatorId == firstArg<String>() } }
         every { repository.findByEntityTypeAndEntityId(any(), any()) } answers {
             rows[firstArg<String>() to secondArg<String>()]
         }
@@ -122,6 +123,15 @@ class EntityCatalogServiceTest {
         assertEquals(false, service.exists("agent", "char_129_zhoutai"))
         // 公开读取不删除用于历史排查的旧目录实体。
         assertTrue(rows.containsKey("agent" to "char_130_zhoutai"))
+    }
+
+    @Test
+    fun `agent game eligibility follows the current public catalog`() {
+        operators = listOf(operator("char_125_zhaoyun", "赵云"))
+
+        assertEquals(false, service.agentMatchesGame("char_125_zhaoyun", "如鸢"))
+        assertEquals(true, service.agentMatchesGame("char_125_zhaoyun", "代号鸢"))
+        assertEquals(false, service.agentMatchesGame("char_missing", "代号鸢"))
     }
 
     private fun operator(id: String, name: String) = OperatorCatalogEntity(

@@ -86,6 +86,7 @@ class InventoryServiceTest {
         accounts["u2" to "foreign"] = SubAccount(id = "a4", userId = "u2", accountId = "foreign", name = "他人账号")
         nextRecordId = 1
         every { catalogService.exists(any(), any()) } returns true
+        every { catalogService.agentMatchesGame(any(), any()) } returns true
         every { catalogService.catalog() } returns InventoryCatalogResponse(catalogVersion = "2026-08-16", entities = emptyList())
         every { accountRepository.findByUserIdAndAccountId(any(), any()) } answers {
             accounts[firstArg<String>() to secondArg<String>()]
@@ -428,6 +429,34 @@ class InventoryServiceTest {
             3,
             service.current("u1", "main", "agent").single().entries.getValue("char_102_jianyong").count,
         )
+    }
+
+    @Test
+    fun `new agent inventory rejects entries outside the account game before writing any record`() {
+        accounts["u1" to "main"] = accounts.getValue("u1" to "main").copy(game = "如鸢")
+        every { catalogService.agentMatchesGame("char_125_zhaoyun", "如鸢") } returns false
+        val request = document(
+            reward("item-reward", "2026-08-16T10:00:00Z", "baijinbi", 1),
+            agentSnapshot("wrong-game", "2026-08-16T11:00:00Z", "listed", "main", entry("char_125_zhaoyun", 2)),
+        )
+
+        val error = assertThrows(InventoryApiException::class.java) { service.import("u1", request) }
+
+        assertEquals(422, error.status.value())
+        assertEquals("agent_game_mismatch", error.code)
+        assertTrue(records.isEmpty())
+        assertTrue(currents.isEmpty())
+    }
+
+    @Test
+    fun `same agent record stays idempotent after account game changes`() {
+        val request = document(agentSnapshot("old-game", "2026-08-16T10:00:00Z", "listed", "main", entry("char_125_zhaoyun", 2)))
+        assertEquals(1, service.import("u1", request).accepted)
+        accounts["u1" to "main"] = accounts.getValue("u1" to "main").copy(game = "如鸢")
+        every { catalogService.agentMatchesGame("char_125_zhaoyun", "如鸢") } returns false
+
+        assertEquals(1, service.import("u1", request).duplicates)
+        assertEquals(2, count("u1", "char_125_zhaoyun", entityType = "agent"))
     }
 
     @Test
