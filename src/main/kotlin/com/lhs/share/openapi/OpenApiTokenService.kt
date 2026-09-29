@@ -180,6 +180,10 @@ class OpenApiTokenService(
         )
     }
 
+    fun secret(userId: String, tokenId: String): String =
+        tokenRepository.findByIdAndUserId(tokenId, userId)?.token
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
+
     fun revokeByAccount(userId: String, accountId: String) {
         tokenRepository.findAllByUserIdAndAccountId(userId, accountId).forEach {
             redisCache.delete(redisKey(it.token))

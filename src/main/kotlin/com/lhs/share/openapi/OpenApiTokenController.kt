@@ -13,7 +13,9 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.http.CacheControl
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -26,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController
 /**
  * 第三方 API Token 管理接口
  *
- * 生成/删除/列举均需登录;权限列表公开(见 SecurityConfig.URL_PERMIT_ALL)。
+ * 生成/删除/列举/按需复制均需登录;权限列表公开(见 SecurityConfig.URL_PERMIT_ALL)。
  */
 @Tag(name = "OpenAPI Token")
 @RequestMapping("/user/open-api", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -61,6 +63,14 @@ class OpenApiTokenController(
     @GetMapping("/tokens")
     fun tokens(): ApiResult<List<OpenApiTokenListItemDto>> = success(tokenService.list(helper.requireUserId()))
 
+    @Operation(summary = "按需复制本人连接码", description = "仅在用户主动复制时返回明文，禁止缓存")
+    @RequireJwt
+    @GetMapping("/tokens/{tokenId}/secret")
+    fun secret(@PathVariable tokenId: String): ResponseEntity<ApiResult<OpenApiTokenSecretResponse>> =
+        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
+            success(OpenApiTokenSecretResponse(tokenService.secret(helper.requireUserId(), tokenId))),
+        )
+
     /**
      * 完整替换第三方 API Token 权限(需登录),不改变 Token 明文。
      */
@@ -85,3 +95,5 @@ class OpenApiTokenController(
         return success()
     }
 }
+
+data class OpenApiTokenSecretResponse(val token: String)

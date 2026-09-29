@@ -17,8 +17,10 @@ import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -88,6 +90,30 @@ class OpenApiTokenControllerContractTest {
         mockMvc.perform(delete("/user/open-api/tokens/token-id"))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.status_code").value(401))
+    }
+
+    @Test
+    fun `secret route returns only owned token with no-store header`() {
+        every { tokenService.secret("u1", "token-id") } returns "synthetic-secret"
+
+        mockMvc.perform(get("/user/open-api/tokens/token-id/secret"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.token").value("synthetic-secret"))
+            .andExpect(header().string("Cache-Control", "no-store"))
+
+        verify { tokenService.secret("u1", "token-id") }
+    }
+
+    @Test
+    fun `secret route rejects missing JWT and unknown token`() {
+        every { tokenService.secret("u1", "missing") } throws ApiResultException(404, "token 不存在")
+        mockMvc.perform(get("/user/open-api/tokens/missing/secret"))
+            .andExpect(status().isNotFound)
+
+        every { helper.requireUserId() } throws ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        mockMvc.perform(get("/user/open-api/tokens/token-id/secret"))
+            .andExpect(status().isUnauthorized)
+        verify(exactly = 0) { tokenService.secret(any(), "token-id") }
     }
 
     @Test

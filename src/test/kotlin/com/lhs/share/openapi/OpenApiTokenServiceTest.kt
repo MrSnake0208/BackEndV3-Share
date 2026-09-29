@@ -185,6 +185,25 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `secret is returned only for an owned active token without writes`() {
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns entity()
+        every { tokenRepository.findByIdAndUserId("token-id", "u2") } returns null
+        every { tokenRepository.findByIdAndUserId("missing", "u1") } returns null
+
+        assertEquals("tok123", service.secret("u1", "token-id"))
+        assertEquals(
+            404,
+            assertThrows(ApiResultException::class.java) { service.secret("u2", "token-id") }.statusCode,
+        )
+        assertEquals(
+            404,
+            assertThrows(ApiResultException::class.java) { service.secret("u1", "missing") }.statusCode,
+        )
+        verify(exactly = 0) { tokenRepository.save(any()) }
+        verify(exactly = 0) { tokenRepository.delete(any()) }
+    }
+
+    @Test
     fun `scope update adds permission while preserving token and all other fields`() {
         val original = entity(scope = listOf(20004, 10002)).copy(
             kind = "OPERATOR",
