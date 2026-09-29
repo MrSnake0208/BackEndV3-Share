@@ -65,6 +65,9 @@ class EntityCatalogService(
         return entityType == "item" && repository.findByEntityTypeAndEntityId(entityType, entityId) != null
     }
 
+    fun agentMatchesGame(entityId: String, game: String): Boolean =
+        operatorCatalogService.getOperator(entityId)?.games?.let { it.isEmpty() || game in it } == true
+
     /**
      * 惰性播种:首次访问时补齐 classpath 中存在、collection 中缺失的对象。
      */

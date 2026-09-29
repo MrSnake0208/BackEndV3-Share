@@ -113,6 +113,8 @@
 
 当 `id` 有效但 `name` 与当前目录不同，接收方应以 `id` 为准并可返回 warning；未知 `id` 应返回 `unknown_entity_id`，不能按名称猜测。
 
+新导入的 `agent` 条目还必须适用于目标子账号的游戏版本；否则整份导入返回 422 `agent_game_mismatch`。相同正文的已接收记录仍可幂等重传，不会自动改写既有历史数据。
+
 ### 5.1 对象目录交换
 
 合作平台可以直接根据 MaaYuan 发布的 `agent/items.json` 与 `agent/operators.json` 建立映射，也可以使用后端提供的目录接口：
@@ -278,6 +280,7 @@ Accept: application/json
 | 409     | `record_conflict`            |
 | 422     | `schema_validation_failed`   |
 | 422     | `unknown_entity_id`          |
+| 422     | `agent_game_mismatch`        |
 | 422     | `unsupported_version`        |
 
 ## 10. 版本兼容
