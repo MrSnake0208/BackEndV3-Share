@@ -12,6 +12,7 @@ import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
@@ -48,6 +49,7 @@ class SubAccountService(
     private val operatorRecordRepository: OperatorRecordRepository,
     private val operatorCorrectionRecordRepository: OperatorCorrectionRecordRepository,
     private val operatorV3ImportRecordRepository: OperatorV3ImportRecordRepository,
+    private val operatorScanReviewRepository: OperatorScanReviewRepository,
     private val tokenService: OpenApiTokenService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
     private val operatorAnnotationRepository: OperatorAnnotationRepository? = null,
@@ -139,6 +141,7 @@ class SubAccountService(
             operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+            operatorScanReviewRepository.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
             operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)

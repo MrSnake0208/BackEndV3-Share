@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorScanImportEvent
+import com.lhs.share.hub.controller.operator.response.OperatorScanReviewResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3FieldChange
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportItem
@@ -12,9 +13,11 @@ import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewRes
 import com.lhs.share.hub.controller.operator.response.OperatorV3Issue
 import com.lhs.share.hub.controller.operator.response.toCommitResponse
 import com.lhs.share.hub.controller.operator.response.toPreviewResponse
+import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.OperatorScanReview
 import com.lhs.share.hub.repository.entity.OperatorV3ImportRecord
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
@@ -22,6 +25,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Instant
 import java.time.OffsetDateTime
 
 @Service
@@ -33,6 +37,7 @@ class OperatorV3ImportService(
     private val operatorService: OperatorService,
     private val importRecordRepository: OperatorV3ImportRecordRepository,
     private val accountEventService: AccountEventService,
+    private val scanReviewRepository: OperatorScanReviewRepository,
     private val subjectiveService: OperatorSubjectiveService? = null,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate? = null,
 ) {
@@ -46,6 +51,28 @@ class OperatorV3ImportService(
 
     fun commitScan(userId: String, accountId: String, document: JsonNode): OperatorV3ImportCommitResponse =
         commit(userId, parseCommand(document, accountId))
+
+    fun listScanReviews(userId: String, accountId: String): List<OperatorScanReviewResponse> {
+        requireOwnedAccount(userId, accountId)
+        // ponytail: list the account queue directly; paginate if real scan backlogs make this slow.
+        return scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId).map { review ->
+            OperatorScanReviewResponse(
+                accountId = review.accountId,
+                recordId = review.recordId,
+                operatorId = review.operatorId,
+                status = review.status,
+                document = objectMapper.readTree(review.document),
+                warnings = review.warnings,
+                blockingErrors = review.blockingErrors,
+                updatedAt = review.updatedAt,
+            )
+        }
+    }
+
+    fun closeScanReview(userId: String, accountId: String, recordId: String, operatorId: String) {
+        requireOwnedAccount(userId, accountId)
+        scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(userId, accountId, recordId, operatorId)
+    }
 
     private fun commit(userId: String, command: ImportCommand): OperatorV3ImportCommitResponse {
         val committed = mutableListOf<OperatorV3ImportItem>()
@@ -142,6 +169,50 @@ class OperatorV3ImportService(
                             revisions = written.mapNotNull { item -> item.revision?.let { item.operatorId to it } }.toMap(),
                         ),
                     )
+                }
+                if (command.scanAccountId != null) {
+                    written.forEach { item ->
+                        if (item.status == REVIEW || item.status == REJECTED) {
+                            val selected = entries(record).firstOrNull { text(it, "operator_id") == item.operatorId } ?: return@forEach
+                            val singleRecord = record.deepCopy()
+                            singleRecord.set<com.fasterxml.jackson.databind.node.ArrayNode>(
+                                "entries",
+                                objectMapper.createArrayNode().add(selected),
+                            )
+                            val singleDocument = command.document.deepCopy()
+                            singleDocument.set<com.fasterxml.jackson.databind.node.ArrayNode>(
+                                "records",
+                                objectMapper.createArrayNode().add(singleRecord),
+                            )
+                            val prior = scanReviewRepository.findByUserIdAndAccountIdAndRecordIdAndOperatorId(
+                                userId,
+                                targetAccountId,
+                                item.recordId,
+                                item.operatorId,
+                            )
+                            scanReviewRepository.save(
+                                OperatorScanReview(
+                                    id = prior?.id,
+                                    userId = userId,
+                                    accountId = targetAccountId,
+                                    recordId = item.recordId,
+                                    operatorId = item.operatorId,
+                                    status = item.status,
+                                    document = objectMapper.writeValueAsString(singleDocument),
+                                    warnings = item.warnings,
+                                    blockingErrors = item.blockingErrors,
+                                    updatedAt = Instant.now(),
+                                ),
+                            )
+                        } else if (item.status == ACCEPTED || item.status == PARTIAL) {
+                            scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(
+                                userId,
+                                targetAccountId,
+                                item.recordId,
+                                item.operatorId,
+                            )
+                        }
+                    }
                 }
             }
             if (command.scanAccountId != null) written.forEach { publishScanEvent(userId, it) }

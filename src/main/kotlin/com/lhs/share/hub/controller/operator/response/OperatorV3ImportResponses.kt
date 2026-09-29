@@ -47,6 +47,17 @@ data class OperatorV3Issue(
     val field: String? = null,
 )
 
+data class OperatorScanReviewResponse(
+    val accountId: String,
+    val recordId: String,
+    val operatorId: String,
+    val status: String,
+    val document: com.fasterxml.jackson.databind.JsonNode,
+    val warnings: List<OperatorV3Issue>,
+    val blockingErrors: List<OperatorV3Issue>,
+    val updatedAt: Instant,
+)
+
 /** Transient SSE notification; operator_current remains the durable source of truth. */
 data class OperatorScanImportEvent(
     val eventId: String = UUID.randomUUID().toString(),

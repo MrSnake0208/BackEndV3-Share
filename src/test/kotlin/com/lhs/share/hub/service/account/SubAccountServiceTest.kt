@@ -11,6 +11,7 @@ import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
@@ -51,6 +52,7 @@ class SubAccountServiceTest {
     private val operatorRecordRepository = mockk<OperatorRecordRepository>()
     private val operatorCorrectionRecordRepository = mockk<OperatorCorrectionRecordRepository>()
     private val operatorV3ImportRecordRepository = mockk<OperatorV3ImportRecordRepository>()
+    private val operatorScanReviewRepository = mockk<OperatorScanReviewRepository>(relaxed = true)
     private val tokenService = mockk<OpenApiTokenService>()
     private val annotationRepository = mockk<OperatorAnnotationRepository>()
     private val targetRepository = mockk<OperatorGrowthTargetRepository>()
@@ -79,6 +81,7 @@ class SubAccountServiceTest {
         operatorRecordRepository,
         operatorCorrectionRecordRepository,
         operatorV3ImportRecordRepository,
+        operatorScanReviewRepository,
         tokenService,
         transactionTemplate,
         annotationRepository,
@@ -145,6 +148,7 @@ class SubAccountServiceTest {
         verify(exactly = 0) { operatorRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { operatorScanReviewRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { annotationRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { targetRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { upgradeRepository.deleteAllByUserIdAndAccountId(any(), any()) }
@@ -215,6 +219,7 @@ class SubAccountServiceTest {
         every { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
+        every { operatorScanReviewRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
         every { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") } just runs
@@ -239,6 +244,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { operatorRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { operatorScanReviewRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") }

@@ -401,7 +401,15 @@ OpenAPI scan 处理 entry 后发送 `operator_scan_import` 事件，数据包含
 每个 OpenAPI 库存导入事务成功后发送一个 `inventory_import` 事件，数据包含导入结果和本次
 `record_id / record_type / entity_type / entries[{id,count}]`。前端可以只根据事件名和时间显示“最近流水已更新”或“库存已更新”，忽略条目明细；采集端可以批量提交，不要求一个 entry 一个请求。
 它不维护扫描总量或开始/结束状态，也不补发断线期间的历史动画事件；`operator_current` 和
-`inventory_current` 仍是持久事实源。
+`inventory_current` 仍是持久事实源。`review/rejected` 的密探采集条目另存为待复核结果，按用户、子账号、`record_id`、`operator_id` 隔离：
+
+```http
+GET /v1/operator/scan-reviews?account_id=acc_xxx
+DELETE /v1/operator/scan-reviews?account_id=acc_xxx&record_id=scan:xxx&operator_id=char_xxx
+Authorization: Bearer <JWT>
+```
+
+GET 返回原始 v3 单密探文档及 warning/error。用户修正后用新 `record_id` 走现有浏览器 v3 preview/commit；确认写入成功后才关闭待复核项。部分可靠分区可能在原扫描提交时已写入。
 服务端每 15 秒发送 SSE comment 心跳并关闭 Nginx 响应缓冲。由于原生 `EventSource` 不能设置 Bearer header，
 当前 JWT 前端应使用带 `Authorization` 的流式 `fetch` 或支持自定义 header 的 SSE 客户端。
 

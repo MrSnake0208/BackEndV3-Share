@@ -16,6 +16,7 @@ import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
 import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorRecordPageResponse
+import com.lhs.share.hub.controller.operator.response.OperatorScanReviewResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
@@ -113,6 +114,24 @@ class OperatorController(
         @RequestBody request: JsonNode,
     ): ApiResult<OperatorV3ImportPreviewResponse> {
         return success(requireNotNull(v3ImportService).previewBrowser(helper.requireUserId(), request))
+    }
+
+    @Operation(summary = "读取当前子账号的待复核密探采集结果")
+    @RequireJwt
+    @GetMapping("/scan-reviews")
+    fun scanReviews(@RequestParam(name = "account_id") accountId: String): ApiResult<List<OperatorScanReviewResponse>> =
+        success(requireNotNull(v3ImportService).listScanReviews(helper.requireUserId(), accountId))
+
+    @Operation(summary = "关闭已处理的密探采集待复核项")
+    @RequireJwt
+    @DeleteMapping("/scan-reviews")
+    fun closeScanReview(
+        @RequestParam(name = "account_id") accountId: String,
+        @RequestParam(name = "record_id") recordId: String,
+        @RequestParam(name = "operator_id") operatorId: String,
+    ): ApiResult<Boolean> {
+        requireNotNull(v3ImportService).closeScanReview(helper.requireUserId(), accountId, recordId, operatorId)
+        return success(true)
     }
 
     @GetMapping("/current")
