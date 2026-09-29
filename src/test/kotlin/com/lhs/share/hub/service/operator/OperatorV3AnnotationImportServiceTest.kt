@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.operator
 
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
@@ -48,6 +49,7 @@ class OperatorV3AnnotationImportServiceTest {
         operators,
         audits,
         events,
+        mockk<OperatorScanReviewRepository>(),
         subjective,
         transactionTemplate,
     )

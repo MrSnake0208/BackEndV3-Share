@@ -8,6 +8,7 @@ import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
@@ -15,6 +16,7 @@ import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorCorrectionRecord
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorEntry
+import com.lhs.share.hub.repository.entity.OperatorScanReview
 import com.lhs.share.hub.repository.entity.OperatorV3ImportRecord
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
@@ -45,6 +47,7 @@ class OperatorV3ImportServiceTest {
     private val catalogService = mockk<OperatorCatalogService>()
     private val operatorService = mockk<OperatorService>()
     private val importRecordRepository = mockk<OperatorV3ImportRecordRepository>()
+    private val scanReviewRepository = mockk<OperatorScanReviewRepository>()
     private val accountEventService = mockk<AccountEventService>()
     private val service = OperatorV3ImportService(
         mapper,
@@ -54,6 +57,7 @@ class OperatorV3ImportServiceTest {
         operatorService,
         importRecordRepository,
         accountEventService,
+        scanReviewRepository,
     )
 
     @BeforeEach
@@ -65,6 +69,9 @@ class OperatorV3ImportServiceTest {
         every { operatorService.completeFullImport(any(), any(), any(), any(), any()) } just runs
         every { importRecordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "scan:1") } returns null
         every { importRecordRepository.save(any()) } answers { firstArg<OperatorV3ImportRecord>() }
+        every { scanReviewRepository.findByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) } returns null
+        every { scanReviewRepository.save(any()) } answers { firstArg() }
+        every { scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) } just runs
         every { accountEventService.publish(any(), any(), any(), any(), any()) } just runs
     }
 
@@ -82,6 +89,74 @@ class OperatorV3ImportServiceTest {
         assertEquals("scan", patch.captured.path("combat_stats").path("source").asText())
         verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
         verify(exactly = 0) { importRecordRepository.save(any()) }
+        verify(exactly = 0) { scanReviewRepository.save(any()) }
+    }
+
+    @Test
+    fun `scan review is saved for its owner before notification and can be resumed`() {
+        val request = document().also { root ->
+            val entry = root.path("records").get(0).path("entries").get(0) as com.fasterxml.jackson.databind.node.ObjectNode
+            (entry.path("section_status") as com.fasterxml.jackson.databind.node.ObjectNode)
+                .put("basic", "review").put("combat_stats", "review")
+        }
+        val saved = slot<OperatorScanReview>()
+        every { scanReviewRepository.save(capture(saved)) } answers { firstArg() }
+        every { scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "acc1") } answers { listOf(saved.captured) }
+
+        val result = service.commitScan("u1", "acc1", request)
+        val pending = service.listScanReviews("u1", "acc1").single()
+
+        assertEquals(1, result.review)
+        assertEquals("op1", pending.operatorId)
+        assertEquals("scan:1", pending.recordId)
+        assertEquals(1, pending.document.path("records").size())
+        assertEquals("review", pending.document.path("records").get(0).path("entries").get(0).path("section_status").path("basic").asText())
+        verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { scanReviewRepository.save(any()) }
+        verify(exactly = 1) { accountEventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `rejected scan entry remains available for correction`() {
+        every { catalogService.getOperator("op1") } returns null
+        val saved = slot<OperatorScanReview>()
+        every { scanReviewRepository.save(capture(saved)) } answers { firstArg() }
+
+        val result = service.commitScan("u1", "acc1", document())
+
+        assertEquals(1, result.rejected)
+        assertEquals("rejected", saved.captured.status)
+        assertEquals("op1", saved.captured.operatorId)
+        verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `review stores source even when a reliable section was already written`() {
+        val request = document().also { root ->
+            val entry = root.path("records").get(0).path("entries").get(0)
+            (entry.path("section_status") as com.fasterxml.jackson.databind.node.ObjectNode).put("combat_stats", "review")
+        }
+        every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
+            OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
+        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+
+        val result = service.commitScan("u1", "acc1", request)
+
+        assertEquals(1, result.review)
+        verify(exactly = 1) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { importRecordRepository.save(any()) }
+        verify(exactly = 1) { scanReviewRepository.save(any()) }
+    }
+
+    @Test
+    fun `scan review read and close reject a foreign account before repository access`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "other") } returns null
+
+        assertThrows(OperatorApiException::class.java) { service.listScanReviews("u1", "other") }
+        assertThrows(OperatorApiException::class.java) { service.closeScanReview("u1", "other", "scan:1", "op1") }
+
+        verify(exactly = 0) { scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(any(), any()) }
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) }
     }
 
     @Test
@@ -184,6 +259,7 @@ class OperatorV3ImportServiceTest {
             realOperatorService,
             importRecordRepository,
             accountEventService,
+            scanReviewRepository,
         )
         val tokenService = mockk<OpenApiTokenService>()
         every { tokenService.validateAuthorization("Bearer scan", OpenApiPermission.OPERATOR_SCAN_WRITE) } returns
