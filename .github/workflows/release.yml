@@ -71,7 +71,10 @@ jobs:
           set -euo pipefail
           ci_run_id="$(
             gh run list \
+              --repo "$GITHUB_REPOSITORY" \
               --workflow ci.yml \
+              --branch main \
+              --event push \
               --commit "$BACKEND_RELEASE_COMMIT" \
               --status success \
               --limit 1 \
@@ -79,7 +82,7 @@ jobs:
               --jq '.[0].databaseId // empty'
           )"
           test -n "$ci_run_id" || {
-            echo "::error::No successful CI run exists for release commit $BACKEND_RELEASE_COMMIT"
+            echo "::error::No successful main push CI run exists for release commit $BACKEND_RELEASE_COMMIT"
             exit 1
           }
           echo "Using successful CI run $ci_run_id for $BACKEND_RELEASE_COMMIT"
@@ -295,8 +298,8 @@ jobs:
             echo "The production jar is built on server B from the exact tagged commit; no large jar is uploaded by GitHub Actions."
           } > "$notes"
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" --title "Backend $RELEASE_TAG" --notes-file "$notes"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Backend $RELEASE_TAG" --notes-file "$notes"
           else
-            gh release create "$RELEASE_TAG" --title "Backend $RELEASE_TAG" --notes-file "$notes" --verify-tag
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Backend $RELEASE_TAG" --notes-file "$notes" --verify-tag
           fi
