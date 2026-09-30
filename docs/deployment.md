@@ -262,26 +262,34 @@ Nginx → Green
 
 后端版本由 Git tag 决定。
 
-例如：
+在 YuanHub-All 工作区内推荐根目录统一入口，先自行提交业务改动：
 
 ```bash
-cd /Users/snake/Desktop/YuanHub-All/BackEndV3-Share
+./release.sh --dry-run --frontend auto --backend 0.1.13
+./release.sh --frontend auto --backend 0.1.13
+# 仅发后端
+./release.sh --backend 0.1.13
+```
 
-git add .
-git commit -m "feat: server-build blue-green deployment"
+版本号为示例，必须使用新版本。两仓 main 先推送，入口并行等待对应 SHA 的 main push CI；任一失败均不创建 tag。默认后端 Release 完整成功后才发布前端，冻结的 SHA 不随等待期间的新提交变化。详细恢复步骤见工作区 `docs/release-workflow.md`。
 
-git tag v0.1.1
+独立 clone 本仓库时人工发布：
+
+```bash
+# 先提交业务改动，再推 main
 git push origin main
+# 等 ci.yml 的 main push CI 在同一 SHA 成功后，才推对应 tag
+git tag v0.1.1
 git push origin v0.1.1
 ```
 
-push `v*` tag 后 Release workflow 自动执行。
+push `v*` tag 后 Release workflow 自动执行。提前推 tag 时门禁会失败，不会等待 CI；CI 成功后重跑原 Release，禁止删除或移动已有 tag。
 
 GitHub Runner：
 
 1. checkout 精确 tag
-2. JDK 21
-3. `./gradlew test` 作为发布闸门
+2. 核对 `ci.yml / main / push / 同 SHA` 已有成功 CI，复用 ktlint / unit tests / assemble，不在 Release 重跑测试
+3. 解析产品版本、检查配置/SSH 和服务器 Java 21 JDK
 4. SSH 到服务器 B
 
 服务器 B：
@@ -299,7 +307,7 @@ GitHub Runner：
 11. 成功后等待 drain，再停止旧实例
 12. 保留最近若干 release
 
-GitHub Actions **不再 SCP JAR，也不再上传 JAR artifact**。
+Release **不再 SCP JAR**；CI 仍上传 JAR artifact 保留 7 天供检查，但 Release 使用服务器 B 本地构建产物。
 
 ## 8. 自动失败回滚
 
