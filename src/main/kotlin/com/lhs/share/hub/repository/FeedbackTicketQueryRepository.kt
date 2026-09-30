@@ -219,6 +219,7 @@ class FeedbackTicketQueryRepository(
         publicStatus: String?,
         publishedAt: Instant?,
         publicUpdatedAt: Instant,
+        completedAt: Instant? = null,
     ): FeedbackTicket? = template.findAndModify(
         Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
         Update()
@@ -227,7 +228,8 @@ class FeedbackTicketQueryRepository(
             .set("publicSummary", publicSummary)
             .set("publicStatus", publicStatus)
             .set("publishedAt", publishedAt)
-            .set("publicUpdatedAt", publicUpdatedAt),
+            .set("publicUpdatedAt", publicUpdatedAt)
+            .set("completedAt", completedAt),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
     )
@@ -382,6 +384,19 @@ class FeedbackTicketQueryRepository(
             .set("handlerUserId", updated.handlerUserId)
             .set("handledAt", updated.handledAt)
             .set("updatedAt", updated.updatedAt)
+        if (updated.publicStatus != previous.publicStatus || updated.completedAt != previous.completedAt ||
+            updated.publicUpdatedAt != previous.publicUpdatedAt
+        ) {
+            query.addCriteria(
+                Criteria.where("visibility").`is`(previous.visibility)
+                    .and("publicStatus").`is`(previous.publicStatus)
+                    .and("publicUpdatedAt").`is`(previous.publicUpdatedAt)
+                    .and("completedAt").`is`(previous.completedAt),
+            )
+            update.set("publicStatus", updated.publicStatus)
+                .set("completedAt", updated.completedAt)
+                .set("publicUpdatedAt", updated.publicUpdatedAt)
+        }
         if (updated.teamReadReporterIndex != null &&
             (previous.teamReadReporterIndex == null || updated.teamReadReporterIndex > previous.teamReadReporterIndex)
         ) {

@@ -595,8 +595,13 @@ class FeedbackReportService(
         }
 
         val now = Instant.now()
+        val completePublic = actorMode == ActorMode.ADMIN && newStatus == "RESOLVED" &&
+            request.completePublicFeedback && FeedbackVisibility.isPublic(ticket.visibility)
         val updatedTicket = ticket.copy(
             status = newStatus,
+            publicStatus = if (completePublic) PublicFeedbackStatus.COMPLETED else ticket.publicStatus,
+            completedAt = if (completePublic) ticket.completedAt ?: now else ticket.completedAt,
+            publicUpdatedAt = if (completePublic) now else ticket.publicUpdatedAt,
             workflowStage = if (actorMode == ActorMode.ADMIN && newStatus == "OPEN" && ticket.status != "OPEN") {
                 if (ticket.operatorAssigneeUserId != null &&
                     FeedbackWorkflow.area(ticket) in feedbackAccessService.operatorAreas(ticket.operatorAssigneeUserId)

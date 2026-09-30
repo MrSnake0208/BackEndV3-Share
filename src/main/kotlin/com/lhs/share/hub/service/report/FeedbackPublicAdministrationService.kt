@@ -60,6 +60,7 @@ class FeedbackPublicAdministrationService(
             publicStatus = status,
             publishedAt = ticket.publishedAt ?: now,
             publicUpdatedAt = now,
+            completedAt = if (status == PublicFeedbackStatus.COMPLETED) ticket.completedAt ?: now else null,
         ) ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
     }
 
@@ -77,6 +78,7 @@ class FeedbackPublicAdministrationService(
             publicStatus = ticket.publicStatus,
             publishedAt = ticket.publishedAt,
             publicUpdatedAt = now,
+            completedAt = ticket.completedAt,
         ) ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
     }
 

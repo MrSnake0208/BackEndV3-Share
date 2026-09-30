@@ -16,4 +16,6 @@ data class FeedbackStatusUpdateRequest(
     )
     val actorMode: String? = null,
     val reason: String? = null,
+    @field:Schema(description = "管理员结案公开反馈时同时标记公开完成；false 保留原公开进度，提交人结案不生效")
+    val completePublicFeedback: Boolean = true,
 )

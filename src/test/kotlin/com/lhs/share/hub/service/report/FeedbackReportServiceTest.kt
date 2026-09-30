@@ -1038,6 +1038,47 @@ class FeedbackReportServiceTest {
         assertEquals(FeedbackArea.STAR, managed.workArea)
     }
 
+    @Test
+    fun `只有管理员结案公开反馈且选择同步时更新公开完成与时间`() {
+        val publicUpdatedAt = Instant.parse("2026-09-01T00:00:00Z")
+        for (visibility in listOf(FeedbackVisibility.PUBLIC, FeedbackVisibility.PRIVATE)) {
+            for ((actor, sync) in listOf("ADMIN" to true, "ADMIN" to false, "REPORTER" to true)) {
+                val id = "${visibility}_${actor}_$sync"
+                val currentUser = if (actor == "ADMIN") "admin" else "user"
+                val ticket = openTicket().copy(
+                    id = id,
+                    visibility = visibility,
+                    publicStatus = PublicFeedbackStatus.CONFIRMED,
+                    publicUpdatedAt = publicUpdatedAt,
+                    workflowStage = FeedbackWorkflow.PROCESSING,
+                    operatorAssigneeUserId = "admin",
+                )
+                prepareTicket(ticket, currentUser, canManage = actor == "ADMIN")
+                val response = service.updateStatus(
+                    currentUser,
+                    id,
+                    FeedbackStatusUpdateRequest("RESOLVED", actor, completePublicFeedback = sync),
+                )
+                val completed = visibility == FeedbackVisibility.PUBLIC && actor == "ADMIN" && sync
+                assertEquals("RESOLVED", response.status)
+                assertEquals(if (completed) PublicFeedbackStatus.COMPLETED else PublicFeedbackStatus.CONFIRMED, response.publicStatus)
+                if (completed) {
+                    assertNotNull(response.completedAt)
+                    assertEquals(response.updatedAt, response.publicUpdatedAt)
+                } else {
+                    assertNull(response.completedAt)
+                    assertEquals(publicUpdatedAt, response.publicUpdatedAt)
+                }
+                verify(exactly = 1) {
+                    queryRepository.saveIfUnchanged(
+                        ticket,
+                        match { it.status == "RESOLVED" && it.publicStatus == response.publicStatus },
+                    )
+                }
+            }
+        }
+    }
+
     private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {
         every { ticketRepository.findById(checkNotNull(ticket.id)) } returns Optional.of(ticket)
         every { ticketRepository.save(any()) } answers { firstArg() }

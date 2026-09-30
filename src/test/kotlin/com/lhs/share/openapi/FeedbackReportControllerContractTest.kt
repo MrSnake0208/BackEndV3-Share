@@ -117,6 +117,21 @@ class FeedbackReportControllerContractTest {
     }
 
     @Test
+    fun `complete_public_feedback binds false and defaults true for older clients`() {
+        every { reportService.updateStatus("u1", "rpt_1", any()) } returns response().copy(status = "RESOLVED")
+        for (sync in listOf(null, false, true)) {
+            val field = sync?.let { ",\"complete_public_feedback\":$it" } ?: ""
+            mockMvc.perform(
+                patch("/v1/reports/rpt_1/status")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"status":"RESOLVED","actor_mode":"ADMIN"$field}"""),
+            ).andExpect(status().isOk)
+                .andExpect(jsonPath("$.status_code").value(200))
+            verify { reportService.updateStatus("u1", "rpt_1", match { it.completePublicFeedback == (sync ?: true) }) }
+        }
+    }
+
+    @Test
     fun `actor authorization errors remain ApiResult business status codes`() {
         every { reportService.appendMessage("u1", "rpt_1", any()) } throws
             ApiResultException(403, "当前用户不是工单提交人")
