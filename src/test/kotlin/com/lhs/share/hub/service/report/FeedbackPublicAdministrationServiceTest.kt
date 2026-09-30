@@ -112,7 +112,7 @@ class FeedbackPublicAdministrationServiceTest {
         }
 
         assertEquals(403, error.statusCode)
-        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -128,7 +128,7 @@ class FeedbackPublicAdministrationServiceTest {
             assertEquals(403, error.statusCode)
             assertEquals("用户未授权发布到反馈广场", error.message)
         }
-        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -149,7 +149,7 @@ class FeedbackPublicAdministrationServiceTest {
         val published = Instant.parse("2026-09-01T00:00:00Z")
         every { ticketRepository.findById("rpt_1") } returns
             Optional.of(ticket("rpt_1", publishedAt = published).copy(publicConsent = true))
-        every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) } returns ticket(
+        every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) } returns ticket(
             "rpt_1",
             visibility = FeedbackVisibility.PUBLIC,
             publishedAt = published,
@@ -176,7 +176,7 @@ class FeedbackPublicAdministrationServiceTest {
         every { ticketRepository.findById("rpt_1") } returns Optional.of(
             ticket("rpt_1", visibility = FeedbackVisibility.PUBLIC),
         )
-        every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) } returns ticket(
+        every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) } returns ticket(
             "rpt_1",
             visibility = FeedbackVisibility.PRIVATE,
         )
@@ -466,5 +466,50 @@ class FeedbackPublicAdministrationServiceTest {
         service.updateType("admin", "rpt_1", FeedbackTypeUpdateRequest(type = "feature"))
 
         verify(exactly = 1) { queryRepository.setType("rpt_1", "FEATURE") }
+    }
+
+    @Test
+    fun `发布面板保存完成状态维护完成时间且离开完成状态清空`() {
+        allowManage()
+        val completed = Instant.parse("2026-09-01T00:00:00Z")
+        every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) } returns ticket("rpt_1")
+        for (oldCompleted in listOf(null, completed)) {
+            val original = ticket("rpt_1", visibility = FeedbackVisibility.PUBLIC).copy(
+                publicConsent = true,
+                completedAt = oldCompleted,
+            )
+            every { ticketRepository.findById("rpt_1") } returns Optional.of(original)
+            service.publish("admin", "rpt_1", FeedbackPublishRequest(publicTitle = "公开标题", publicStatus = "COMPLETED"))
+            verify {
+                queryRepository.setPublicInfo(
+                    "rpt_1",
+                    FeedbackVisibility.PUBLIC,
+                    "公开标题",
+                    null,
+                    PublicFeedbackStatus.COMPLETED,
+                    any(),
+                    any(),
+                    match { oldCompleted == null || it.equals(oldCompleted) },
+                )
+            }
+        }
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(
+            ticket("rpt_1", visibility = FeedbackVisibility.PUBLIC).copy(publicConsent = true, completedAt = completed),
+        )
+        service.publish("admin", "rpt_1", FeedbackPublishRequest(publicTitle = "公开标题", publicStatus = "CONFIRMED"))
+        verify {
+            queryRepository.setPublicInfo(
+                "rpt_1",
+                FeedbackVisibility.PUBLIC,
+                "公开标题",
+                null,
+                PublicFeedbackStatus.CONFIRMED,
+                any(),
+                any(),
+                null,
+            )
+        }
+        service.unpublish("admin", "rpt_1")
+        verify { queryRepository.setPublicInfo("rpt_1", FeedbackVisibility.PRIVATE, any(), any(), any(), any(), any(), completed) }
     }
 }

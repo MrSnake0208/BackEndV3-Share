@@ -473,6 +473,15 @@ GET /v1/admin/audit-logs
 先保持 `APPLY = false` 核对 dry-run 输出，再明确改为 `true` 执行。角色回收按数据库当前绑定即时生效，
 不依赖 JWT 里的旧 authority。
 
+**反馈工单与广场状态**：`PATCH /v1/reports/{id}/status` 的请求支持
+`complete_public_feedback`（默认 `true`）。仅当 `actor_mode=ADMIN`、目标为 `RESOLVED`
+且反馈已公开时，同时保存 `publicStatus=COMPLETED`、`completedAt` 与 `publicUpdatedAt`；
+传 `false` 保留原公开进度，提交人自行结案不改变广场状态。工单和公开完成使用单次 Mongo
+条件更新，期间公开状态或可见性发生变化则返回业务 `409`，不结案、不发送成功通知。
+公开发布面板保存完成状态也维护完成时间，离开完成状态时清空；取消公开保留已有完成时间。
+已公开的历史反馈即使缺少公开授权，也可通过现有 `public-status` 或 `unpublish` 接口维护状态或撤下，
+但 `publish` 仍强制要求用户授权。权限仍以当前运营负责人或超级管理员为准，公开接口不返回内部字段。
+
 ## 项目结构
 
 沿用 MaaYuan-Share-Backend 的分层:

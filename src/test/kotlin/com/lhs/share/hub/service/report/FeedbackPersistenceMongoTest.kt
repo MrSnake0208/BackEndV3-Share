@@ -382,6 +382,63 @@ class FeedbackPersistenceMongoTest {
 
     private fun message(id: String) = FeedbackMessage(id, "REPORTER", "reporter", "Synthetic message $id")
 
+    @Test
+    fun `公开反馈结案一次写入完成状态时间且保留公开内容和消息`() {
+        val initial = mongo.insert(
+            ticket("public-close").copy(
+                visibility = FeedbackVisibility.PUBLIC,
+                publicTitle = "公开标题",
+                publicStatus = PublicFeedbackStatus.CONFIRMED,
+            ),
+        )
+        service.updateStatus("admin", "public-close", FeedbackStatusUpdateRequest("RESOLVED", "ADMIN"))
+        val saved = mongo.findById("public-close", FeedbackTicket::class.java)!!
+        assertEquals("RESOLVED", saved.status)
+        assertEquals(PublicFeedbackStatus.COMPLETED, saved.publicStatus)
+        assertTrue(saved.completedAt != null)
+        assertEquals(saved.updatedAt, saved.publicUpdatedAt)
+        assertEquals(initial.publicTitle, saved.publicTitle)
+        assertEquals(initial.messages, saved.messages)
+    }
+
+    @Test
+    fun `并发更改公开状态或取消公开时同步结案冲突且不发送完成通知`() {
+        for (unpublish in listOf(false, true)) {
+            val id = "public-conflict-$unpublish"
+            val initial = mongo.insert(
+                ticket(id).copy(
+                    visibility = FeedbackVisibility.PUBLIC,
+                    publicStatus = PublicFeedbackStatus.CONFIRMED,
+                ),
+            )
+            every { tickets.findById(id) } returns Optional.of(initial)
+            if (unpublish) {
+                queries.setPublicInfo(id, FeedbackVisibility.PRIVATE, null, null, initial.publicStatus, null, Instant.now())
+            } else {
+                queries.setPublicStatus(id, PublicFeedbackStatus.IN_PROGRESS, Instant.now(), null)
+            }
+            val error = assertThrows(ApiResultException::class.java) {
+                service.updateStatus("admin", id, FeedbackStatusUpdateRequest("RESOLVED", "ADMIN"))
+            }
+            assertEquals(409, error.statusCode)
+            val saved = mongo.findById(id, FeedbackTicket::class.java)!!
+            assertEquals("OPEN", saved.status)
+            assertEquals(if (unpublish) FeedbackVisibility.PRIVATE else FeedbackVisibility.PUBLIC, saved.visibility)
+            assertEquals(if (unpublish) PublicFeedbackStatus.CONFIRMED else PublicFeedbackStatus.IN_PROGRESS, saved.publicStatus)
+        }
+        verify(exactly = 0) { notifications.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `仅写内部字段不会覆盖新的公开进度`() {
+        val initial = mongo.insert(ticket("internal-only").copy(visibility = FeedbackVisibility.PUBLIC))
+        queries.setPublicStatus("internal-only", PublicFeedbackStatus.IN_PROGRESS, Instant.now(), null)
+        assertTrue(queries.saveIfUnchanged(initial, initial.copy(status = "RESOLVED")) != null)
+        val saved = mongo.findById("internal-only", FeedbackTicket::class.java)!!
+        assertEquals("RESOLVED", saved.status)
+        assertEquals(PublicFeedbackStatus.IN_PROGRESS, saved.publicStatus)
+    }
+
     private fun ticket(id: String) = FeedbackTicket(
         id = id,
         type = "BUG",
