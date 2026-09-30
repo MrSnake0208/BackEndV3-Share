@@ -1,0 +1,301 @@
+package com.lhs.share.hub.service.recruitment
+
+import com.fasterxml.jackson.databind.PropertyNamingStrategies
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
+import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.RecruitmentRepository
+import com.lhs.share.hub.repository.RecruitmentTotals
+import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.RecruitmentArchive
+import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentEvent
+import com.lhs.share.hub.repository.entity.RecruitmentPool
+import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
+import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
+import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.AccountEventService
+import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.hub.service.inventory.InventoryApiException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.TransactionStatus
+import org.springframework.transaction.support.SimpleTransactionStatus
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Instant
+
+class RecruitmentServiceTest {
+    private val mapper = jacksonObjectMapper().registerModule(
+        JavaTimeModule(),
+    ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+    private val store = mockk<RecruitmentRepository>()
+    private val operators = mockk<OperatorCatalogRepository>()
+    private val catalog = RecruitmentCatalog(mapper)
+    private val mutation = RecruitmentMutation(store, operators, catalog, mapper)
+    private val events = mutableMapOf<String, RecruitmentEvent>()
+    private val batches = mutableMapOf<String, RecruitmentBatch>()
+    private val now = Instant.parse("2026-10-01T00:00:00Z")
+    private var state =
+        RecruitmentArchive(
+            "u:a",
+            "u",
+            "a",
+            "如鸢",
+            pools = listOf(RecruitmentPool("p", RecruitmentPoolSnapshot("临时池", "如鸢"), progress = 0)),
+            temporaryAgents = listOf(
+                RecruitmentTemporaryAgent("tmp_A", "A"),
+                RecruitmentTemporaryAgent("tmp_B", "B"),
+                RecruitmentTemporaryAgent("tmp_C", "C"),
+            ),
+        )
+
+    init {
+        every { store.event("u", "a", any()) } answers { events[thirdArg()] }
+        every { store.insertEvent(any()) } answers {
+            firstArg<RecruitmentEvent>().let { events[it.eventId] = it }
+            Unit
+        }
+        every { store.saveEvent(any()) } answers {
+            firstArg<RecruitmentEvent>().let { events[it.eventId] = it }
+            Unit
+        }
+        every { store.batch("u", "a", any()) } answers { batches[thirdArg()] }
+        every { store.insertBatch(any()) } answers {
+            firstArg<RecruitmentBatch>().let { batches[it.batchId] = it }
+            Unit
+        }
+        every { store.saveBatch(any()) } answers {
+            firstArg<RecruitmentBatch>().let { batches[it.batchId] = it }
+            Unit
+        }
+        every { store.batchEvents("u", "a", any()) } answers { events.values.filter { it.batchId == thirdArg<String>() } }
+        every { store.poolEvents("u", "a", "p", any()) } answers { events.values.filter { it.deletedAt == null }.sortedBy { it.sortOrder } }
+    }
+
+    private fun command(operation: String, data: String) = mutation.apply(state, operation, mapper.readTree(data), now).also {
+        state =
+            it.archive
+    }
+    private fun count() = state.baseline + state.pools.sumOf { it.progress ?: 0 } +
+        events.values.filter { it.deletedAt == null && it.batchId == null }.sumOf { it.pullSpan ?: 0 } +
+        batches.values.filter { it.deletedAt == null }.sumOf { it.totalPullCount }
+    private fun historical() = command(
+        "event_create",
+        """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17},{"event_id":"B","agent_id":"tmp_B","pull_span":31},{"event_id":"C","agent_id":"tmp_C","pull_span":17}]}""",
+    )
+
+    @Test fun `new pool progress must be explicitly unknown zero or a validated known value`() {
+        assertNull(RecruitmentPool("default", RecruitmentPoolSnapshot("默认", "如鸢")).progress)
+        listOf(
+            """{"pool_id":"bad","name":"新池"}""",
+            """{"pool_id":"bad","name":"新池","progress":-1}""",
+            """{"pool_id":"bad","name":"新池","progress":1.5}""",
+            """{"pool_id":"bad","name":"新池","progress":"0"}""",
+            """{"pool_id":"bad","name":"新池","progress":1000000001}""",
+        ).forEach { input ->
+            assertEquals(422, assertThrows(RecruitmentApiException::class.java) { command("pool_create", input) }.status.value())
+        }
+        command("pool_create", """{"pool_id":"unknown","name":"未知进度","progress":null}""")
+        assertNull(state.pools.single { it.poolId == "unknown" }.progress)
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "event_create",
+                """{"pool_id":"unknown","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_A","pull_span":17}]}""",
+            )
+        }
+        command("pool_create", """{"pool_id":"zero","name":"确认从零开始","progress":0}""")
+        assertEquals(0L, state.pools.single { it.poolId == "zero" }.progress)
+        command("pool_create", """{"pool_id":"known","name":"已抽13次","progress":13}""")
+        assertEquals(13L, state.pools.single { it.poolId == "known" }.progress)
+    }
+
+    @Test fun `only this game absolute catalog agents are accepted and mapping preserves original snapshots`() {
+        fun operator(id: String, rarity: Int, game: String) = OperatorCatalogEntity(
+            operatorId = id, name = id, rarity = rarity, games = listOf(game), prof = emptyList(), subProf = emptyList(),
+            discs = emptyList(), starStones = emptyList(), catalogVersion = "test-v1",
+        )
+        every { operators.findByOperatorId("wrong-rarity") } returns operator("wrong-rarity", 3, "如鸢")
+        every { operators.findByOperatorId("wrong-game") } returns operator("wrong-game", 5, "代号鸢")
+        every { operators.findByOperatorId("valid") } returns operator("valid", 5, "如鸢")
+        every { operators.findByOperatorId("missing") } returns null
+        listOf("wrong-rarity", "wrong-game", "missing").forEach { id ->
+            assertEquals(
+                422,
+                assertThrows(RecruitmentApiException::class.java) {
+                    command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"$id","pull_span":17}]}""")
+                }.status.value(),
+            )
+        }
+        assertTrue(events.isEmpty())
+        historical()
+        val original = events.getValue("A").agentSnapshot
+        command("agent_map", """{"agent_id":"tmp_A","catalog_agent_id":"valid"}""")
+        assertEquals("valid", state.temporaryAgents.single { it.agentId == "tmp_A" }.mappedAgentId)
+        assertEquals("A", state.temporaryAgents.single { it.agentId == "tmp_A" }.name)
+        assertEquals(original, events.getValue("A").agentSnapshot)
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"valid-event","agent_id":"valid","pull_span":17}]}""",
+        )
+        assertEquals(5, events.getValue("valid-event").agentSnapshot.rarity)
+        assertEquals("test-v1", events.getValue("valid-event").agentSnapshot.catalogRevision)
+    }
+
+    @Test fun `deleting B31 changes 65 to 34 and undo restores same ID without touching C or progress`() {
+        historical()
+        assertEquals(65L, count())
+        command("progress_set", """{"pool_id":"p","progress":8}""")
+        command("event_delete", """{"event_id":"B"}""")
+        assertEquals(42L, count())
+        assertEquals(17L, events.getValue("C").pullSpan)
+        assertEquals(8L, state.pools.single().progress)
+        val deletedId = events.getValue("B").id
+        command("event_restore", """{"event_id":"B"}""")
+        assertEquals(deletedId, events.getValue("B").id)
+        assertEquals(73L, count())
+        command("event_delete", """{"event_id":"B"}""")
+        command("baseline_set", """{"baseline":1}""")
+        assertEquals(
+            409,
+            assertThrows(RecruitmentApiException::class.java) {
+                command("event_restore", """{"event_id":"B"}""")
+            }.status.value(),
+        )
+    }
+
+    @Test fun `current exact save consumes old progress and historical extraction preserves cumulative total`() {
+        command("baseline_set", """{"baseline":100}""")
+        command("progress_set", """{"pool_id":"p","progress":21}""")
+        command("event_create", """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_A","pull_span":27}]}""")
+        assertEquals(127L, count())
+        assertEquals(0L, state.pools.single().progress)
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","extract_from_baseline":true,"entries":[{"agent_id":"tmp_B","pull_span":31}]}""",
+        )
+        assertEquals(69L, state.baseline)
+        assertEquals(127L, count())
+        command("event_create", """{"pool_id":"p","mode":"current","tail_progress":null,"entries":[{"agent_id":"tmp_C","pull_span":17}]}""")
+        assertNull(state.pools.single().progress)
+        assertThrows(RecruitmentApiException::class.java) {
+            command("event_create", """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_C","pull_span":1}]}""")
+        }
+    }
+
+    @Test fun `unknown-position batch counts once and deleted node stays deleted across batch undo`() {
+        command(
+            "batch_create",
+            """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":null},{"event_id":"B","agent_id":"tmp_B","pull_span":null}]}""",
+        )
+        assertEquals(10L, count())
+        command("event_update", """{"event_id":"A","entry":{"agent_id":"tmp_A","pull_span":7}}""")
+        assertEquals(10L, count())
+        command("event_delete", """{"event_id":"A"}""")
+        command("event_update", """{"event_id":"B","entry":{"agent_id":"tmp_B","pull_span":10}}""")
+        assertEquals(10L, count())
+        command("batch_delete", """{"batch_id":"b","confirm_total_pull_count":10}""")
+        assertEquals(0L, count())
+        command("batch_restore", """{"batch_id":"b"}""")
+        assertEquals(10L, count())
+        assertTrue(events.getValue("A").deletedAt != null)
+        assertNull(events.getValue("B").deletedAt)
+    }
+
+    @Test fun `reordering changes only ordering and unknown historical span remains unknown`() {
+        historical()
+        command("event_reorder", """{"pool_id":"p","event_ids":["C","A","B"]}""")
+        assertEquals(65L, count())
+        assertEquals(listOf("C", "A", "B"), events.values.sortedBy { it.sortOrder }.map { it.eventId })
+        command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"tmp_A","pull_span":null}]}""")
+        assertEquals(65L, count())
+        assertNull(events.values.last().pullSpan)
+    }
+
+    @Test fun `validation rejects null primitive unknown fields fractions negative counts and duplicate stable IDs`() {
+        listOf("""{"baseline":null}""", """{"baseline":1,"extra":true}""", """{"baseline":1.2}""", """{"baseline":-1}""").forEach {
+            assertEquals(422, assertThrows(RecruitmentApiException::class.java) { command("baseline_set", it) }.status.value())
+        }
+        historical()
+        assertEquals(
+            409,
+            assertThrows(RecruitmentApiException::class.java) {
+                command(
+                    "event_create",
+                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17}]}""",
+                )
+            }.status.value(),
+        )
+        assertThrows(RecruitmentApiException::class.java) { command("baseline_set", """{"baseline":1000000001}""") }
+    }
+
+    @Test fun `empty repeated reads return revision zero and perform only owner scoped reads`() {
+        val accountService = mockk<SubAccountService>()
+        val accounts = mockk<SubAccountRepository>()
+        val publisher = mockk<AccountEventService>()
+        val tx = TransactionTemplate(object : PlatformTransactionManager {
+            override fun getTransaction(definition: TransactionDefinition?) = SimpleTransactionStatus()
+            override fun commit(status: TransactionStatus) = Unit
+            override fun rollback(status: TransactionStatus) = Unit
+        })
+        val readStore = mockk<RecruitmentRepository>()
+        every { accountService.requireAccount("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test")
+        every { readStore.archive("u", "a") } returns null
+        every { readStore.totals("u", "a") } returns RecruitmentTotals(0, 0, 0, 0, 0)
+        every { readStore.poolTotals("u", "a") } returns emptyMap()
+        val service = RecruitmentService(readStore, accountService, accounts, mutation, publisher, mapper, tx)
+        repeat(3) {
+            assertEquals(0L, service.archive("u", "a").archiveRevision)
+            assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
+        }
+        verify(exactly = 6) { accountService.requireAccount("u", "a") }
+        verify(exactly = 6) { readStore.archive("u", "a") }
+        verify(exactly = 6) { readStore.totals("u", "a") }
+        verify(exactly = 6) { readStore.poolTotals("u", "a") }
+        confirmVerified(readStore, accountService)
+        verify {
+            publisher wasNot io.mockk.Called
+            accounts wasNot io.mockk.Called
+        }
+    }
+
+    @Test fun `successful old revision retry returns cached result before checking revision and cannot serve foreign owner`() {
+        val accountService = mockk<SubAccountService>()
+        val accounts = mockk<SubAccountRepository>()
+        val publisher = mockk<AccountEventService>()
+        val tx = mockk<TransactionTemplate>()
+        val service = RecruitmentService(store, accountService, accounts, mutation, publisher, mapper, tx)
+        val request = RecruitmentCommandRequest("a", 0, "r", "baseline_set", mapper.readTree("""{"baseline":5}"""))
+        every { accountService.requireAccount("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test")
+        every { store.request("u", "a", "r") } returns
+            RecruitmentRequestRecord("u:a:r", "u", "a", "r", service.hash(mapper.valueToTree(request)), 1)
+        assertEquals(1L, service.command("u", request).archiveRevision)
+        assertEquals(
+            409,
+            assertThrows(RecruitmentApiException::class.java) {
+                service.command("u", request.copy(data = mapper.readTree("""{"baseline":6}""")))
+            }.status.value(),
+        )
+        every { accountService.requireAccount("foreign", "a") } throws
+            InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
+        assertThrows(InventoryApiException::class.java) { service.command("foreign", request) }
+        verify(exactly = 0) { store.request("foreign", any(), any()) }
+        verify {
+            tx wasNot io.mockk.Called
+            publisher wasNot io.mockk.Called
+            accounts wasNot io.mockk.Called
+        }
+    }
+}

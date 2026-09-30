@@ -11,6 +11,7 @@ import com.lhs.share.hub.repository.OperatorStaminaScheduleRepositoryImpl
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepositoryImpl
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.OperatorTrainingWorkspace
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
@@ -42,7 +43,10 @@ class OperatorPlannerMongoTest {
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val factory = MongoRepositoryFactory(template)
-    private val accounts = factory.getRepository(SubAccountRepository::class.java)
+    private val accounts = factory.getRepository(
+        SubAccountRepository::class.java,
+        org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments.just(SubAccountRepositoryImpl(template)),
+    )
     private val workspaces = factory.getRepository(
         OperatorTrainingWorkspaceRepository::class.java,
         RepositoryFragments.just(OperatorTrainingWorkspaceRepositoryImpl(template)),

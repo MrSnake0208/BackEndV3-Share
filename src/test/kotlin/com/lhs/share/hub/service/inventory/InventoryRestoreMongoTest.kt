@@ -8,6 +8,7 @@ import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.InventoryCurrent
 import com.lhs.share.hub.repository.entity.InventoryDeletedRecord
 import com.lhs.share.hub.repository.entity.InventoryRecord
@@ -39,7 +40,10 @@ class InventoryRestoreMongoTest {
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val factory = MongoRepositoryFactory(template)
-    private val accounts = factory.getRepository(SubAccountRepository::class.java)
+    private val accounts = factory.getRepository(
+        SubAccountRepository::class.java,
+        org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments.just(SubAccountRepositoryImpl(template)),
+    )
     private val current = factory.getRepository(InventoryCurrentRepository::class.java)
     private val records = factory.getRepository(InventoryRecordRepository::class.java)
     private val deleted = factory.getRepository(InventoryDeletedRecordRepository::class.java)
