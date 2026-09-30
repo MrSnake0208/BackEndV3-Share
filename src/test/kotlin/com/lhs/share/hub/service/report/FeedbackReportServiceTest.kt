@@ -766,7 +766,7 @@ class FeedbackReportServiceTest {
                 userId = "user",
                 kind = "FEEDBACK_STATUS_UPDATED",
                 title = any(),
-                body = any(),
+                body = "反馈摘要：${ticket.content.take(100)}\n管理员将你的反馈状态更新为: 已忽略",
                 refType = "FEEDBACK",
                 refId = "rpt_1",
             )
@@ -791,7 +791,7 @@ class FeedbackReportServiceTest {
                 userId = "user",
                 kind = "FEEDBACK_STATUS_UPDATED",
                 title = any(),
-                body = any(),
+                body = "反馈摘要：${ticket.content.take(100)}\n管理员将你的反馈状态更新为: 已处理",
                 refType = "FEEDBACK",
                 refId = "rpt_1",
             )

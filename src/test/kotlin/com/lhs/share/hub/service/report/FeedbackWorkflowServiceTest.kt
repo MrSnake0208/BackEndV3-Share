@@ -1,12 +1,14 @@
 package com.lhs.share.hub.service.report
 
 import com.lhs.share.controller.response.ApiResultException
+import com.lhs.share.controller.response.user.MaaUserInfo
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
+import com.lhs.share.hub.service.HubUserInfoService
 import com.lhs.share.hub.service.notification.NotificationService
 import io.mockk.every
 import io.mockk.mockk
@@ -16,6 +18,8 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.util.Optional
 
 class FeedbackWorkflowServiceTest {
@@ -25,11 +29,18 @@ class FeedbackWorkflowServiceTest {
     private val access = mockk<FeedbackAccessService>(relaxed = true)
     private val notifications = mockk<NotificationService>(relaxed = true)
     private val categories = mockk<FeedbackCategoryService>()
-    private val service = FeedbackWorkflowService(tickets, query, events, access, notifications, categories)
+    private val userInfo = mockk<HubUserInfoService>()
+    private val service = FeedbackWorkflowService(tickets, query, events, access, notifications, categories, userInfo)
 
     init {
         every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.keys() } returns FeedbackArea.all
+        every { categories.label(any()) } returns null
+        every { userInfo.get(any()) } returns null
+        every { userInfo.get("alice") } returns MaaUserInfo("alice", "小王")
+        every { userInfo.get("bob") } returns MaaUserInfo("bob", "小李")
+        every { userInfo.get("root") } returns MaaUserInfo("root", "管理员")
+        every { userInfo.get("developer") } returns MaaUserInfo("developer", "小周")
     }
 
     private fun ticket(id: String = "rpt_1") = FeedbackTicket(
@@ -63,6 +74,7 @@ class FeedbackWorkflowServiceTest {
 
         assertEquals(409, error.statusCode)
         verify(exactly = 0) { events.save(any()) }
+        verify(exactly = 0) { notifications.create(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -180,5 +192,130 @@ class FeedbackWorkflowServiceTest {
             }.statusCode,
         )
         verify(exactly = 0) { query.advanceTeamRead(any(), any()) }
+    }
+
+    @ParameterizedTest
+    @CsvSource("alice,小王转交了,2", "bob,小李接手了,2", "root,管理员转交了,3")
+    fun `转交和接手向交接双方及操作人发送当次关系和摘要`(actor: String, action: String, count: Int) {
+        val old = ticket().copy(
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+            title = "签到问题",
+            content = "奖励未到账",
+        )
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.operatorAreas("bob") } returns setOf(FeedbackArea.OPERATOR)
+        every { access.canControlTicket(actor, old) } returns (actor != "bob")
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        service.assign(actor, "rpt_1", "bob", "请核查奖励")
+
+        val title = "$action「签到问题」（小王 → 小李）"
+        val body = "反馈摘要：奖励未到账\n交接说明：请核查奖励"
+        for (recipient in setOf("alice", "bob", actor)) {
+            verify(exactly = 1) { notifications.create(recipient, "FEEDBACK_ASSIGNED", title, body, "FEEDBACK", "rpt_1") }
+        }
+        verify(exactly = count) { notifications.create(any(), any(), any(), any(), any(), any()) }
+        verify { events.save(match { it.note == "$title\n请核查奖励" && it.actorUserId == actor }) }
+    }
+
+    @Test
+    fun `旧反馈无标题和目标昵称时保留正文摘要及用户标识`() {
+        val old = ticket().copy(
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+            content = "奖励未到账",
+        )
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.operatorAreas("unknown") } returns setOf(FeedbackArea.OPERATOR)
+        every { access.canControlTicket("alice", old) } returns true
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        service.assign("alice", "rpt_1", "unknown", "核查")
+
+        verify {
+            notifications.create(
+                "unknown",
+                "FEEDBACK_ASSIGNED",
+                "小王转交了「奖励未到账」（小王 → unknown）",
+                "反馈摘要：奖励未到账\n交接说明：核查",
+                "FEEDBACK",
+                "rpt_1",
+            )
+        }
+    }
+
+    @Test
+    fun `转程序通知明确板块和人员并对操作人及双岗位负责人去重`() {
+        val old = ticket().copy(
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+            title = "签到问题",
+            content = "奖励未到账",
+        )
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("root", old) } returns true
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.MAAYUAN)
+        every { access.developerUserIds(FeedbackArea.MAAYUAN) } returns linkedSetOf("developer", "alice")
+        every { categories.label(FeedbackArea.MAAYUAN) } returns "麻圆"
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        service.handoff("root", "rpt_1", FeedbackArea.MAAYUAN, "核查程序")
+
+        val title = "管理员将「签到问题」转交给麻圆程序（小周、小王）"
+        for (recipient in setOf("developer", "alice", "root")) {
+            verify(exactly = 1) {
+                notifications.create(recipient, "FEEDBACK_DEV_HANDOFF", title, "反馈摘要：奖励未到账\n交接说明：核查程序", "FEEDBACK", "rpt_1")
+            }
+        }
+        verify(exactly = 3) { notifications.create(any(), any(), any(), any(), any(), any()) }
+        verify { events.save(match { it.note == "$title\n核查程序" }) }
+    }
+
+    @Test
+    fun `无程序接收人时不保存交接或创建通知`() {
+        val old = ticket().copy(workflowStage = FeedbackWorkflow.PROCESSING, operatorAssigneeUserId = "alice")
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("alice", old) } returns true
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.OPERATOR)
+        every { access.developerUserIds(FeedbackArea.OPERATOR) } returns emptySet()
+
+        assertEquals(
+            409,
+            assertThrows(ApiResultException::class.java) {
+                service.handoff("alice", "rpt_1", FeedbackArea.OPERATOR, "核查")
+            }.statusCode,
+        )
+        verify(exactly = 0) { query.saveIfUnchanged(any(), any()) }
+        verify(exactly = 0) { notifications.create(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "RETURN,developer,小周将「签到问题」交回运营小王,2",
+        "WITHDRAW,alice,小王撤回了「签到问题」的程序交接（运营小王）,1",
+    )
+    fun `交回和撤回使用不同文案并给交接双方发送摘要`(mode: String, actor: String, title: String, count: Int) {
+        val old = ticket().copy(
+            workflowStage = FeedbackWorkflow.DEV_HANDOFF,
+            operatorAssigneeUserId = "alice",
+            title = "签到问题",
+            content = "奖励未到账",
+        )
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.developerAreas("developer") } returns setOf(FeedbackArea.OPERATOR)
+        every { access.canControlTicket("alice", old) } returns true
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+
+        service.returnToOperator(actor, "rpt_1", "处理说明", mode)
+
+        for (recipient in setOf(actor, "alice")) {
+            verify(exactly = 1) {
+                notifications.create(recipient, "FEEDBACK_DEV_RETURN", title, "反馈摘要：奖励未到账\n交接说明：处理说明", "FEEDBACK", "rpt_1")
+            }
+        }
+        verify(exactly = count) { notifications.create(any(), any(), any(), any(), any(), any()) }
+        verify { notifications.clearFeedbackKinds("rpt_1", setOf("FEEDBACK_DEV_HANDOFF")) }
+        verify { events.save(match { it.action == mode && it.note == "$title\n处理说明" }) }
     }
 }

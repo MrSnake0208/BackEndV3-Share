@@ -654,7 +654,7 @@ class FeedbackReportService(
                 userId = ticket.reporterUserId,
                 kind = "FEEDBACK_STATUS_UPDATED",
                 title = "你的反馈状态已更新",
-                body = "管理员将你的反馈状态更新为: $statusLabel",
+                body = "反馈摘要：${ticket.content.take(100)}\n管理员将你的反馈状态更新为: $statusLabel",
                 refType = "FEEDBACK",
                 refId = ticketId,
             )
