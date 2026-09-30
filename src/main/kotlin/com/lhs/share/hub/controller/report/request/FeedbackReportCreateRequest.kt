@@ -10,7 +10,8 @@ import jakarta.validation.constraints.Size
  * @property type 反馈类型: BUG / FEATURE / CONTENT / ACCOUNT / REPORT / OTHER
  * @property category 反馈归属板块: INVENTORY / OPERATOR / LEDGER / PLAZA / ACCOUNT / UI / STAR / MAAYUAN / OTHER
  * @property area 旧版兼容字段；新请求使用 category 表示板块
- * @property title 用户提交的原始标题(可选,最多 120 字符);仅用于提交前相似提示
+ * @property title 用户提交的原始标题(公开授权时必填,最多 120 字符)
+ * @property publicConsent 用户是否允许管理员整理发布到反馈广场,默认 false
  * @property content 正文(1..1000 字符)
  * @property mediaIds 关联媒体 id 列表(最多 3 个)
  * @property clientInfoConsent 是否同意附带浏览器信息
@@ -30,4 +31,5 @@ data class FeedbackReportCreateRequest(
     val clientInfoConsent: Boolean = false,
     @field:Valid
     val diagnostics: FeedbackDiagnosticsRequest? = null,
+    val publicConsent: Boolean = false,
 )

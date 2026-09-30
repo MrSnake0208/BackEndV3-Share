@@ -8,6 +8,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.handler.GlobalExceptionHandler
 import com.lhs.share.hub.controller.report.FeedbackReportController
+import com.lhs.share.hub.controller.report.request.FeedbackReportCreateRequest
 import com.lhs.share.hub.controller.report.response.FeedbackReportListItem
 import com.lhs.share.hub.controller.report.response.FeedbackReportListResponse
 import com.lhs.share.hub.controller.report.response.FeedbackReportResponse
@@ -49,6 +50,35 @@ class FeedbackReportControllerContractTest {
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .build()
         every { helper.requireUserId() } returns "u1"
+    }
+
+    @Test
+    fun `public_consent snake case binds independently and missing consent defaults to false`() {
+        every { reportService.create("u1", any()) } answers {
+            response().copy(publicConsent = secondArg<FeedbackReportCreateRequest>().publicConsent)
+        }
+
+        for (consent in listOf(false, true)) {
+            mockMvc.perform(
+                post("/v1/reports")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """{"type":"BUG","category":"OPERATOR","content":"正文","title":"标题",
+                            "public_consent":$consent,"client_info_consent":false}""",
+                    ),
+            )
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.data.public_consent").value(consent))
+            verify { reportService.create("u1", match { it.publicConsent == consent && !it.clientInfoConsent }) }
+        }
+
+        mockMvc.perform(
+            post("/v1/reports").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"type":"BUG","category":"OPERATOR","content":"私下沟通"}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.public_consent").value(false))
+        verify { reportService.create("u1", match { !it.publicConsent && it.title == null }) }
     }
 
     @Test

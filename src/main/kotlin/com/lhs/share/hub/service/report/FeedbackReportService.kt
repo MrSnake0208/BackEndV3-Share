@@ -176,6 +176,10 @@ class FeedbackReportService(
      */
     fun create(userId: String, request: FeedbackReportCreateRequest): FeedbackReportResponse {
         val fields = normalizeCreateFields(request)
+        val title = request.title?.trim()?.takeIf { it.isNotEmpty() }
+        if (request.publicConsent && title == null) {
+            throw ApiResultException(400, "允许发布到反馈广场时请填写标题")
+        }
 
         // 校验 media_ids 归属
         val mediaAssets = validateMediaIds(userId, request.mediaIds)
@@ -216,7 +220,8 @@ class FeedbackReportService(
             teamReadReporterIndex = -1,
             reporterUserId = userId,
             content = request.content,
-            title = request.title?.trim()?.takeIf { it.isNotEmpty() },
+            title = title,
+            publicConsent = request.publicConsent,
             visibility = FeedbackVisibility.PRIVATE,
             clientInfoConsent = request.clientInfoConsent,
             clientInfo = clientInfo,
@@ -904,6 +909,7 @@ class FeedbackReportService(
             needsReply = adminMode && FeedbackWorkflow.needsReply(ticket),
             content = ticket.content,
             title = ticket.title,
+            publicConsent = ticket.publicConsent,
             visibility = FeedbackVisibility.normalize(ticket.visibility),
             publicTitle = ticket.publicTitle,
             publicSummary = ticket.publicSummary,

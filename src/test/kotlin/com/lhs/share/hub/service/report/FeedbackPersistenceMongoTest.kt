@@ -72,6 +72,22 @@ class FeedbackPersistenceMongoTest {
     }
 
     @Test
+    fun `公开授权往返保存且旧文档缺失字段默认为未授权`() {
+        mongo.insert(ticket("consented").copy(publicConsent = true))
+        mongo.insert(ticket("private"))
+        val legacy = Document()
+        mongo.converter.write(ticket("legacy"), legacy)
+        legacy.remove("publicConsent")
+        mongo.getCollection("feedback_tickets").insertOne(legacy)
+
+        assertTrue(mongo.findById("consented", FeedbackTicket::class.java)!!.publicConsent)
+        assertFalse(mongo.findById("private", FeedbackTicket::class.java)!!.publicConsent)
+        assertFalse(mongo.findById("legacy", FeedbackTicket::class.java)!!.publicConsent)
+        assertTrue(service.getById("reporter", "consented").publicConsent)
+        assertFalse(service.getById("reporter", "legacy").publicConsent)
+    }
+
+    @Test
     fun `OTHER grant does not expose category-only tickets from another board`() {
         mongo.insert(ticket("operator").copy(area = null))
         mongo.insert(ticket("other").copy(type = "FEEDBACK", category = "BUG", area = null))

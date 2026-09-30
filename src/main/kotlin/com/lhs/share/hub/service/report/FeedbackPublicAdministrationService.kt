@@ -42,6 +42,9 @@ class FeedbackPublicAdministrationService(
         val ticket = requireTicket(ticketId)
         requireManage(adminUserId, ticket)
         requireIndependent(ticket)
+        if (!ticket.publicConsent) {
+            throw ApiResultException(403, "用户未授权发布到反馈广场")
+        }
         val title = request.publicTitle.trim()
         if (title.isEmpty()) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "公开标题不能为空")

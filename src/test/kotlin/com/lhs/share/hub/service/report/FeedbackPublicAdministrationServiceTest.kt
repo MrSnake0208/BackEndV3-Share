@@ -104,7 +104,7 @@ class FeedbackPublicAdministrationServiceTest {
 
     @Test
     fun `非管理员发布返回 403`() {
-        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1").copy(publicConsent = true))
         every { accessService.canManage(any(), any()) } returns false
 
         val error = assertThrows(ApiResultException::class.java) {
@@ -112,12 +112,29 @@ class FeedbackPublicAdministrationServiceTest {
         }
 
         assertEquals(403, error.statusCode)
+        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `管理员不能发布或重新发布未授权的反馈且不会写入`() {
+        allowManage()
+        for (visibility in listOf(FeedbackVisibility.PRIVATE, FeedbackVisibility.PUBLIC)) {
+            every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1", visibility = visibility))
+
+            val error = assertThrows(ApiResultException::class.java) {
+                service.publish("admin", "rpt_1", FeedbackPublishRequest(publicTitle = "公开标题"))
+            }
+
+            assertEquals(403, error.statusCode)
+            assertEquals("用户未授权发布到反馈广场", error.message)
+        }
+        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `发布要求公开标题非空`() {
         allowManage()
-        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1"))
+        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1").copy(publicConsent = true))
 
         val error = assertThrows(ApiResultException::class.java) {
             service.publish("admin", "rpt_1", FeedbackPublishRequest(publicTitle = "   "))
@@ -130,7 +147,8 @@ class FeedbackPublicAdministrationServiceTest {
     fun `发布写入公开字段并保留首次发布时间`() {
         allowManage()
         val published = Instant.parse("2026-09-01T00:00:00Z")
-        every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1", publishedAt = published))
+        every { ticketRepository.findById("rpt_1") } returns
+            Optional.of(ticket("rpt_1", publishedAt = published).copy(publicConsent = true))
         every { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any()) } returns ticket(
             "rpt_1",
             visibility = FeedbackVisibility.PUBLIC,
