@@ -4,8 +4,13 @@ set -euo pipefail
 : "${BACKEND_ROOT:?BACKEND_ROOT is required}"
 : "${RELEASE_VERSION:?RELEASE_VERSION is required}"
 : "${RELEASE_COMMIT:?RELEASE_COMMIT is required}"
-: "${PRODUCT_VERSION:?PRODUCT_VERSION is required}"
-: "${BACKEND_URL:?BACKEND_URL is required}"
+DEPLOY_PHASE="${DEPLOY_PHASE:-release}"
+case "$DEPLOY_PHASE" in prepare|release) ;; *) echo "Invalid DEPLOY_PHASE" >&2; exit 1 ;; esac
+if [ "$DEPLOY_PHASE" = release ]; then
+  : "${PRODUCT_VERSION:?PRODUCT_VERSION is required}"
+  : "${BACKEND_URL:?BACKEND_URL is required}"
+fi
+[[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_COMMIT must be a full SHA" >&2; exit 1; }
 
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 DRAIN_SECONDS="${DRAIN_SECONDS:-45}"
@@ -16,10 +21,9 @@ NGINX="${NGINX:-$(command -v nginx 2>/dev/null || true)}"
 SYSTEMCTL="${SYSTEMCTL:-/usr/bin/systemctl}"
 NGINX="${NGINX:-/usr/sbin/nginx}"
 
-case "$RELEASE_VERSION" in
-  v[0-9A-Za-z._-]*) ;;
-  *) echo "RELEASE_VERSION must be an immutable v* release tag; got '$RELEASE_VERSION'" >&2; exit 1 ;;
-esac
+[[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] || {
+  echo "RELEASE_VERSION must be a v-prefixed semantic version" >&2; exit 1;
+}
 case "$KEEP_RELEASES" in ''|*[!0-9]*) KEEP_RELEASES=5 ;; esac
 case "$DRAIN_SECONDS" in ''|*[!0-9]*) DRAIN_SECONDS=45 ;; esac
 case "$LEGACY_CAPTURE_DRAIN_SECONDS" in ''|*[!0-9]*) LEGACY_CAPTURE_DRAIN_SECONDS=2100 ;; esac
@@ -32,94 +36,93 @@ STATE_DIR="$BACKEND_ROOT/state"
 ACTIVE_SLOT_FILE="$STATE_DIR/active-slot"
 NGINX_ACTIVE_FILE="$BACKEND_ROOT/nginx/active.conf"
 
-mkdir -p "$RELEASES_DIR" "$SLOTS_DIR" "$STATE_DIR" "$BACKEND_ROOT/nginx" "$BACKEND_ROOT/logs"
+mkdir -p "$RELEASES_DIR"
+[ -d "$SOURCE_DIR/.git" ] || { echo "Source cache is missing: $SOURCE_DIR" >&2; exit 1; }
+for tool in git java javac python3; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "$tool is required on the deployment server" >&2; exit 1; }
+done
 
-for tool in git java javac curl python3; do
-  command -v "$tool" >/dev/null 2>&1 || {
-    echo "$tool is required on the deployment server" >&2
+if [ "$DEPLOY_PHASE" = release ]; then
+  mkdir -p "$SLOTS_DIR" "$STATE_DIR" "$BACKEND_ROOT/nginx" "$BACKEND_ROOT/logs"
+
+  command -v curl >/dev/null 2>&1 || { echo "curl is required on the deployment server" >&2; exit 1; }
+  [ -x "$SYSTEMCTL" ] || { echo "systemctl not found at $SYSTEMCTL" >&2; exit 1; }
+  [ -x "$NGINX" ] || { echo "nginx not found at $NGINX" >&2; exit 1; }
+  [ -f "$BACKEND_ROOT/shared/backend.env" ] || {
+    echo "Missing $BACKEND_ROOT/shared/backend.env" >&2
     exit 1
   }
-done
-[ -x "$SYSTEMCTL" ] || { echo "systemctl not found at $SYSTEMCTL" >&2; exit 1; }
-[ -x "$NGINX" ] || { echo "nginx not found at $NGINX" >&2; exit 1; }
-[ -f "$BACKEND_ROOT/shared/backend.env" ] || {
-  echo "Missing $BACKEND_ROOT/shared/backend.env" >&2
-  exit 1
-}
-[ -d "$SOURCE_DIR/.git" ] || {
-  echo "Source cache is missing: $SOURCE_DIR" >&2
-  exit 1
-}
-[ -f "$NGINX_ACTIVE_FILE" ] || {
-  echo "Blue/green bootstrap has not created $NGINX_ACTIVE_FILE" >&2
-  exit 1
-}
+  [ -f "$NGINX_ACTIVE_FILE" ] || {
+    echo "Blue/green bootstrap has not created $NGINX_ACTIVE_FILE" >&2
+    exit 1
+  }
 
-active_slot="$(tr -d '[:space:]' < "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
-case "$active_slot" in
-  blue|green|legacy) ;;
-  '') active_slot=legacy ;;
-  *) echo "Invalid active slot: $active_slot" >&2; exit 1 ;;
-esac
-
-slot_port() {
-  case "$1" in
-    blue) echo 8080 ;;
-    green) echo 8081 ;;
-    *) return 1 ;;
+  active_slot="$(tr -d '[:space:]' < "$ACTIVE_SLOT_FILE" 2>/dev/null || true)"
+  case "$active_slot" in
+    blue|green|legacy) ;;
+    '') active_slot=legacy ;;
+    *) echo "Invalid active slot: $active_slot" >&2; exit 1 ;;
   esac
-}
 
-slot_management_port() {
-  case "$1" in
-    blue) echo 18080 ;;
-    green) echo 18081 ;;
-    *) return 1 ;;
-  esac
-}
+  slot_port() {
+    case "$1" in
+      blue) echo 8080 ;;
+      green) echo 8081 ;;
+      *) return 1 ;;
+    esac
+  }
 
-read_version() {
-  python3 -c 'import json,sys; data=json.load(sys.stdin).get("data") or {}; print((data.get("backend_version") or "") + " " + (data.get("backend_commit") or ""))'
-}
+  slot_management_port() {
+    case "$1" in
+      blue) echo 18080 ;;
+      green) echo 18081 ;;
+      *) return 1 ;;
+    esac
+  }
 
-version_payload_matches() {
-  local payload="$1"
-  local reported_version reported_commit
-  read -r reported_version reported_commit <<<"$(printf '%s' "$payload" | read_version 2>/dev/null || true)"
-  [ "$reported_version" = "$RELEASE_VERSION" ] || return 1
-  [ -n "$reported_commit" ] || return 1
-  case "$RELEASE_COMMIT" in
-    "$reported_commit"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+  read_version() {
+    python3 -c 'import json,sys; data=json.load(sys.stdin).get("data") or {}; print((data.get("backend_version") or "") + " " + (data.get("backend_commit") or ""))'
+  }
 
-if [ "$active_slot" = "blue" ] || [ "$active_slot" = "green" ]; then
-  active_port="$(slot_port "$active_slot")"
-  active_payload="$(curl -fsS --max-time 5 "http://127.0.0.1:$active_port/version" 2>/dev/null || true)"
-  if [ -n "$active_payload" ] && version_payload_matches "$active_payload"; then
-    public_payload="$(curl -fsS --max-time 10 -H 'Cache-Control: no-cache' "${BACKEND_URL%/}/version?deploy=$RELEASE_COMMIT" 2>/dev/null || true)"
-    if [ -n "$public_payload" ] && version_payload_matches "$public_payload"; then
-      echo "$RELEASE_VERSION is already active on $active_slot; nothing to deploy."
-      exit 0
+  version_payload_matches() {
+    local payload="$1"
+    local reported_version reported_commit
+    read -r reported_version reported_commit <<<"$(printf '%s' "$payload" | read_version 2>/dev/null || true)"
+    [ "$reported_version" = "$RELEASE_VERSION" ] || return 1
+    [ -n "$reported_commit" ] || return 1
+    case "$RELEASE_COMMIT" in
+      "$reported_commit"*) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+  if [ "$active_slot" = "blue" ] || [ "$active_slot" = "green" ]; then
+    active_port="$(slot_port "$active_slot")"
+    active_payload="$(curl -fsS --max-time 5 "http://127.0.0.1:$active_port/version" 2>/dev/null || true)"
+    if [ -n "$active_payload" ] && version_payload_matches "$active_payload"; then
+      public_payload="$(curl -fsS --max-time 10 -H 'Cache-Control: no-cache' "${BACKEND_URL%/}/version?deploy=$RELEASE_COMMIT" 2>/dev/null || true)"
+      if [ -n "$public_payload" ] && version_payload_matches "$public_payload"; then
+        echo "$RELEASE_VERSION is already active on $active_slot; nothing to deploy."
+        exit 0
+      fi
     fi
   fi
-fi
 
-if [ "$active_slot" = "blue" ]; then
-  target_slot=green
-else
-  target_slot=blue
-  if [ "$active_slot" = "legacy" ]; then
-    # The legacy service already occupies 8080; first migration always stages Green on 8081.
+  if [ "$active_slot" = "blue" ]; then
     target_slot=green
+  else
+    target_slot=blue
+    if [ "$active_slot" = "legacy" ]; then
+      # The legacy service already occupies 8080; first migration always stages Green on 8081.
+      target_slot=green
+    fi
   fi
-fi
 
-target_port="$(slot_port "$target_slot")"
-target_management_port="$(slot_management_port "$target_slot")"
-echo "Active slot: $active_slot"
-echo "Target slot: $target_slot (app=$target_port management=$target_management_port)"
+  target_port="$(slot_port "$target_slot")"
+  target_management_port="$(slot_management_port "$target_slot")"
+  echo "Active slot: $active_slot"
+  echo "Target slot: $target_slot (app=$target_port management=$target_management_port)"
+fi
 
 meta_file="$RELEASE_DIR/deploy-meta.json"
 reuse_release=0
@@ -133,6 +136,14 @@ if [ -f "$meta_file" ] && [ -f "$RELEASE_DIR/app.jar" ]; then
 fi
 
 if [ "$reuse_release" -ne 1 ]; then
+  # Both slots may reference rollback artifacts, including the stopped slot.
+  for slot in blue green; do
+    if [ -f "$SLOTS_DIR/$slot.env" ] && grep -qFx "YUANHUB_JAR=$RELEASE_DIR/app.jar" "$SLOTS_DIR/$slot.env"; then
+      echo "Refusing to replace release referenced by $slot: $RELEASE_DIR" >&2
+      exit 1
+    fi
+  done
+  build_started="$(date +%s)"
   cd "$SOURCE_DIR"
   actual_commit="$(git rev-parse HEAD)"
   [ "$actual_commit" = "$RELEASE_COMMIT" ] || {
@@ -182,6 +193,12 @@ with open(path, "w", encoding="utf-8") as fh:
 PY
   rm -rf "$RELEASE_DIR"
   mv "$stage_dir" "$RELEASE_DIR"
+  echo "Backend build seconds: $(( $(date +%s) - build_started ))"
+fi
+
+if [ "$DEPLOY_PHASE" = prepare ]; then
+  echo "Prepared $RELEASE_VERSION ($RELEASE_COMMIT); slots and upstream are unchanged."
+  exit 0
 fi
 
 slot_env_tmp="$SLOTS_DIR/.$target_slot.env.tmp"
