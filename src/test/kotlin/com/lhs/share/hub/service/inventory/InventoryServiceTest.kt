@@ -37,6 +37,8 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.transaction.PlatformTransactionManager
@@ -434,10 +436,19 @@ class InventoryServiceTest {
     @Test
     fun `new agent inventory rejects entries outside the account game before writing any record`() {
         accounts["u1" to "main"] = accounts.getValue("u1" to "main").copy(game = "如鸢")
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", "如鸢") } returns false
         every { catalogService.agentMatchesGame("char_125_zhaoyun", "如鸢") } returns false
         val request = document(
             reward("item-reward", "2026-08-16T10:00:00Z", "baijinbi", 1),
-            agentSnapshot("wrong-game", "2026-08-16T11:00:00Z", "listed", "main", entry("char_125_zhaoyun", 2)),
+            agentSnapshot(
+                "wrong-game",
+                "2026-08-16T11:00:00Z",
+                "listed",
+                "main",
+                entry("char_038_luxun", 4),
+                entry("char_100_zhouzhong", 0),
+                entry("char_125_zhaoyun", 2),
+            ),
         )
 
         val error = assertThrows(InventoryApiException::class.java) { service.import("u1", request) }
@@ -446,6 +457,210 @@ class InventoryServiceTest {
         assertEquals("agent_game_mismatch", error.code)
         assertTrue(records.isEmpty())
         assertTrue(currents.isEmpty())
+        assertTrue(revisions.isEmpty())
+        verify(exactly = 0) { recordRepository.save(any()) }
+        verify(exactly = 0) { currentRepository.save(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["full", "listed"])
+    fun `mixed agent snapshots ignore cross game zeros preserve originals and clear supported zeros`(scope: String) {
+        accounts["u1" to "main"] = accounts.getValue("u1" to "main").copy(game = "如鸢")
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", "如鸢") } returns false
+        service.import(
+            "u1",
+            document(
+                agentSnapshot(
+                    "before",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "main",
+                    entry("char_038_luxun", 9),
+                    entry("char_102_jianyong", 8),
+                ),
+            ),
+        )
+        val snapshot = agentSnapshot(
+            "mixed",
+            "2026-08-16T11:00:00Z",
+            scope,
+            "main",
+            entry("char_038_luxun", 4),
+            entry("char_102_jianyong", 0),
+            InventoryEntryRequest("char_100_zhouzhong", "周忠", 0),
+        )
+        val request = document(snapshot)
+        val result = if (scope == "full") service.import("u1", "main", request) else service.import("u1", request)
+
+        assertEquals(1, result.accepted)
+        assertEquals(listOf("已忽略如鸢不支持的零值密探：周忠"), result.warnings)
+        val current = currents.getValue(Triple("u1", "main", "agent"))
+        assertEquals(4, current.entries.getValue("char_038_luxun").count)
+        assertEquals(0, current.entries.getValue("char_102_jianyong").count)
+        assertTrue("char_100_zhouzhong" !in current.entries)
+        val original = records.getValue(Triple("u1", "main", "mixed"))
+        assertEquals(snapshot.entries.map { RecordEntry(it.id, it.name, it.count) }, original.entries)
+
+        // 已接收的原正文重传不再依赖当前目录；删除被忽略的原始 entry 仍属正文冲突。
+        every { catalogService.exists("agent", "char_100_zhouzhong") } returns false
+        assertEquals(1, service.import("u1", request).duplicates)
+        assertEquals(current, currents.getValue(Triple("u1", "main", "agent")))
+        assertEquals(2, revisions.getValue("u1" to "main").revision)
+        assertEquals(original, records.getValue(Triple("u1", "main", "mixed")))
+        val conflict = assertThrows(InventoryApiException::class.java) {
+            service.import("u1", document(snapshot.copy(entries = snapshot.entries.dropLast(1))))
+        }
+        assertEquals("record_conflict", conflict.code)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["full", "listed"])
+    fun `unknown zero agent still rejects the entire document`(scope: String) {
+        every { catalogService.exists("agent", "unknown") } returns false
+        every { catalogService.agentMatchesGame("unknown", any()) } returns false
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.import(
+                "u1",
+                document(
+                    reward("valid", "2026-08-16T10:00:00Z", "baijinbi", 1),
+                    agentSnapshot("unknown", "2026-08-16T11:00:00Z", scope, "main", entry("unknown", 0)),
+                ),
+            )
+        }
+
+        assertEquals(422, error.status.value())
+        assertEquals("unknown_entity_id", error.code)
+        assertTrue(records.isEmpty())
+        assertTrue(currents.isEmpty())
+        assertTrue(revisions.isEmpty())
+        verify(exactly = 0) { recordRepository.save(any()) }
+        verify(exactly = 0) { currentRepository.save(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = [0, 1])
+    fun `cross game reward deltas remain strictly rejected`(count: Long) {
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", any()) } returns false
+        val record = reward("reward", "2026-08-16T10:00:00Z", "char_100_zhouzhong", count).copy(entityType = "agent")
+
+        val error = assertThrows(InventoryApiException::class.java) { service.import("u1", document(record)) }
+
+        assertEquals(422, error.status.value())
+        assertEquals(if (count == 0L) "schema_validation_failed" else "agent_game_mismatch", error.code)
+        assertTrue(records.isEmpty())
+        assertTrue(currents.isEmpty())
+        assertTrue(revisions.isEmpty())
+    }
+
+    @Test
+    fun `fully ignored listed snapshot leaves stock baselines and revision unchanged`() {
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", any()) } returns false
+        service.import(
+            "u1",
+            document(agentSnapshot("before", "2026-08-16T10:00:00Z", "full", "main", entry("char_038_luxun", 9))),
+        )
+        val before = currents.getValue(Triple("u1", "main", "agent"))
+        val revision = revisions.getValue("u1" to "main")
+        val request = document(
+            agentSnapshot("ignored", "2026-08-16T11:00:00Z", "listed", "main", entry("char_100_zhouzhong", 0)),
+        )
+
+        val result = service.import("u1", request)
+
+        assertEquals(1, result.accepted)
+        assertEquals(1, result.historyOnly)
+        assertEquals(listOf("已忽略代号鸢不支持的零值密探：char_100_zhouzhong"), result.warnings)
+        assertEquals(before, currents.getValue(Triple("u1", "main", "agent")))
+        assertEquals(revision, revisions.getValue("u1" to "main"))
+        assertEquals("history_only", records.getValue(Triple("u1", "main", "ignored")).stockEffect)
+        assertEquals(1, service.import("u1", request).duplicates)
+        verify(exactly = 1) { currentRepository.save(any()) }
+    }
+
+    @Test
+    fun `fully ignored listed snapshot does not create current stock`() {
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", any()) } returns false
+
+        val result = service.import(
+            "u1",
+            document(agentSnapshot("ignored", "2026-08-16T10:00:00Z", "listed", "main", entry("char_100_zhouzhong", 0))),
+        )
+
+        assertEquals(1, result.historyOnly)
+        assertEquals(1, records.size)
+        assertTrue(currents.isEmpty())
+        assertTrue(revisions.isEmpty())
+        verify(exactly = 0) { currentRepository.save(any()) }
+    }
+
+    @Test
+    fun `fully ignored full snapshot clears older stock preserves newer listed stock and advances full baseline`() {
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", any()) } returns false
+        service.import(
+            "u1",
+            document(
+                agentSnapshot(
+                    "before",
+                    "2026-08-16T10:00:00Z",
+                    "full",
+                    "main",
+                    entry("char_038_luxun", 9),
+                    entry("char_102_jianyong", 8),
+                ),
+                agentSnapshot("newer", "2026-08-16T12:00:00Z", "listed", "main", entry("char_102_jianyong", 3)),
+            ),
+        )
+
+        val result = service.import(
+            "u1",
+            document(agentSnapshot("ignored", "2026-08-16T11:00:00Z", "full", "main", entry("char_100_zhouzhong", 0))),
+        )
+
+        assertEquals(1, result.accepted)
+        assertEquals(0, result.historyOnly)
+        val current = currents.getValue(Triple("u1", "main", "agent"))
+        assertEquals(setOf("char_102_jianyong"), current.entries.keys)
+        assertEquals(3, current.entries.getValue("char_102_jianyong").count)
+        assertEquals(Instant.parse("2026-08-16T12:00:00Z"), current.entries.getValue("char_102_jianyong").listedBaselineAt)
+        assertEquals(Instant.parse("2026-08-16T11:00:00Z"), current.fullBaselineAt)
+
+        val delayed = reward("delayed", "2026-08-16T10:30:00Z", "char_038_luxun", 2).copy(entityType = "agent")
+        assertEquals(1, service.import("u1", document(delayed)).historyOnly)
+        assertEquals(current, currents.getValue(Triple("u1", "main", "agent")))
+        val older = agentSnapshot("older", "2026-08-16T09:00:00Z", "full", "main", entry("char_100_zhouzhong", 0))
+        assertEquals(1, service.import("u1", document(older)).superseded)
+        assertEquals(current, currents.getValue(Triple("u1", "main", "agent")))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["full", "listed"])
+    fun `delete and restore replay filters zero padding while preserving original snapshots`(scope: String) {
+        every { catalogService.agentMatchesGame("char_100_zhouzhong", any()) } returns false
+        val snapshot = agentSnapshot(
+            "mixed",
+            "2026-08-16T10:00:00Z",
+            scope,
+            "main",
+            entry("char_038_luxun", 4),
+            entry("char_100_zhouzhong", 0),
+        )
+        val reward = reward("later", "2026-08-16T11:00:00Z", "char_038_luxun", 2).copy(entityType = "agent")
+        service.import("u1", document(snapshot, reward))
+        val original = records.getValue(Triple("u1", "main", "mixed"))
+        // 新记录的未知 ID 由预检拒绝；已接收的补零不能因目录删除在重放时重新进入库存。
+        every { catalogService.exists("agent", "char_100_zhouzhong") } returns false
+
+        service.deleteRecord("u1", "main", "later")
+
+        assertEquals(4, count("u1", "char_038_luxun", entityType = "agent"))
+        assertTrue("char_100_zhouzhong" !in currents.getValue(Triple("u1", "main", "agent")).entries)
+        assertEquals(original, records.getValue(Triple("u1", "main", "mixed")))
+
+        service.restoreRecord("u1", "main", "later")
+
+        assertEquals(6, count("u1", "char_038_luxun", entityType = "agent"))
+        assertTrue("char_100_zhouzhong" !in currents.getValue(Triple("u1", "main", "agent")).entries)
+        assertEquals(original, records.getValue(Triple("u1", "main", "mixed")))
     }
 
     @Test

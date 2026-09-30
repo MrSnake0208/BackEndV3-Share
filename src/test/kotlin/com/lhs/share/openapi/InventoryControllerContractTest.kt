@@ -117,7 +117,8 @@ class InventoryControllerContractTest {
     fun `API token with inventory write can import`() {
         every { tokenService.validateAuthorization("Bearer write-token", OpenApiPermission.INVENTORY_WRITE) } returns
             OpenApiPrincipal("token-user", "main")
-        every { inventoryService.import("token-user", "main", any()) } returns InventoryImportResult(accepted = 1)
+        every { inventoryService.import("token-user", "main", any()) } returns
+            InventoryImportResult(accepted = 1, warnings = listOf("已忽略如鸢不支持的零值密探：周忠"))
 
         mockMvc.perform(
             post("/open-api/inventory/import")
@@ -127,6 +128,7 @@ class InventoryControllerContractTest {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.accepted").value(1))
+            .andExpect(jsonPath("$.data.warnings[0]").value("已忽略如鸢不支持的零值密探：周忠"))
 
         verify {
             inventoryService.import(
@@ -198,11 +200,13 @@ class InventoryControllerContractTest {
     @Test
     fun `JWT inventory import remains available`() {
         every { helper.requireUserId() } returns "jwt-user"
-        every { inventoryService.import("jwt-user", any()) } returns InventoryImportResult(accepted = 1)
+        every { inventoryService.import("jwt-user", any()) } returns
+            InventoryImportResult(accepted = 1, warnings = listOf("已忽略如鸢不支持的零值密探：周忠"))
 
         mockMvc.perform(post("/v1/inventory/import").contentType(MediaType.APPLICATION_JSON).content(validDocument))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.accepted").value(1))
+            .andExpect(jsonPath("$.data.warnings[0]").value("已忽略如鸢不支持的零值密探：周忠"))
 
         verify { inventoryService.import("jwt-user", any()) }
     }
