@@ -13,6 +13,7 @@ enum class AdminPermission(val value: String) {
     BETA_MANAGE("beta:manage"),
     OPERATOR_CATALOG_WRITE("operator_catalog:write"),
     LEVEL_CATALOG_WRITE("level_catalog:write"),
+    DEVELOPMENT_GOAL_MANAGE("development_goal:manage"),
     CHANGELOG_WRITE("changelog:write"),
     CHANGELOG_REVIEW("changelog:review"),
     ADMIN_ROLE_MANAGE("admin:role:manage"),
@@ -50,6 +51,7 @@ class AdminAuthorizationService(
             AdminPermission.BETA_MANAGE,
             AdminPermission.OPERATOR_CATALOG_WRITE,
             AdminPermission.LEVEL_CATALOG_WRITE,
+            AdminPermission.DEVELOPMENT_GOAL_MANAGE,
             -> AdminRole.PLATFORM_ADMIN in roles
             AdminPermission.CHANGELOG_WRITE -> AdminRole.CHANGELOG_EDITOR in roles
             AdminPermission.CHANGELOG_REVIEW -> AdminRole.CHANGELOG_REVIEWER in roles

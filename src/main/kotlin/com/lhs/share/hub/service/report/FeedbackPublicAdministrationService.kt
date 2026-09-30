@@ -131,7 +131,7 @@ class FeedbackPublicAdministrationService(
         return updated
     }
 
-    /** 修改反馈类型;影响反馈广场展示与许愿池归属。 */
+    /** 修改反馈类型;影响反馈广场的类型筛选。 */
     fun updateType(adminUserId: String, ticketId: String, request: FeedbackTypeUpdateRequest): FeedbackTicket {
         val ticket = requireTicket(ticketId)
         requireManage(adminUserId, ticket)

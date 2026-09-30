@@ -30,12 +30,13 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
-    fun `平台管理员只能获得公共图鉴权限`() {
+    fun `平台管理员可维护公共图鉴和开发目标但不能治理角色或审核日志`() {
         activeUser("platform")
         every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))
 
         assertTrue(service.hasPermission("platform", AdminPermission.OPERATOR_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.LEVEL_CATALOG_WRITE))
+        assertTrue(service.hasPermission("platform", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_ROLE_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.CHANGELOG_WRITE))
@@ -51,6 +52,7 @@ class AdminAuthorizationServiceTest {
         assertTrue(service.hasPermission("root", AdminPermission.ADMIN_ROLE_MANAGE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_REVIEW))
+        assertTrue(service.hasPermission("root", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
         assertEquals(FeedbackArea.all, service.manageableAreasFor("root"))
     }
 
@@ -74,6 +76,7 @@ class AdminAuthorizationServiceTest {
 
         assertTrue(service.hasPermission("editor", AdminPermission.CHANGELOG_WRITE))
         assertFalse(service.hasPermission("editor", AdminPermission.CHANGELOG_REVIEW))
+        assertFalse(service.hasPermission("editor", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
         assertTrue(service.hasPermission("reviewer", AdminPermission.CHANGELOG_REVIEW))
         assertFalse(service.hasPermission("reviewer", AdminPermission.CHANGELOG_WRITE))
     }

@@ -3,6 +3,8 @@ package com.lhs.share.integration
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.lhs.share.hub.repository.entity.DevelopmentCriterion
+import com.lhs.share.hub.repository.entity.DevelopmentGoal
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.service.jwt.JwtService
@@ -38,6 +40,7 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /** Actual Spring HTTP + actual generated OpenAPI + isolated Mongo/Redis. This
@@ -154,7 +157,8 @@ class OpenApiSchemaHarnessTest {
             assertTrue(businessStatus < 500, "$label: internal error encoded inside HTTP ${response.statusCode()}: $json")
         }
         val status = if (response.statusCode() >= 400) response.statusCode() else checkNotNull(businessStatus)
-        val operationPath = if (path == "/v1/accounts") path else "/v1/accounts/{accountId}"
+        val resourcePath = path.substringBefore('?')
+        val operationPath = if (resourcePath in setOf("/v1/accounts", "/v1/development-goals")) resourcePath else "/v1/accounts/{accountId}"
         val responses = spec.path("paths").path(operationPath).path(method.lowercase()).path("responses")
         val declared = responses.path(response.statusCode().toString()).path("content").path("application/json").path("schema")
         val documented = !declared.isMissingNode
@@ -182,6 +186,36 @@ class OpenApiSchemaHarnessTest {
     private fun success(reply: Reply): JsonNode {
         assertEquals(200, reply.status, reply.body.toString())
         return reply.body.path("data")
+    }
+
+    @Test
+    fun `public development goals match generated schema and repeated reads never write`() {
+        val id = "goal_${UUID.randomUUID()}"
+        val goal = DevelopmentGoal(
+            id,
+            "公开开发目标",
+            "独立验收交付",
+            "PLANNED",
+            listOf(DevelopmentCriterion("验收标准")),
+            feedbackIds = listOf("nonpublic_reference"),
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+        )
+        mongo.save(goal)
+        try {
+            val before = mongo.findById(id, DevelopmentGoal::class.java)
+            repeat(2) {
+                val data = success(call("anonymous development goals $it", "GET", "/v1/development-goals", user = null))
+                val item = data.path("data").first { entry -> entry.path("id").asText() == id }
+                assertEquals("公开开发目标", item.path("title").asText())
+                assertFalse(item.has("feedback_ids"))
+                assertTrue(item.path("linked_feedback").isEmpty)
+            }
+            assertEquals(400, call("invalid development pagination", "GET", "/v1/development-goals?page=invalid", user = null).status)
+            assertEquals(before, mongo.findById(id, DevelopmentGoal::class.java))
+        } finally {
+            mongo.remove(Query(Criteria.where("id").`is`(id)), DevelopmentGoal::class.java)
+        }
     }
 
     @Test
