@@ -6,6 +6,7 @@ import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
+import com.lhs.share.hub.service.HubUserInfoService
 import com.lhs.share.hub.service.notification.NotificationService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -20,7 +21,15 @@ class FeedbackWorkflowService(
     private val access: FeedbackAccessService,
     private val notifications: NotificationService,
     private val categories: FeedbackCategoryService,
+    private val userInfo: HubUserInfoService,
 ) {
+    private fun userName(userId: String): String = userInfo.get(userId)?.userName?.takeIf { it.isNotBlank() } ?: userId
+
+    private fun feedbackSubject(ticket: FeedbackTicket): String =
+        (ticket.title?.trim()?.takeIf { it.isNotEmpty() } ?: ticket.content.trim()).take(40)
+
+    private fun notificationBody(ticket: FeedbackTicket, note: String): String = "反馈摘要：${ticket.content.take(100)}\n交接说明：${note.take(100)}"
+
     private fun ticket(id: String): FeedbackTicket = tickets.findById(id).orElseThrow {
         ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $id")
     }
@@ -86,10 +95,13 @@ class FeedbackWorkflowService(
         if (old == targetUserId) return previous
         val now = Instant.now()
         val updated = save(previous, previous.copy(operatorAssigneeUserId = targetUserId, operatorAssignedAt = now, updatedAt = now))
-        events.save(FeedbackWorkflowEvent(ticketId = id, action = "ASSIGN", actorUserId = actor, note = note))
+        val relationship = "${userName(old)} → ${userName(targetUserId)}"
+        val action = if (actor == targetUserId) "接手了" else "转交了"
+        val title = "${userName(actor)}$action「${feedbackSubject(previous)}」（$relationship）"
+        events.save(FeedbackWorkflowEvent(ticketId = id, action = "ASSIGN", actorUserId = actor, note = "$title\n$note"))
         notifications.clearFeedbackKinds(id, setOf("FEEDBACK_ASSIGNED", "FEEDBACK_MESSAGE_FROM_REPORTER"))
-        setOf(old, targetUserId).forEach { userId ->
-            notifications.create(userId, "FEEDBACK_ASSIGNED", "反馈负责人已变更", note.take(100), "FEEDBACK", id)
+        setOf(old, targetUserId, actor).forEach { userId ->
+            notifications.create(userId, "FEEDBACK_ASSIGNED", title, notificationBody(previous, note), "FEEDBACK", id)
         }
         return updated
     }
@@ -117,8 +129,12 @@ class FeedbackWorkflowService(
                 previous,
                 reclassified(previous, area, Instant.now()).copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF, developerReturnedAt = null),
             )
-        events.save(FeedbackWorkflowEvent(ticketId = id, action = "HANDOFF", actorUserId = actor, note = reason))
-        developers.forEach { notifications.create(it, "FEEDBACK_DEV_HANDOFF", "反馈转程序处理", reason.take(100), "FEEDBACK", id) }
+        val target = "${categories.label(area) ?: area}程序（${developers.joinToString("、") { userName(it) }}）"
+        val title = "${userName(actor)}将「${feedbackSubject(previous)}」转交给$target"
+        events.save(FeedbackWorkflowEvent(ticketId = id, action = "HANDOFF", actorUserId = actor, note = "$title\n$reason"))
+        (developers + setOfNotNull(actor, previous.operatorAssigneeUserId)).forEach {
+            notifications.create(it, "FEEDBACK_DEV_HANDOFF", title, notificationBody(previous, reason), "FEEDBACK", id)
+        }
         return updated
     }
 
@@ -145,7 +161,7 @@ class FeedbackWorkflowService(
         if (FeedbackWorkflow.stage(updated) == FeedbackWorkflow.UNASSIGNED) {
             notifications.clearFeedbackTasks(id)
             access.operatorUserIds(area).forEach {
-                notifications.create(it, "FEEDBACK_ASSIGNED", "反馈板块已调整", reason.take(100), "FEEDBACK", id)
+                notifications.create(it, "FEEDBACK_ASSIGNED", "反馈板块已调整", notificationBody(previous, reason), "FEEDBACK", id)
             }
         }
         return updated
@@ -175,10 +191,16 @@ class FeedbackWorkflowService(
                 updatedAt = Instant.now(),
             ),
         )
-        events.save(FeedbackWorkflowEvent(ticketId = id, action = mode, actorUserId = actor, note = reason))
+        val operator = previous.operatorAssigneeUserId?.let { userName(it) }.orEmpty()
+        val title = if (mode == "RETURN") {
+            "${userName(actor)}将「${feedbackSubject(previous)}」交回运营$operator"
+        } else {
+            "${userName(actor)}撤回了「${feedbackSubject(previous)}」的程序交接（运营$operator）"
+        }
+        events.save(FeedbackWorkflowEvent(ticketId = id, action = mode, actorUserId = actor, note = "$title\n$reason"))
         notifications.clearFeedbackKinds(id, setOf("FEEDBACK_DEV_HANDOFF"))
-        previous.operatorAssigneeUserId?.let {
-            notifications.create(it, "FEEDBACK_DEV_RETURN", "反馈已交回运营", reason.take(100), "FEEDBACK", id)
+        setOfNotNull(actor, previous.operatorAssigneeUserId).forEach {
+            notifications.create(it, "FEEDBACK_DEV_RETURN", title, notificationBody(previous, reason), "FEEDBACK", id)
         }
         return updated
     }
