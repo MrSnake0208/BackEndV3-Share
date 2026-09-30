@@ -1,6 +1,6 @@
 # 独立开发目标
 
-共创中心使用 Hub 库 `development_goals` 集合，目标不是公开反馈的状态分组。每个目标有标题、说明、阶段、验收清单、可选目标版本/日期和最多 20 条关联公开反馈。目标可不关联反馈；目标阶段与工单状态互不自动同步。
+大饼中心使用 Hub 库 `development_goals` 集合，目标不是公开反馈的状态分组。每个目标有标题、说明、阶段、验收清单、可选目标版本/日期和最多 20 条关联公开反馈。目标可不关联反馈；目标阶段与工单状态互不自动同步。
 
 公开读取 `GET /v1/development-goals?page=1&size=12&stage=PLANNED`。省略 stage 返回全部；page >= 1，size 为 1–50，按创建时间/ID 倒序分页。返回统一 ApiResult，data 为 `{data,total,page,has_next}`。
 
