@@ -108,6 +108,51 @@ class FeedbackReportServiceTest {
     }
 
     @Test
+    fun `未授权反馈无需标题且默认私下保存`() {
+        prepareCreate()
+
+        val response = service.create("user", FeedbackReportCreateRequest(type = "BUG", category = "OPERATOR", content = "私下反馈"))
+
+        assertNull(response.title)
+        assertFalse(response.publicConsent)
+        assertEquals(FeedbackVisibility.PRIVATE, response.visibility)
+        verify { ticketRepository.save(match { !it.publicConsent && it.title == null && it.visibility == FeedbackVisibility.PRIVATE }) }
+    }
+
+    @Test
+    fun `授权公开时缺少标题在附件和保存之前拒绝`() {
+        prepareCreate()
+
+        for (title in listOf(null, "   ")) {
+            val error = assertThrows(ApiResultException::class.java) {
+                service.create(
+                    "user",
+                    FeedbackReportCreateRequest(type = "BUG", category = "OPERATOR", title = title, content = "问题", publicConsent = true),
+                )
+            }
+            assertEquals(400, error.statusCode)
+        }
+        verify(exactly = 0) { mediaRepository.findAllById(any()) }
+        verify(exactly = 0) { ticketRepository.save(any()) }
+    }
+
+    @Test
+    fun `公开授权单独保存回传且不会自动发布或开启客户端信息`() {
+        prepareCreate()
+
+        val response = service.create(
+            "user",
+            FeedbackReportCreateRequest(type = "BUG", category = "OPERATOR", title = " 标题 ", content = "正文", publicConsent = true),
+        )
+
+        assertTrue(response.publicConsent)
+        assertEquals("标题", response.title)
+        assertEquals(FeedbackVisibility.PRIVATE, response.visibility)
+        assertNull(response.clientInfo)
+        verify { ticketRepository.save(match { it.publicConsent && !it.clientInfoConsent && it.title == "标题" }) }
+    }
+
+    @Test
     fun `星石和麻圆可直接作为用户反馈板块`() {
         prepareCreate()
 

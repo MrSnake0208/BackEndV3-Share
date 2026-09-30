@@ -89,6 +89,9 @@ data class FeedbackTicket(
     /** 用户提交的原始标题(仅用于提交前相似提示);旧工单为空 */
     val title: String? = null,
 
+    /** 用户是否允许管理员整理发布到反馈广场；旧记录缺失时不视为授权 */
+    val publicConsent: Boolean = false,
+
     /** 公开可见性: PRIVATE / PUBLIC;旧工单缺失该字段时一律视为 PRIVATE */
     val visibility: String? = null,
 

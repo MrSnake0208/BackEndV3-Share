@@ -73,6 +73,7 @@ data class FeedbackReportResponse(
     val needsReply: Boolean = false,
     val content: String,
     val title: String? = null,
+    val publicConsent: Boolean = false,
     val visibility: String = "PRIVATE",
     val publicTitle: String? = null,
     val publicSummary: String? = null,
