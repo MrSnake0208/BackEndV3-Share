@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.inventory
 
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.testinfra.TestMongo
 import io.mockk.mockk
@@ -23,7 +24,10 @@ class InventoryAcquiredSummaryMongoTest {
     private val database = TestMongo.database("inventory")
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
-    private val accounts = MongoRepositoryFactory(template).getRepository(SubAccountRepository::class.java)
+    private val accounts = MongoRepositoryFactory(template).getRepository(
+        SubAccountRepository::class.java,
+        org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments.just(SubAccountRepositoryImpl(template)),
+    )
     private val service = InventoryService(accounts, mockk(), mockk(), mockk(), mockk(), template, mockk())
 
     @AfterEach

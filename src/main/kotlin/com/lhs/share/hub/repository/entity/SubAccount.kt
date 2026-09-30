@@ -30,4 +30,6 @@ data class SubAccount(
     val updatedAt: Instant = Instant.now(),
     @Indexed(name = "idx_sub_share_token_unique", unique = true, sparse = true)
     val shareToken: String? = null,
+    // A write fence shared by recruitment mutations and account lifecycle transactions.
+    val recruitmentFence: Long = 0,
 )

@@ -16,6 +16,7 @@ import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
+import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
@@ -64,6 +65,13 @@ class SubAccountServiceTest {
     private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
     private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
     private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
+    private val recruitmentRepository = mockk<RecruitmentRepository>()
+    init {
+        every { accountRepository.fenceRecruitmentWrite(any(), any(), any()) } returns true
+        every { recruitmentRepository.hasSubstantiveData(any(), any()) } returns false
+        every { recruitmentRepository.removeEmptyPreferences(any(), any()) } just runs
+        every { recruitmentRepository.deleteAccount(any(), any()) } just runs
+    }
     private val transactionTemplate = TransactionTemplate(
         object : PlatformTransactionManager {
             override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
@@ -94,6 +102,7 @@ class SubAccountServiceTest {
         starLoadoutRepository,
         starStateRepository,
         starRecoveryRepository,
+        recruitmentRepository,
     )
 
     @Test
@@ -121,6 +130,11 @@ class SubAccountServiceTest {
                 stored[saved.accountId] = saved
                 saved
             }
+        }
+        every { accountRepository.updateDetails("u1", any(), any(), any(), any()) } answers {
+            val old = stored.getValue(secondArg())
+            stored[old.accountId] = old.copy(name = thirdArg(), game = args[3] as String, updatedAt = args[4] as java.time.Instant)
+            Unit
         }
 
         val created = service.create("u1", "新账号", "如鸢")
@@ -251,6 +265,8 @@ class SubAccountServiceTest {
         verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
+        verify(exactly = 1) { recruitmentRepository.deleteAccount("u1", "main") }
+        verify(exactly = 1) { accountRepository.fenceRecruitmentWrite("u1", "main", "代号鸢") }
     }
 
     @Test
@@ -288,5 +304,31 @@ class SubAccountServiceTest {
         verify(exactly = 0) { starStateRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+    }
+
+    @Test
+    fun `substantive recruitment history locks game but permits rename`() {
+        val account = SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns account
+        every { recruitmentRepository.hasSubstantiveData("u1", "main") } returns true
+        every { accountRepository.updateDetails("u1", "main", "改名", "代号鸢", any()) } just runs
+        val error = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "如鸢") }
+        assertEquals("recruitment_game_locked", error.code)
+        assertEquals(409, error.status.value())
+        assertEquals("改名", service.update("u1", "main", "改名", null).name)
+        verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), "如鸢", any()) }
+        verify(exactly = 0) { recruitmentRepository.removeEmptyPreferences(any(), any()) }
+    }
+
+    @Test
+    fun `preference-only game change clears empty recruitment state and lost fence rejects lifecycle`() {
+        val account = SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns account
+        every { accountRepository.updateDetails("u1", "main", "大号", "如鸢", any()) } just runs
+        assertEquals("如鸢", service.update("u1", "main", null, "如鸢").game)
+        verify(exactly = 1) { recruitmentRepository.removeEmptyPreferences("u1", "main") }
+        every { accountRepository.fenceRecruitmentWrite("u1", "main", "代号鸢") } returns false
+        assertEquals("account_changed", assertThrows(InventoryApiException::class.java) { service.delete("u1", "main") }.code)
+        verify(exactly = 0) { recruitmentRepository.deleteAccount(any(), any()) }
     }
 }

@@ -9,12 +9,13 @@ import com.lhs.share.hub.controller.operator.response.OperatorShareOddityValue
 import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareStarStone
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
-import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
+import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import java.time.Instant
 import java.util.UUID
 
 @Service
@@ -38,7 +39,10 @@ class OperatorShareService(
     fun revoke(userId: String, accountId: String): OperatorShareResponse {
         val account = requireAccount(userId, accountId)
         if (account.activeShareToken() == null) return response(account)
-        return response(accountRepository.save(account.copy(shareToken = null)))
+        accountRepository.updateShareToken(userId, accountId, account.shareToken, null, Instant.now())?.let { return response(it) }
+        val latest = requireAccount(userId, accountId)
+        if (latest.activeShareToken() == null) return response(latest)
+        throw OperatorApiException(HttpStatus.CONFLICT, "share_code_changed", "Share code changed; refresh before revoking it")
     }
 
     fun view(shareCode: String): OperatorShareViewResponse {
@@ -63,11 +67,18 @@ class OperatorShareService(
         var latest = account
         repeat(MAX_GENERATION_ATTEMPTS) {
             try {
-                return response(accountRepository.save(latest.copy(shareToken = UUID.randomUUID().toString())))
+                accountRepository.updateShareToken(
+                    latest.userId,
+                    latest.accountId,
+                    latest.shareToken,
+                    UUID.randomUUID().toString(),
+                    Instant.now(),
+                )?.let { return response(it) }
             } catch (_: DuplicateKeyException) {
-                latest = requireAccount(account.userId, account.accountId)
-                if (reuseWinner) latest.activeShareToken()?.let { return response(latest) }
+                // A unique-index collision retries with another token, without replacing the account document.
             }
+            latest = requireAccount(account.userId, account.accountId)
+            if (reuseWinner) latest.activeShareToken()?.let { return response(latest) }
         }
         throw OperatorApiException(
             HttpStatus.CONFLICT,

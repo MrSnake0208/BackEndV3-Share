@@ -17,12 +17,14 @@ import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
+import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import com.lhs.share.hub.service.recruitment.RecruitmentService
 import com.lhs.share.openapi.OpenApiTokenService
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.dao.DuplicateKeyException
@@ -62,6 +64,8 @@ class SubAccountService(
     private val starLoadoutCurrentRepository: StarLoadoutCurrentRepository? = null,
     private val starStateCurrentRepository: StarStateCurrentRepository? = null,
     private val starRecoveryPointRepository: StarRecoveryPointRepository? = null,
+    private val recruitmentRepository: RecruitmentRepository? = null,
+    private val accountEvents: AccountEventService? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -102,20 +106,29 @@ class SubAccountService(
                 "name 或 game 至少提供一项",
             )
         }
-        val account = requireAccount(userId, accountId)
-        val nextGame = game?.let(::normalizeGame) ?: account.game
         return try {
-            SubAccountResponse.of(
-                accountRepository.save(
-                    account.copy(
-                        name = name ?: account.name,
-                        game = nextGame,
-                        updatedAt = Instant.now(),
-                    ),
-                ),
+            checkNotNull(
+                transactionTemplate.execute {
+                    val account = requireAccount(userId, accountId)
+                    val nextGame = game?.let(::normalizeGame) ?: account.game
+                    fenceAccount(account)
+                    if (nextGame != account.game) {
+                        if (recruitmentRepository?.hasSubstantiveData(userId, accountId) == true) {
+                            throw InventoryApiException(HttpStatus.CONFLICT, "recruitment_game_locked", "已有招募档案，不能修改所属游戏；请使用另一个游戏账号")
+                        }
+                        recruitmentRepository?.removeEmptyPreferences(userId, accountId)
+                    }
+                    val now = Instant.now()
+                    accountRepository.updateDetails(userId, accountId, name ?: account.name, nextGame, now)
+                    accountEvents?.publishChange(userId, accountId, "account_updated", mapOf("game" to nextGame))
+                    SubAccountResponse.of(account.copy(name = name ?: account.name, game = nextGame, updatedAt = now))
+                },
             )
         } catch (e: DuplicateKeyException) {
             throw nameConflict()
+        } catch (e: RuntimeException) {
+            if (RecruitmentService.isWriteConflict(e)) throw accountConflict()
+            throw e
         }
     }
 
@@ -131,31 +144,45 @@ class SubAccountService(
     }
 
     fun delete(userId: String, accountId: String) {
-        val account = requireAccount(userId, accountId)
-        transactionTemplate.executeWithoutResult {
-            inventoryCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            inventoryRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorScanReviewRepository.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
-            trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            starLoadoutCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            starStateCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            starRecoveryPointRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
-            tokenService.revokeByAccount(userId, accountId)
-            accountRepository.deleteById(checkNotNull(account.id))
+        try {
+            transactionTemplate.executeWithoutResult {
+                val account = requireAccount(userId, accountId)
+                fenceAccount(account)
+                inventoryCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                inventoryRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                favoriteRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorCorrectionRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorV3ImportRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorScanReviewRepository.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
+                trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                starLoadoutCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                starStateCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                starRecoveryPointRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                recruitmentRepository?.deleteAccount(userId, accountId)
+                tokenService.revokeByAccount(userId, accountId)
+                accountRepository.deleteById(checkNotNull(account.id))
+                accountEvents?.publishChange(userId, accountId, "account_deleted")
+            }
+        } catch (e: RuntimeException) {
+            if (RecruitmentService.isWriteConflict(e)) throw accountConflict()
+            throw e
         }
     }
+
+    private fun fenceAccount(account: SubAccount) {
+        if (!accountRepository.fenceRecruitmentWrite(account.userId, account.accountId, account.game)) throw accountConflict()
+    }
+
+    private fun accountConflict() = InventoryApiException(HttpStatus.CONFLICT, "account_changed", "账号正在被修改，请刷新后重试")
 
     fun requireAccount(userId: String, accountId: String): SubAccount = accountRepository.findByUserIdAndAccountId(userId, accountId)
         ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
