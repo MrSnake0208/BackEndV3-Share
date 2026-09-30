@@ -68,6 +68,8 @@ class SecurityConfig(
                 // Hub 库业务:查询公开,写操作需登录(未放行的方法默认 authenticated)
                 .requestMatchers(HttpMethod.GET, "/hub/post/**")
                 .permitAll()
+                .requestMatchers(HttpMethod.GET, "/v1/development-goals")
+                .permitAll()
                 .anyRequest()
                 .authenticated()
         }
