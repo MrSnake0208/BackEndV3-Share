@@ -279,6 +279,42 @@ class FeedbackReportServiceTest {
     }
 
     @Test
+    fun `需我回复接受共享类型筛选和排序且保留岗位范围`() {
+        every { accessService.operatorAreas("admin") } returns setOf(FeedbackArea.STAR)
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            PageImpl(emptyList<FeedbackTicket>())
+        every { userInfoService.getDict(emptySet()) } returns emptyMap()
+
+        val result = service.list(
+            "admin", 2, 20, null, "EXPERIENCE", "STAR", null, false, null, "保存", "createdAt", "asc", "NEEDS_REPLY",
+        )
+
+        assertEquals("createdAt", result.sortBy)
+        assertEquals("asc", result.sortOrder)
+        verify(exactly = 1) {
+            queryRepository.search(
+                null, null, null, "EXPERIENCE", "STAR", "保存",
+                match { it.pageNumber == 1 && it.sort.getOrderFor("createdAt")?.isAscending == true },
+                setOf(FeedbackArea.STAR), "NEEDS_REPLY", "admin", emptySet(), FeedbackArea.all,
+            )
+        }
+    }
+
+    @Test
+    fun `队列和排序非法时不执行查询`() {
+        for ((queue, sortBy, sortOrder) in listOf(
+            Triple("UNKNOWN", "createdAt", "asc"),
+            Triple("NEEDS_REPLY", "content", "asc"),
+            Triple("NEEDS_REPLY", "createdAt", "random"),
+        )) {
+            assertThrows(ApiResultException::class.java) {
+                service.list("admin", 1, 20, null, null, null, null, false, null, null, sortBy, sortOrder, queue)
+            }
+        }
+        verify(exactly = 0) { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `管理列表只从最后一条 REPORTER 消息推导边界`() {
         val firstReporter = FeedbackMessage(
             id = "rpm_initial",

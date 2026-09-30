@@ -61,9 +61,11 @@ class AdminFeedbackController(
         @RequestParam(required = false) workArea: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) q: String?,
+        @RequestParam(defaultValue = "updatedAt") sortBy: String = "updatedAt",
+        @RequestParam(defaultValue = "desc") sortOrder: String = "desc",
     ): ApiResult<FeedbackReportListResponse> = success(
         feedbackReportService.list(
-            helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, "updatedAt", "desc", queue,
+            helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, sortBy, sortOrder, queue,
         ),
     )
 
