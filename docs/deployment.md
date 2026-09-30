@@ -271,7 +271,11 @@ Nginx → Green
 ./release.sh --backend 0.1.13
 ```
 
-版本号为示例，必须使用新版本。两仓 main 先推送，入口并行等待对应 SHA 的 main push CI；任一失败均不创建 tag。默认后端 Release 完整成功后才发布前端，冻结的 SHA 不随等待期间的新提交变化。详细恢复步骤见工作区 `docs/release-workflow.md`。
+版本号为示例，必须使用新版本。两仓 main 先推送，入口并行等待对应 SHA 的 main push CI 与服务器预构建；任一失败均不创建 tag。默认后端 Release 完整成功后才发布前端，冻结的 SHA 不随等待期间的新提交变化。详细恢复步骤见工作区 `docs/release-workflow.md`。
+
+统一入口 dispatch 同一 `release.yml` 的 `phase=prepare`，传入新 tag、完整 SHA 和唯一 request。prepare 只允许从 main 发起，提交必须属于 main 历史且 tag 不存在；服务器只生成 `app.jar` 与 version/commit 元数据，不写 slot/upstream、不启停服务或创建 GitHub Release。准备与发布共用原 production environment / concurrency；人工审批配置对两阶段都生效。两仓 workflow 需先进入远端 main。
+
+CI 与 prepare 都成功后，tag Release 复用同版本/SHA 的 JAR，继续 readiness、切流、自动回滚及 drain；产物缺失或 metadata 不匹配则按原路径构建。脚本拒绝覆盖任一蓝绿槽位引用的产物，包括停止槽位保留的回滚 JAR。直接推 tag 保持原构建发布路径。
 
 独立 clone 本仓库时人工发布：
 
@@ -297,7 +301,7 @@ GitHub Runner：
 1. 第一次 clone `.source`，以后只 `git fetch` 增量
 2. checkout 精确 commit
 3. 保留 `~/.gradle`、`.gradle`、`build` 缓存
-4. `./gradlew --no-daemon --max-workers=2 bootJar -x test --build-cache`
+4. 复用同版本/SHA 的已有 JAR；无有效产物时执行 `./gradlew --no-daemon --max-workers=2 bootJar -x test --build-cache`
 5. 将 JAR 放入 `releases/<tag>/app.jar`
 6. 启动非活动 slot
 7. 本机 readiness

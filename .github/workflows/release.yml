@@ -1,4 +1,5 @@
 name: Release
+run-name: ${{ inputs.phase == 'prepare' && format('Prepare {0} @ {1} [{2}]', inputs.tag, inputs.commit, inputs.request) || format('Release {0}', inputs.tag || github.ref_name) }}
 
 # Production backend release:
 # GitHub-hosted runner performs the release gate, then server B fetches the exact commit
@@ -13,8 +14,19 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing immutable backend tag to deploy (for example v0.2.0)"
+        description: "Backend tag (prepare uses a new tag; release uses an existing tag)"
         required: true
+      phase:
+        description: "Prepare builds only; release activates after successful CI"
+        type: choice
+        options: [release, prepare]
+        default: release
+      commit:
+        description: "Full main commit SHA, required for prepare"
+        required: false
+      request:
+        description: "Unique prepare request identifier"
+        required: false
 
 concurrency:
   group: yuanhub-backend-production
@@ -33,13 +45,40 @@ jobs:
 
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      DEPLOY_PHASE: ${{ inputs.phase || 'release' }}
+      REQUESTED_COMMIT: ${{ inputs.commit }}
+      PREPARE_REQUEST: ${{ inputs.request }}
 
     steps:
+      - name: Validate release request
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DEPLOY_PHASE" in prepare|release) ;; *) echo "::error::Invalid phase"; exit 1 ;; esac
+          if [ "$DEPLOY_PHASE" = prepare ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::prepare must run from main"; exit 1; }
+            [[ "$REQUESTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::prepare requires a full SHA"; exit 1; }
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] || { echo "::error::Invalid prepare tag"; exit 1; }
+            [[ "$PREPARE_REQUEST" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || { echo "::error::Invalid prepare request"; exit 1; }
+          fi
+
       - name: Checkout release ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ inputs.phase == 'prepare' && (inputs.commit || 'main') || (github.event_name == 'workflow_dispatch' && inputs.tag || github.ref) }}
           fetch-depth: 0
+
+      - name: Validate prepared commit
+        if: ${{ inputs.phase == 'prepare' }}
+        run: |
+          set -eu
+          [ "$(git rev-parse HEAD)" = "$REQUESTED_COMMIT" ]
+          git merge-base --is-ancestor "$REQUESTED_COMMIT" origin/main || {
+            echo "::error::prepare commit must belong to main"; exit 1;
+          }
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            echo "::error::prepare cannot overwrite an existing tag"; exit 1;
+          fi
 
       - name: Resolve immutable release
         shell: bash
@@ -50,11 +89,15 @@ jobs:
             v*) ;;
             *) echo "::error::backend release tag must start with v"; exit 1 ;;
           esac
-          git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null || {
-            echo "::error::tag $RELEASE_TAG does not exist in this checkout"
-            exit 1
-          }
-          release_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if [ "$DEPLOY_PHASE" = prepare ]; then
+            release_commit="$REQUESTED_COMMIT"
+          else
+            git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null || {
+              echo "::error::tag $RELEASE_TAG does not exist in this checkout"
+              exit 1
+            }
+            release_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          fi
           head_commit="$(git rev-parse HEAD)"
           if [ "$release_commit" != "$head_commit" ]; then
             echo "::error::checked out commit $head_commit does not match tag $RELEASE_TAG ($release_commit)"
@@ -64,6 +107,7 @@ jobs:
           echo "Releasing $RELEASE_TAG (${release_commit::7})"
 
       - name: Require successful CI for release commit
+        if: ${{ inputs.phase != 'prepare' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -196,13 +240,14 @@ jobs:
           RELEASE_VERSION: ${{ env.RELEASE_TAG }}
           RELEASE_COMMIT: ${{ env.BACKEND_RELEASE_COMMIT }}
           REPO_URL: git@github.com:${{ github.repository }}.git
+          DEPLOY_PHASE: ${{ env.DEPLOY_PHASE }}
         with:
           host: ${{ secrets.YUANHUB_BACKEND_VPS_HOST }}
           username: ${{ secrets.YUANHUB_BACKEND_VPS_USER }}
           key: ${{ secrets.YUANHUB_BACKEND_VPS_SSH_KEY }}
           port: ${{ secrets.YUANHUB_BACKEND_VPS_PORT }}
           command_timeout: 60m
-          envs: BACKEND_ROOT,BACKEND_URL,PRODUCT_VERSION,KEEP_RELEASES,DRAIN_SECONDS,LEGACY_SERVICE,RELEASE_VERSION,RELEASE_COMMIT,REPO_URL
+          envs: BACKEND_ROOT,BACKEND_URL,PRODUCT_VERSION,KEEP_RELEASES,DRAIN_SECONDS,LEGACY_SERVICE,RELEASE_VERSION,RELEASE_COMMIT,REPO_URL,DEPLOY_PHASE
           script: |
             set -euo pipefail
 
@@ -250,9 +295,11 @@ jobs:
             PRODUCT_VERSION="$PRODUCT_VERSION" \
             RELEASE_VERSION="$RELEASE_VERSION" \
             RELEASE_COMMIT="$RELEASE_COMMIT" \
+            DEPLOY_PHASE="$DEPLOY_PHASE" \
               ./deploy/blue-green-deploy.sh
 
       - name: Verify public deployment from GitHub runner
+        if: ${{ inputs.phase != 'prepare' }}
         env:
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
         shell: bash
@@ -280,6 +327,7 @@ jobs:
           exit 1
 
       - name: Create or update GitHub Release
+        if: ${{ inputs.phase != 'prepare' }}
         env:
           GH_TOKEN: ${{ github.token }}
           BACKEND_URL: ${{ vars.YUANHUB_BACKEND_URL }}
