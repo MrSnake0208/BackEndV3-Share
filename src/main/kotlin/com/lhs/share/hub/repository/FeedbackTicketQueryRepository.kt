@@ -4,6 +4,7 @@ import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.service.report.FeedbackArea
 import com.lhs.share.hub.service.report.FeedbackType
 import com.lhs.share.hub.service.report.FeedbackVisibility
+import org.bson.Document
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -64,6 +65,34 @@ class FeedbackTicketQueryRepository(
                 Criteria.where("operatorAssigneeUserId").`is`(actorUserId),
                 Criteria.where("mergedIntoId").`is`(null),
             )
+            "NEEDS_REPLY" -> filters += Criteria().andOperator(
+                Criteria.where("status").`is`("OPEN"),
+                Criteria.where("workflowStage").`is`("PROCESSING"),
+                Criteria.where("operatorAssigneeUserId").`is`(actorUserId),
+                workAreaSetCriteria(workAreas.orEmpty(), knownAreas),
+                Criteria.where("mergedIntoId").`is`(null),
+                // Match needsReply from the messages, including old tickets without lastMessageSender.
+                Criteria.where("\$expr").`is`(
+                    Document(
+                        "\$eq",
+                        listOf(
+                            Document(
+                                "\$arrayElemAt",
+                                listOf(
+                                    Document(
+                                        "\$filter",
+                                        Document("input", Document("\$ifNull", listOf("\$messages.senderKind", emptyList<String>())))
+                                            .append("as", "kind")
+                                            .append("cond", Document("\$in", listOf("\$\$kind", listOf("REPORTER", "ADMIN")))),
+                                    ),
+                                    -1,
+                                ),
+                            ),
+                            "REPORTER",
+                        ),
+                    ),
+                ),
+            )
             "DEV" -> filters += Criteria().andOperator(
                 Criteria.where("status").`is`("OPEN"),
                 Criteria.where("workflowStage").`is`("DEV_HANDOFF"),
@@ -78,7 +107,7 @@ class FeedbackTicketQueryRepository(
                 Criteria.where("status").`is`("OPEN"),
                 Criteria.where("workflowStage").`is`("PROCESSING"),
                 Criteria.where("developerReturnedAt").ne(null),
-                workAreaSetCriteria(developerAreas, knownAreas),
+                workAreaSetCriteria(workAreas.orEmpty() + developerAreas, knownAreas),
                 Criteria.where("mergedIntoId").`is`(null),
             )
             "ALL" -> if (keyword.isNullOrBlank()) filters += Criteria.where("mergedIntoId").`is`(null)

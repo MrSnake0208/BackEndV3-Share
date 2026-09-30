@@ -275,7 +275,7 @@ class FeedbackReportService(
                 if (it !in categories.keys()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
             }
         }
-        if (!mine && queue != null && queue !in setOf("UNASSIGNED", "MINE", "DEV", "RETURNED", "CLOSED", "ALL")) {
+        if (!mine && queue != null && queue !in setOf("UNASSIGNED", "MINE", "NEEDS_REPLY", "DEV", "RETURNED", "CLOSED", "ALL")) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的工作队列")
         }
         if (sortBy !in setOf("createdAt", "updatedAt")) {

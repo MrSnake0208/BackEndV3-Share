@@ -173,6 +173,60 @@ class FeedbackPersistenceMongoTest {
     }
 
     @Test
+    fun `需我回复按真实消息分页计数且隔离负责人板块结案和合并`() {
+        val start = Instant.parse("2026-09-01T00:00:00Z")
+        val base = ticket("waiting_old").copy(createdAt = start)
+        mongo.insert(base.copy(lastMessageSender = "ADMIN")) // The messages, not this legacy preview, are authoritative.
+        mongo.insert(base.copy(id = "waiting_new", createdAt = start.plusSeconds(60)))
+        mongo.insert(base.copy(id = "answered", messages = base.messages + message("reply").copy(senderKind = "ADMIN")))
+        mongo.insert(base.copy(id = "another_owner", operatorAssigneeUserId = "other"))
+        mongo.insert(base.copy(id = "another_board", workArea = "STAR"))
+        mongo.insert(base.copy(id = "closed", status = "RESOLVED"))
+        mongo.insert(base.copy(id = "merged", mergedIntoId = "main"))
+        mongo.insert(base.copy(id = "no_messages", messages = emptyList()))
+        mongo.insert(base.copy(id = "developer", workflowStage = FeedbackWorkflow.DEV_HANDOFF))
+
+        val first = queries.search(
+            null, null, null, null, null, null, PageRequest.of(0, 1, Sort.Direction.ASC, "createdAt"),
+            workAreas = setOf("OPERATOR"), queue = "NEEDS_REPLY", actorUserId = "admin",
+        )
+        val second = queries.search(
+            null, null, null, null, null, null, PageRequest.of(1, 1, Sort.Direction.ASC, "createdAt"),
+            workAreas = setOf("OPERATOR"), queue = "NEEDS_REPLY", actorUserId = "admin",
+        )
+        assertEquals(2L, first.totalElements)
+        assertEquals(listOf("waiting_old"), first.content.map { it.id })
+        assertEquals(listOf("waiting_new"), second.content.map { it.id })
+        assertTrue(first.content.all(FeedbackWorkflow::needsReply))
+    }
+
+    @Test
+    fun `程序交回队列同时支持运营和程序范围且不泄露其他板块`() {
+        val returned = ticket("returned").copy(developerReturnedAt = Instant.parse("2026-09-01T00:00:00Z"))
+        mongo.insert(returned)
+        mongo.insert(returned.copy(id = "other_board", workArea = "STAR"))
+        mongo.insert(returned.copy(id = "closed", status = "RESOLVED"))
+        mongo.insert(ticket("not_returned"))
+        val pageable = PageRequest.of(0, 20)
+        val operator = queries.search(
+            null, null, null, null, null, null, pageable,
+            workAreas = setOf("OPERATOR"), queue = "RETURNED", actorUserId = "admin",
+        )
+        val developer = queries.search(
+            null, null, null, null, null, null, pageable,
+            workAreas = emptySet(), queue = "RETURNED", actorUserId = "dev", developerAreas = setOf("OPERATOR"),
+        )
+        assertEquals(listOf("returned"), operator.content.map { it.id })
+        assertEquals(listOf("returned"), developer.content.map { it.id })
+        assertTrue(
+            queries.search(
+                null, null, null, null, null, null, pageable,
+                workAreas = emptySet(), queue = "NEEDS_REPLY", actorUserId = "dev", developerAreas = setOf("OPERATOR"),
+            ).isEmpty,
+        )
+    }
+
+    @Test
     fun `自定义板块的工单可按目录筛选且不会落入其他板块`() {
         mongo.insert(ticket("custom").copy(category = "CUSTOM_TEST", area = "CUSTOM_TEST", workArea = "CUSTOM_TEST"))
         val known = FeedbackArea.all + "CUSTOM_TEST"
