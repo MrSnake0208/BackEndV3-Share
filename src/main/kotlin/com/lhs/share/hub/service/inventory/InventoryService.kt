@@ -100,7 +100,8 @@ class InventoryService(
         val ordered = validateAndSort(request)
         repeat(MAX_TRANSACTION_ATTEMPTS) { attempt ->
             try {
-                val prepared = prepareRecords(userId, ordered, accountGames)
+                val warnings = mutableSetOf<String>()
+                val prepared = prepareRecords(userId, ordered, accountGames, warnings)
                 return checkNotNull(
                     transactionTemplate.execute {
                         var accepted = 0
@@ -130,7 +131,7 @@ class InventoryService(
                             }
                         }
                         changedAccounts.forEach { bumpInventoryRevision(userId, it) }
-                        InventoryImportResult(accepted, duplicates, historyOnly, superseded)
+                        InventoryImportResult(accepted, duplicates, historyOnly, superseded, warnings.toList())
                     },
                 )
             } catch (e: DuplicateKeyException) {
@@ -141,7 +142,12 @@ class InventoryService(
         error("Unreachable")
     }
 
-    private fun prepareRecords(userId: String, ordered: List<ValidatedRecord>, accountGames: Map<String, String>): List<PreparedRecord> {
+    private fun prepareRecords(
+        userId: String,
+        ordered: List<ValidatedRecord>,
+        accountGames: Map<String, String>,
+        warnings: MutableSet<String>,
+    ): List<PreparedRecord> {
         val requestRecords = mutableMapOf<Pair<String, String>, ValidatedRecord>()
         return ordered.map { validated ->
             val record = validated.record
@@ -154,7 +160,7 @@ class InventoryService(
                 requestRecords[key] = validated
                 val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
                 if (existing != null && !sameBody(existing, record)) throw recordConflict(record.recordId)
-                if (existing == null) validateCatalogEntries(record, accountGames.getValue(record.accountId))
+                if (existing == null) validateCatalogEntries(record, accountGames.getValue(record.accountId), warnings)
                 PreparedRecord(validated, duplicate = existing != null)
             }
         }
@@ -289,7 +295,7 @@ class InventoryService(
     }
 
     // 已接收的同正文记录仍需幂等成功，即使其密探后来被公共图鉴删除。
-    private fun validateCatalogEntries(record: InventoryRecordRequest, accountGame: String) {
+    private fun validateCatalogEntries(record: InventoryRecordRequest, accountGame: String, warnings: MutableSet<String>) {
         record.entries.forEach { entry ->
             if (!catalogService.exists(record.entityType, entry.id)) {
                 throw InventoryApiException(
@@ -301,6 +307,10 @@ class InventoryService(
                 )
             }
             if (record.entityType == "agent" && !catalogService.agentMatchesGame(entry.id, accountGame)) {
+                if (record.recordType == STOCK_SNAPSHOT && entry.count == 0L) {
+                    warnings += "已忽略${accountGame}不支持的零值密探：${entry.name ?: entry.id}"
+                    return@forEach
+                }
                 throw InventoryApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     "agent_game_mismatch",
@@ -453,9 +463,21 @@ class InventoryService(
 
     /**
      * 计算快照效果(纯计算,不写库):full 快照不早于现有 full 基线才生效;
-     * listed 快照在所有列出对象的 listed 基线都晚于本快照时整条 superseded。
+     * listed 补零过滤后为空时只存档,有效条目均早于基线时整条 superseded。
      */
     private fun computeSnapshot(userId: String, accountId: String, entity: InventoryRecord): SnapshotComputation {
+        // 原始正文保留用于审计和幂等比较；导入与删除/恢复重放只在库存计算时过滤补零。
+        val entries = if (entity.entityType == ENTITY_AGENT) {
+            val game = requireAccount(userId, accountId).game
+            entity.entries.filterNot { entry ->
+                entry.count == 0L && !catalogService.agentMatchesGame(entry.id, game)
+            }
+        } else {
+            entity.entries
+        }
+        if (entity.snapshotScope == SNAPSHOT_LISTED && entries.isEmpty()) {
+            return SnapshotComputation(Effect.HISTORY_ONLY, emptyList())
+        }
         val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
         val existingFullBaseline = current?.fullBaselineAt
         val isFull = entity.snapshotScope == SNAPSHOT_FULL
@@ -463,10 +485,10 @@ class InventoryService(
 
         if (isFull) {
             val superseded = existingFullBaseline != null && effective.isBefore(existingFullBaseline)
-            return SnapshotComputation(if (superseded) Effect.SUPERSEDED else Effect.APPLIED, entity.entries)
+            return SnapshotComputation(if (superseded) Effect.SUPERSEDED else Effect.APPLIED, entries)
         }
 
-        val appliedEntries = entity.entries.filter { entry ->
+        val appliedEntries = entries.filter { entry ->
             val baseline = maxOfNotNull(existingFullBaseline, current?.entries?.get(entry.id)?.listedBaselineAt)
             baseline == null || !effective.isBefore(baseline)
         }
@@ -481,7 +503,7 @@ class InventoryService(
      */
     private fun applySnapshotToCurrent(userId: String, accountId: String, entity: InventoryRecord, computation: SnapshotComputation) {
         if (entity.snapshotScope == SNAPSHOT_FULL) {
-            applyFullSnapshot(userId, accountId, entity)
+            applyFullSnapshot(userId, accountId, entity, computation.appliedEntries)
         } else {
             applyListedSnapshot(userId, accountId, entity, computation.appliedEntries)
         }
@@ -491,12 +513,12 @@ class InventoryService(
      * full 快照:替换整个 entries(未列出归零)并更新 full_baseline_at;
      * 对拥有更晚 listed_baseline_at 的对象保留其更晚的局部值(item 粒度保留)。
      */
-    private fun applyFullSnapshot(userId: String, accountId: String, entity: InventoryRecord) {
+    private fun applyFullSnapshot(userId: String, accountId: String, entity: InventoryRecord, entries: List<RecordEntry>) {
         val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
         val effective = entity.effectiveAt
 
         // 构建新 entries:以快照值为准;但保留更晚 listed 基线覆盖的 item(避免旧 full 覆盖新局部读取)
-        val snapshotEntries = entity.entries.associate { it.id to StockEntry(count = it.count, listedBaselineAt = null) }
+        val snapshotEntries = entries.associate { it.id to StockEntry(count = it.count, listedBaselineAt = null) }
         val merged = LinkedHashMap<String, StockEntry>()
         // 快照列出的对象使用快照值(未列出即归零)
         snapshotEntries.forEach { (id, se) -> merged[id] = se }

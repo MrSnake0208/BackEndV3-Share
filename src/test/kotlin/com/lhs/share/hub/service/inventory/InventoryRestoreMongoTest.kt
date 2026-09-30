@@ -1,5 +1,9 @@
 package com.lhs.share.hub.service.inventory
 
+import com.lhs.share.hub.controller.inventory.request.InventoryEntryRequest
+import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
+import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
+import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
@@ -12,6 +16,7 @@ import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.StockEntry
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.testinfra.TestMongo
+import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -38,12 +43,13 @@ class InventoryRestoreMongoTest {
     private val current = factory.getRepository(InventoryCurrentRepository::class.java)
     private val records = factory.getRepository(InventoryRecordRepository::class.java)
     private val deleted = factory.getRepository(InventoryDeletedRecordRepository::class.java)
+    private val catalog = mockk<EntityCatalogService>()
     private val service = InventoryService(
         accounts,
         current,
         records,
         deleted,
-        mockk(),
+        catalog,
         template,
         TransactionTemplate(MongoTransactionManager(template.mongoDatabaseFactory)),
     )
@@ -125,6 +131,56 @@ class InventoryRestoreMongoTest {
         assertNull(records.findByUserIdAndAccountIdAndRecordId("owner", "main", "restore"))
         assertNotNull(deleted.findByUserIdAndAccountIdAndRecordId("owner", "main", "restore"))
         assertEquals(7, current.findByUserIdAndAccountIdAndEntityType("owner", "main", "item")?.entries?.get("baijinbi")?.count)
+    }
+
+    @Test
+    fun `zero padding persists only in original records and remains filtered after restore`() {
+        prepare()
+        accounts.save(checkNotNull(accounts.findByUserIdAndAccountId("owner", "main")).copy(game = "如鸢"))
+        every { catalog.exists(any(), any()) } returns true
+        every { catalog.agentMatchesGame(any(), "如鸢") } answers { firstArg<String>() != "char_100_zhouzhong" }
+        val snapshot = InventoryRecordRequest(
+            accountId = "main",
+            recordId = "padded",
+            recordType = "stock_snapshot",
+            entityType = "agent",
+            snapshotScope = "full",
+            effectiveAt = "2026-09-27T10:00:00Z",
+            entries = listOf(
+                InventoryEntryRequest("char_038_luxun", count = 4),
+                InventoryEntryRequest("char_100_zhouzhong", "周忠", 0),
+            ),
+        )
+        val request = InventoryImportRequest(
+            format = "myshare-inventory-exchange",
+            version = 2,
+            exportedAt = "2026-09-27T11:00:00Z",
+            producer = ProducerDto("test"),
+            records = listOf(snapshot),
+        )
+
+        assertEquals(listOf("已忽略如鸢不支持的零值密探：周忠"), service.import("owner", "main", request).warnings)
+        val original = checkNotNull(records.findByUserIdAndAccountIdAndRecordId("owner", "main", "padded"))
+        assertEquals(snapshot.entries.map { RecordEntry(it.id, it.name, it.count) }, original.entries)
+        assertEquals(setOf("char_038_luxun"), current.findByUserIdAndAccountIdAndEntityType("owner", "main", "agent")?.entries?.keys)
+        assertEquals(1, service.import("owner", request).duplicates)
+
+        val invalid = snapshot.copy(recordId = "nonzero", entries = snapshot.entries.map { it.copy(count = 1) })
+        val validFirst = snapshot.copy(recordId = "valid-first", entries = listOf(InventoryEntryRequest("char_038_luxun", count = 9)))
+        val error = assertThrows(InventoryApiException::class.java) {
+            service.import("owner", request.copy(records = listOf(validFirst, invalid)))
+        }
+        assertEquals("agent_game_mismatch", error.code)
+        assertEquals(1L, records.count())
+        assertEquals(4, current.findByUserIdAndAccountIdAndEntityType("owner", "main", "agent")?.entries?.get("char_038_luxun")?.count)
+
+        service.deleteRecord("owner", "main", "padded")
+        assertNull(current.findByUserIdAndAccountIdAndEntityType("owner", "main", "agent"))
+        assertEquals(original, deleted.findByUserIdAndAccountIdAndRecordId("owner", "main", "padded")?.record)
+        service.restoreRecord("owner", "main", "padded")
+        assertEquals(original, records.findByUserIdAndAccountIdAndRecordId("owner", "main", "padded"))
+        assertEquals(setOf("char_038_luxun"), current.findByUserIdAndAccountIdAndEntityType("owner", "main", "agent")?.entries?.keys)
+        assertEquals(4, current.findByUserIdAndAccountIdAndEntityType("owner", "main", "agent")?.entries?.get("char_038_luxun")?.count)
     }
 
     private fun prepare() {

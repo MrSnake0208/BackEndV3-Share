@@ -107,7 +107,7 @@
 `stock_effect` 推荐值：
 
 - `applied`：奖励已经增加当前库存，或快照已经更新当前库存。
-- `history_only`：记录已保存，但因为不晚于库存基线而未改变当前库存。
+- `history_only`：记录已保存，但奖励不晚于库存基线，或 `listed` 快照的跨游戏补零过滤后为空，未改变当前库存。
 - `superseded`：旧快照已保存，但比当前快照更早，未覆盖当前库存。
 
 这些状态用于排查导入结果，不参与业务计算。
@@ -155,7 +155,7 @@ GET /v1/inventory/catalog
 1. 验证 JSON Schema 和协议版本。
 2. 通过认证上下文确定 `user_id`。
 3. 验证 `(entity_type, id)` 存在于对象目录。
-   对新导入的 `agent` 条目，还需确认公共密探图鉴的 `games` 包含目标子账号的游戏版本；已接收的相同记录仍按幂等规则处理。
+   对新导入的 `agent` 条目，还需确认公共密探图鉴的 `games` 包含绑定子账号的游戏版本。仅对已知密探的 `stock_snapshot` 零值补齐允许跨游戏：完整保存原始正文，并在 `warnings` 提示忽略；库存计算过滤该条目。未知 ID、不支持的非零密探及 `reward_delta` 仍严格校验，整份预检通过后才写入。已接收的相同记录仍按幂等规则处理，不依赖当前目录。
 4. 验证同一 record 的 `entries` 中没有重复 ID。
 5. 同一批记录按 `effective_at` 升序处理；相同时间先处理 `reward_delta`，后处理 `stock_snapshot`，让快照成为最终权威值。
 6. 同一用户的 `record_id` 已存在时按重复记录返回成功，不再更新库存。
@@ -182,6 +182,8 @@ baseline = max(full_baseline_at, entries[id].listed_baseline_at)
 
 - `full`：当快照不早于当前完整快照时，更新 `full_baseline_at`。对于 `listed_baseline_at` 不晚于本快照的对象，使用完整快照值（未列出则归零）；对于拥有更晚 `listed_baseline_at` 的对象，保留其更新值，避免较旧的完整快照覆盖较新的局部读取。
 - `listed`：只设置列出的绝对数量，并更新对应 `listed_baseline_at`。
+- 已知但当前游戏不支持的零值密探只从库存计算中排除，不能删除原始 `entries`；幂等比较、记录查询和删除备份仍使用原正文。删除/恢复重放必须复用相同过滤规则。当前游戏支持的零值仍正常清空旧库存。
+- 补零过滤后为空的 `listed` 只存档为 `history_only`，不写当前库存、不更新任何基线或库存 revision；`full` 即使过滤后为空也继续执行完整快照语义，不能整条跳过。
 - 比现有相应基线更早的快照只存档，设置 `stock_effect: superseded`。
 - 生产者必须给出截图实际完成或数据实际读取的时间，不能用之后的文件导入时间代替。
 
@@ -275,7 +277,7 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 | 409     | `record_conflict`            | 相同 `record_id` 已存在，但内容不同。 |
 | 422     | `schema_validation_failed`   | 字段或类型不符合协议。                |
 | 422     | `unknown_entity_id`          | 对象目录中不存在该 ID。               |
-| 422     | `agent_game_mismatch`        | 密探不属于目标子账号的游戏版本。       |
+| 422     | `agent_game_mismatch`        | 密探不属于目标子账号的游戏版本（已知密探快照零值补齐除外）。 |
 | 422     | `unsupported_version`        | 不支持该协议 major version。          |
 
 建议先完整校验一份导入文档，再开始写入；格式错误时整份拒绝，避免用户不知道哪些条目已经生效。
