@@ -30,13 +30,29 @@ class RecruitmentCatalog(
     private val operatorSeed: Map<String, JsonNode> by lazy {
         ClassPathResource("operator/operators.json").inputStream.use(mapper::readTree).associateBy { it.path("id").asText() }
     }
+    private val seedBindings: Map<String, Map<String, String>> by lazy {
+        resource.path("pools").associate { node ->
+            val poolId = node.path("pool_id").asText()
+            val names = node.path("up_agent_names").map(JsonNode::asText)
+            val ids = node.path("up_agent_ids").map(JsonNode::asText)
+            val bindings = names.mapIndexedNotNull { index, name ->
+                val operatorId = if (names.size == ids.size) {
+                    ids.getOrNull(index)
+                } else {
+                    ids.firstOrNull { operatorSeed[it]?.path("name")?.asText() == name }
+                }
+                operatorId?.let { "$poolId:up:${index + 1}" to it }
+            }.toMap()
+            poolId to bindings
+        }
+    }
     private val seeds: Map<String, RecruitmentCatalogPool> by lazy {
         resource.path("pools").associate { node ->
             val id = node.path("pool_id").asText()
-            val known = node.path("up_agent_ids").map(JsonNode::asText).toSet()
+            val bindings = seedBindings[id].orEmpty()
             val slots = node.path("up_agent_names").mapIndexed { index, name ->
-                val operatorId = known.firstOrNull { operatorSeed[it]?.path("name")?.asText() == name.asText() }
-                RecruitmentUpAgent("$id:up:${index + 1}", name.asText(), operatorId)
+                val slotId = "$id:up:${index + 1}"
+                RecruitmentUpAgent(slotId, name.asText(), bindings[slotId])
             }
             fun date(field: String) = node[field]?.takeUnless { it.isNull }?.asText()?.let(LocalDate::parse)
             id to RecruitmentCatalogPool(
@@ -59,7 +75,10 @@ class RecruitmentCatalog(
 
     fun listForAdmin(): RecruitmentCatalogAdminResponse {
         val names = operatorNames()
-        return RecruitmentCatalogAdminResponse(all().map { it.copy(upAgents = snapshotOf(it, names).upAgents) })
+        return RecruitmentCatalogAdminResponse(all().map {
+            val snapshot = snapshotOf(it, names)
+            it.copy(upAgents = snapshot.upAgents, upStatus = snapshot.upStatus)
+        })
     }
 
     private fun all(): List<RecruitmentCatalogPool> = (seeds + repository.all().associateBy { it.poolId }).values
@@ -78,6 +97,7 @@ class RecruitmentCatalog(
             item.set<JsonNode>("up_agent_ids", mapper.valueToTree(snapshot.upAgentIds))
             item.set<JsonNode>("up_agent_names", mapper.valueToTree(snapshot.upAgentNames))
             item.set<JsonNode>("unmapped_up_agent_names", mapper.valueToTree(snapshot.unmappedUpAgentNames))
+            item.put("up_status", snapshot.upStatus)
             items.add(item)
         }
         return mapper.createObjectNode().put(
@@ -105,13 +125,16 @@ class RecruitmentCatalog(
     }
 
     private fun snapshotOf(pool: RecruitmentCatalogPool, names: Map<String, String> = emptyMap()): RecruitmentPoolSnapshot {
+        val bindings = seedBindings[pool.poolId].orEmpty()
         val slots = pool.upAgents.map { slot ->
-            slot.operatorId?.let { names[it] }?.let { slot.copy(name = it) } ?: slot
+            val operatorId = slot.operatorId ?: bindings[slot.id]
+            if (operatorId == null) slot else slot.copy(operatorId = operatorId, name = names[operatorId] ?: slot.name)
         }
         val active = slots.filter { it.active }
+        val upStatus = if (pool.upStatus == "partial" && active.isNotEmpty() && active.all { it.operatorId != null }) "verified" else pool.upStatus
         return RecruitmentPoolSnapshot(
             name = pool.name, game = pool.game, catalogPoolId = pool.poolId, startDate = pool.startDate, endDate = pool.endDate,
-            upAgentIds = active.mapNotNull { it.operatorId }, upStatus = pool.upStatus,
+            upAgentIds = active.mapNotNull { it.operatorId }, upStatus = upStatus,
             upAgentNames = active.map { it.name }, unmappedUpAgentNames = active.filter { it.operatorId == null }.map { it.name },
             catalogRevision = "${resource.path("catalog_revision").asText()}:${pool.revision}",
             poolType = pool.poolType, upAgents = slots,
@@ -120,7 +143,7 @@ class RecruitmentCatalog(
 
     fun slot(game: String, poolId: String, id: String, requireActive: Boolean = true): RecruitmentUpAgent? =
         findPool(game, poolId)?.let { pool ->
-            val slot = pool.upAgents.firstOrNull { it.id == id } ?: return@let null
+            val slot = snapshotOf(pool, operatorNames()).upAgents.firstOrNull { it.id == id } ?: return@let null
             if (requireActive && (!pool.enabled || !slot.active)) throw recruitmentInvalid("该卡池或UP密探已停用，不能新增记录")
             slot
         }
