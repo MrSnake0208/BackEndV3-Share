@@ -398,6 +398,37 @@ class RecruitmentMongoTest {
         }
     }
 
+    @Test fun `automatic catalog reads and filters are pure and first history write stays account scoped and idempotent`() {
+        val exchange = RecruitmentExchangeService(store, accountService, accounts, service, catalog, publisher, mapper, tx)
+        val visible = service.archive("u", "a")
+        val id = visible.pools.single().poolId
+        assertEquals("catalog_p", visible.pools.single().snapshot.catalogPoolId)
+        assertNull(visible.pools.single().progress)
+        assertTrue(service.page("u", "a", id, null, 10, null, null).items.isEmpty())
+        assertTrue(service.batches("u", "a", id, null, 10).items.isEmpty())
+        assertEquals(id, service.archive("u", "b").pools.single().poolId)
+        assertNull(store.archive("u", "a"))
+        assertNull(store.archive("u", "b"))
+        assertTrue(exchange.export("u", "a").pools.isEmpty())
+        assertFalse(store.hasSubstantiveData("u", "a"))
+        assertEquals(0L, accounts.findByUserIdAndAccountId("u", "a")!!.recruitmentFence)
+        val input =
+            request(
+                0,
+                "event_create",
+                """{"pool_id":"$id","mode":"historical","entries":[{"event_id":"first","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+                "auto-first",
+            )
+        val result = service.command("u", input)
+        assertEquals(result, service.command("u", input))
+        assertEquals(id, store.archive("u", "a")!!.pools.single().poolId)
+        assertEquals(17L, service.archive("u", "a").summary.knownTotalPulls)
+        assertEquals(listOf(id), exchange.export("u", "a").pools.map { it.poolId })
+        assertEquals(0L, service.archive("u", "b").summary.knownTotalPulls)
+        assertNull(store.archive("u", "b"))
+        assertEquals(404, assertThrows(InventoryApiException::class.java) { service.archive("foreign", "a") }.status.value())
+    }
+
     @Test fun `empty GETs are pure and zero baseline public pool preference permits game change`() {
         repeat(3) {
             service.archive("u", "a")
@@ -540,7 +571,7 @@ class RecruitmentMongoTest {
         val id = catalog.catalog("代号鸢").path("pools").first().path("pool_id").asText()
         command("pool_create", """{"catalog_pool_id":"$id","progress":null}""")
         val archive = service.archive("u", "a")
-        assertNull(archive.pools.single().progress)
+        assertNull(archive.pools.single { it.snapshot.catalogPoolId == id }.progress)
         assertEquals(0L, archive.summary.knownTotalPulls)
         assertEquals(1, archive.summary.unknownProgressCount)
         assertTrue(archive.summary.hasUnknown)

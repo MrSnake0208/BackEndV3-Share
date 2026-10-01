@@ -9,6 +9,8 @@ import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
+import com.lhs.share.hub.repository.entity.RecruitmentPool
+import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import io.mockk.every
 import io.mockk.mockk
@@ -78,6 +80,31 @@ class RecruitmentCatalogTest {
         verify(exactly = 4) { operators.findAllByOrderByOperatorIdAsc() }
         assertThrows(RecruitmentApiException::class.java) { catalog.catalog("other") }
         assertThrows(RecruitmentApiException::class.java) { catalog.snapshot("如鸢", pools.first().path("pool_id").asText()) }
+    }
+
+    @Test fun `account view includes all same game pools preserves saved identities and keeps export projection scoped`() {
+        saved["public-a"] = RecruitmentCatalogPool("public-a", "如鸢", "池A")
+        saved["public-b"] = RecruitmentCatalogPool("public-b", "如鸢", "停用池", enabled = false)
+        saved["other-game"] = RecruitmentCatalogPool("other-game", "代号鸢", "另一游戏")
+        val existing = listOf(RecruitmentPool("old-id", RecruitmentPoolSnapshot("旧名字", "如鸢", "public-a"), 8))
+        val view = catalog.projectPools(existing, "如鸢")
+        assertEquals(setOf("public-a", "public-b"), view.map { it.snapshot.catalogPoolId }.toSet())
+        assertEquals("old-id", view.single { it.snapshot.catalogPoolId == "public-a" }.poolId)
+        assertEquals(8L, view.single { it.poolId == "old-id" }.progress)
+        assertNull(view.single { it.snapshot.catalogPoolId == "public-b" }.progress)
+        assertEquals(view, catalog.projectPools(existing, "如鸢"))
+        assertEquals(listOf("old-id"), catalog.projectPools(existing).map { it.poolId })
+        assertEquals(listOf("old-id"), existing.map { it.poolId })
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test fun `automatic identities cannot collide with a retained legacy pool`() {
+        saved["public-a"] = RecruitmentCatalogPool("public-a", "如鸢", "公共池")
+        val old = RecruitmentPool("catalog:public-a", RecruitmentPoolSnapshot("旧临时池", "如鸢"), 4)
+        val view = catalog.projectPools(listOf(old), "如鸢")
+        assertEquals(2, view.map { it.poolId }.toSet().size)
+        assertEquals(old, view.first())
+        assertEquals(view, catalog.projectPools(listOf(old), "如鸢"))
     }
 
     @Test fun `administrator can bind placeholders retire missing slots and edit with CAS without changing slot identity`() {

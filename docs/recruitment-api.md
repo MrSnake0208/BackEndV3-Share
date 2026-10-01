@@ -5,11 +5,11 @@
 ## 读接口
 
 - `GET /catalog?game=如鸢|代号鸢` → `{catalog_revision,pools}`。池字段 `pool_id,game,name,pool_type,start_date,end_date,enabled,revision,up_agents`，兼容保留派生的 `up_agent_ids,up_agent_names,unmapped_up_agent_names,up_status`；未知日期为空。目录含停用池和退役槽以便解析历史，新增时服务端校验启用状态。
-- `GET /archive?account_id=...` → `{account_id,game_snapshot,archive_revision,baseline,current_pool_id,pools,temporary_agents,summary,pool_summaries,game_mismatch}`。pool_summaries为以pool_id为key的summary对象，不含账号baseline，基于服务端完整历史聚合；空档案 revision=0、baseline=0、空数组。
-- `GET /events?account_id=...&pool_id=...&cursor=...&limit=50&order=desc&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` → `{items,next_cursor,archive_revision}`。limit 1–100，pool/date可省略；order为asc（从早到晚）或desc（从新到旧，默认），按用户录入/调整的顺序排序，不声称真实获得时刻排序。游标绑定作用域、筛选、方向和revision，修改后继续旧页返回409，应重新读首页，切换方向须从首页重读。日期筛选不包含未知日期。
-- `GET /batches?account_id=...&pool_id=...&cursor=...&limit=50` → `{items,next_cursor,archive_revision}`，仅有效计数批次；pool/cursor可省略，limit1–100，按创建时间/ID倒序。包括节点已单独删完但计数仍有效的批次。游标绑定scope/pool/revision，旧页409。与archive/events组合时比较三者revision。
+- `GET /archive?account_id=...` → `{account_id,game_snapshot,archive_revision,baseline,current_pool_id,pools,temporary_agents,summary,pool_summaries,game_mismatch}`。pool_summaries为以pool_id为key的summary对象，不含账号baseline，基于服务端完整历史聚合；空档案 revision=0、baseline=0；pools 自动展示账号真实游戏的全部公共卡池（含停用池），合并已有个人池，保留其 ID 和进度。未保存的目录池使用响应中的稳定 pool_id，progress=null；读取不创建档案，summary 只统计实际保存的状态。游戏快照不一致时仅投影原个人池，保持只读。
+- `GET /events?account_id=...&pool_id=...&cursor=...&limit=50&order=desc&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` → `{items,next_cursor,archive_revision}`。limit 1–100，pool/date可省略；order为asc（从早到晚）或desc（从新到旧，默认），按用户录入/调整的顺序排序，不声称真实获得时刻排序。游标绑定作用域、筛选、方向和revision，修改后继续旧页返回409，应重新读首页，切换方向须从首页重读。日期筛选不包含未知日期。尚未保存的本游戏公共池也可筛选，返回空历史，不写入个人档案。
+- `GET /batches?account_id=...&pool_id=...&cursor=...&limit=50` → `{items,next_cursor,archive_revision}`，仅有效计数批次；pool/cursor可省略，limit1–100，按创建时间/ID倒序。包括节点已单独删完但计数仍有效的批次。游标绑定scope/pool/revision，旧页409。与archive/events组合时比较三者revision；同样支持未保存的本游戏公共池筛选。
 
-`pools` 条目：`{pool_id,snapshot,progress,mapped_snapshot}`。snapshot=`{name,game,catalog_pool_id,start_date,end_date,up_agents,up_agent_ids,up_status,up_agent_names,unmapped_up_agent_names,catalog_revision}`；up_status目录枚举为verified/partial/selection/unknown，仅verified且名单非空时可辅助UP判断。`mapped_snapshot` 仅为旧用户临时池的存量兼容字段，不能再新建或映射临时池。progress=null表示未知。新池必须显式提供初始进度：未知填null，确认没有尾抽填0，已知则填非负整数；不得将未确认的进度默认为0。未知进度计入summary的unknown_progress_count，当前录入前需先校准。
+`pools` 条目：`{pool_id,snapshot,progress,mapped_snapshot}`。snapshot=`{name,game,catalog_pool_id,start_date,end_date,up_agents,up_agent_ids,up_status,up_agent_names,unmapped_up_agent_names,catalog_revision}`；up_status目录枚举为verified/partial/selection/unknown，仅verified且名单非空时可辅助UP判断。`mapped_snapshot` 仅为旧用户临时池的存量兼容字段，不能再新建或映射临时池。progress=null表示未知。目录展示不等于用户已开始抽取；只有实际保存的未知进度计入账号 unknown_progress_count。显式使用兼容 pool_create 时必须提供初始进度：未知填null，确认没有尾抽填0，已知则填非负整数；不得将未确认的进度默认为0。已保存卡池的未知进度计入summary的unknown_progress_count，当前录入前需先校准。
 
 `up_agents` 条目：`{id,name,operator_id,active}`。管理员配置的 N 个有效项仅代表 UP 名单，非 UP 仍可从本游戏绝密图鉴选择。`id` 是固定的池内身份，格式为 `<catalog_pool_id>:up:<标识>`；`operator_id=null` 表示占位，管理员绑定图鉴密探后仍保留同一 `id`。选 UP 项录入时 `agent_id` 使用槽 `id`、`temporary=false`；选图鉴非 UP 时使用官方图鉴 ID。新增或编辑换选时直接提交当前 UP 的官方 ID，服务端也规范为同池槽 ID；用户明确填写的 `up_status` 不被覆盖。普通用户不能创建槽或绑定图鉴。
 
@@ -36,10 +36,12 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 `POST /commands` 公共外壳：
 
 ```json
-{"account_id":"acc_...","expected_revision":0,"request_id":"uuid","operation":"pool_create","data":{"catalog_pool_id":"admin_pool_id","progress":null}}
+{"account_id":"acc_...","expected_revision":0,"request_id":"uuid","operation":"progress_set","data":{"pool_id":"catalog:admin_pool_id","progress":0}}
 ```
 
 成功→`{archive_revision,event_ids,pool_id,agent_id,batch_id}`，调用后GET权威状态。每次新草稿/重确认用新request_id；同作用域成功原请求重试先返回原结果，即使expected_revision过期也成功，且不重复发送SSE。同request_id不同内容409。
+
+set_current_pool、progress_set、event_create、batch_create 可直接使用 archive 响应中的未保存公共池 ID，服务端在同一账号 fence / CAS 事务内按需保存目标池，不需先 pool_create。新保存的池默认进度未知，校正命令的明确值除外；current 录入仍要求先校正，historical 可直接补录。未操作的目录池不会保存，也不会进入 export；启用状态校验继续用于新增结果。兼容保留 pool_create，但页面不再提供手动添加入口。
 
 | operation | data |
 | --- | --- |

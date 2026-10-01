@@ -36,8 +36,23 @@ class RecruitmentMutation(
 ) {
     private val decoder = RecruitmentRequestDecoder(mapper)
 
-    fun apply(current: RecruitmentArchive, operation: String, data: JsonNode, now: Instant): RecruitmentMutationResult {
+    fun apply(archive: RecruitmentArchive, operation: String, data: JsonNode, now: Instant): RecruitmentMutationResult {
         if (!data.isObject) throw recruitmentInvalid("操作数据必须是对象")
+        val poolId = when (operation) {
+            "set_current_pool" -> read<RecruitmentPoolSelect>(data).poolId
+            "progress_set" -> read<RecruitmentProgressSet>(data).poolId
+            "event_create" -> read<RecruitmentEventCreate>(data).poolId
+            "batch_create" -> read<RecruitmentBatchCreate>(data).poolId
+            else -> null
+        }
+        val current = if (poolId == null || archive.pools.any { it.poolId == poolId }) {
+            archive
+        } else {
+            if (archive.pools.size >= 500) throw recruitmentInvalid("卡池档案已达500个上限")
+            val selected = catalog.projectPools(archive.pools, archive.gameSnapshot).firstOrNull { it.poolId == poolId }
+                ?: throw recruitmentNotFound("pool")
+            archive.copy(pools = archive.pools + selected, currentPoolId = archive.currentPoolId ?: poolId)
+        }
         var next = current
         var result = RecruitmentCommandResponse(current.archiveRevision + 1)
         when (operation) {
@@ -313,7 +328,7 @@ class RecruitmentMutation(
         return catalog.operator(current.gameSnapshot, id)
     }
 
-    internal fun projectPools(pools: List<RecruitmentPool>): List<RecruitmentPool> = catalog.projectPools(pools)
+    internal fun projectPools(pools: List<RecruitmentPool>, game: String? = null): List<RecruitmentPool> = catalog.projectPools(pools, game)
     internal fun projectEvents(events: List<RecruitmentEvent>): List<RecruitmentEvent> = catalog.projectEvents(events)
 
     private fun pool(current: RecruitmentArchive, id: String) =

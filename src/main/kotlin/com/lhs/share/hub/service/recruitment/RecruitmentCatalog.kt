@@ -157,11 +157,23 @@ class RecruitmentCatalog(
         return value
     }
 
-    fun projectPools(pools: List<RecruitmentPool>): List<RecruitmentPool> {
-        if (pools.isEmpty()) return pools
+    fun projectPools(pools: List<RecruitmentPool>, game: String? = null): List<RecruitmentPool> {
+        if (pools.isEmpty() && game == null) return pools
         val latest = all().associateBy { it.poolId }
         val names = operatorNames()
-        return pools.map { pool ->
+        val visible = pools.toMutableList()
+        if (game != null) {
+            val linked = pools.mapNotNull { (it.mappedSnapshot ?: it.snapshot).catalogPoolId }.toSet()
+            val ids = pools.map { it.poolId }.toMutableSet()
+            latest.values.filter { it.game == game && it.poolId !in linked }.forEach { pool ->
+                val base = "catalog:${pool.poolId}"
+                var id = base
+                var suffix = 0
+                while (!ids.add(id)) id = "$base:${++suffix}"
+                visible.add(RecruitmentPool(id, snapshotOf(pool, names)))
+            }
+        }
+        return visible.map { pool ->
             val reference = pool.mappedSnapshot ?: pool.snapshot
             val snapshot = latest[reference.catalogPoolId]?.takeIf { it.game == reference.game }?.let { snapshotOf(it, names) }
                 ?: return@map pool
