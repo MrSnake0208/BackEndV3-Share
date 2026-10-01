@@ -55,6 +55,7 @@ export type AdminRole = "PLATFORM_ADMIN" | "SUPER_ADMIN";
 
 export type StaticAdminPermission =
   | "operator_catalog:write"
+  | "recruitment_catalog:write"
   | "admin:role:manage"
   | "admin:feedback_access:manage"
   | "admin:audit:read";
@@ -120,6 +121,7 @@ export function canManageAnyFeedback(access: AdminAccess | undefined): boolean {
 | 前端功能 | 展示条件 |
 | --- | --- |
 | 公共密探图鉴管理 | `operator_catalog:write` |
+| 招募卡池及 UP 占位管理（`/recruitment/admin`） | `recruitment_catalog:write` |
 | 跨用户反馈工单 | `manage_areas.length > 0` |
 | 管理员角色管理 | `admin:role:manage` |
 | 反馈模块授权管理 | `admin:feedback_access:manage` |

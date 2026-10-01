@@ -170,7 +170,7 @@ requireFeedbackManage(userId, area)
 - 管理员接口统一经过此服务检查；
 - 角色绑定从 HubBackend 数据库读取；
 - `SUPER_ADMIN` 继承平台管理、角色管理和全量反馈权限；
-- 平台管理员只获得公共图鉴权限；
+- 平台管理员获得公共内容维护等平台权限；招募目录使用 `recruitment_catalog:write`，具体集合以 `AdminPermission` 为准；
 - 反馈模块管理员继续通过 `feedback_access_grants` 判断区域权限；
 - 未授权返回统一的 403；
 - 不把权限判断交给前端，也不只检查 JWT 中签发时保存的 authority。
@@ -182,6 +182,7 @@ requireFeedbackManage(userId, area)
 | 现有接口 | 目标权限 |
 | --- | --- |
 | `/v1/admin/operator-catalog/**` | `operator_catalog:write`，超级管理员隐含拥有 |
+| `/v1/admin/recruitment-catalog/**` | `recruitment_catalog:write`，平台管理员及超级管理员 |
 | `/v1/admin/feedback-access` | `admin:feedback_access:manage`，仅超级管理员 |
 | `/v1/reports/**` 的跨用户查询 | `feedback:<area>:read` 或超级管理员 |
 | `/v1/reports/**` 的回复和状态处理 | `feedback:<area>:manage` 或超级管理员 |

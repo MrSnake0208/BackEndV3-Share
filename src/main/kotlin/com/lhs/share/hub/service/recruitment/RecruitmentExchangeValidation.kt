@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentExchangeDocument
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
+import com.lhs.share.hub.repository.entity.RecruitmentArchive
+import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import java.time.Instant
 
@@ -12,7 +15,7 @@ internal const val RECRUITMENT_EXCHANGE_MAX_EVENTS = 20_000
 internal const val RECRUITMENT_EXCHANGE_MAX_BYTES = 5 * 1024 * 1024
 internal val RECRUITMENT_EXCHANGE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-/** Validate the whole graph before planning any writes; catalog availability is deliberately irrelevant. */
+/** Structural validation also permits exporting legacy facts; new imports must pass the managed-directory boundary. */
 internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
     private val decoder = RecruitmentRequestDecoder(mapper)
 
@@ -105,6 +108,61 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         }
     }
 
+    fun validateImport(
+        document: RecruitmentExchangeDocument,
+        current: RecruitmentArchive,
+        events: List<RecruitmentEvent>,
+        batches: List<RecruitmentBatch>,
+        catalog: RecruitmentCatalog,
+    ) {
+        val existingPools = current.pools.associateBy { it.poolId }
+        val existingAgents = current.temporaryAgents.map { it.agentId }.toSet()
+        val existingEvents = events.associateBy { it.eventId }
+        val existingBatches = batches.map { it.batchId }.toSet()
+        val pools = document.pools.associateBy { it.poolId }
+        val definitions = document.pools.mapNotNull { it.snapshot.catalogPoolId }.distinct()
+            .associateWith { catalog.findPool(document.game, it) }
+        val checkedOperators = mutableSetOf<String>()
+        document.pools.forEach { pool ->
+            val old = existingPools[pool.poolId]
+            val catalogId = pool.snapshot.catalogPoolId
+            if (catalogId == null) {
+                if (old == null || old.snapshot.catalogPoolId != null) fail("不能通过备份新增用户自定义卡池")
+            } else {
+                val definition = definitions[catalogId]
+                if (definition == null && old?.snapshot?.catalogPoolId != catalogId) fail("备份引用的管理员卡池不存在")
+                if (definition != null && pool.snapshot.upAgents.any { agent -> definition.upAgents.none { it.id == agent.id } }) {
+                    fail("备份UP槽不属于该管理员卡池")
+                }
+            }
+        }
+        if (document.temporaryAgents.any { it.agentId !in existingAgents }) fail("不能通过备份新增用户临时密探")
+        document.batches.forEach { batch ->
+            if (batch.batchId !in existingBatches) {
+                val catalogId = pools.getValue(batch.poolId).snapshot.catalogPoolId
+                    ?: fail("旧自定义卡池不能通过备份新增计数批次")
+                if (definitions[catalogId] == null) fail("备份引用的管理员卡池不存在")
+            }
+        }
+        document.events.forEach { event ->
+            val old = existingEvents[event.eventId]
+            // An existing legacy fact may be re-imported for dedupe/conflict; it is never overwritten by the merge policy.
+            if (old != null && old.poolId == event.poolId && old.agentSnapshot.agentId == event.agentSnapshot.agentId &&
+                old.agentSnapshot.temporary == event.agentSnapshot.temporary
+            ) {
+                return@forEach
+            }
+            val pool = pools.getValue(event.poolId)
+            val catalogId = pool.snapshot.catalogPoolId ?: fail("旧自定义卡池不能通过备份新增结果")
+            if (event.poolSnapshot.catalogPoolId != catalogId) fail("记录快照与所属管理员卡池不一致")
+            val definition = definitions[catalogId] ?: fail("备份引用的管理员卡池不存在")
+            if (event.agentSnapshot.temporary) fail("不能通过备份新增用户临时密探结果")
+            if (definition.upAgents.none { it.id == event.agentSnapshot.agentId } && checkedOperators.add(event.agentSnapshot.agentId)) {
+                catalog.operator(document.game, event.agentSnapshot.agentId)
+            }
+        }
+    }
+
     private fun snapshot(value: RecruitmentPoolSnapshot, game: String) {
         text(value.name, 128)
         if (value.game != game) fail("卡池快照游戏与备份不一致")
@@ -113,6 +171,12 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         if (value.upStatus !in setOf("verified", "partial", "selection", "unknown")) fail("卡池UP状态不正确")
         unique(value.upAgentIds)
         if (value.upAgentIds.size > 1000 || value.upAgentNames.size > 1000 || value.unmappedUpAgentNames.size > 1000) fail("UP名单过长")
+        unique(value.upAgents.map { it.id })
+        if (value.upAgents.size > 1000) fail("UP槽名单过长")
+        value.upAgents.forEach {
+            text(it.name, 128)
+            it.operatorId?.let(::id)
+        }
         (value.upAgentNames + value.unmappedUpAgentNames).forEach { text(it, 128) }
         value.catalogRevision?.let { text(it, 128) }
         value.poolType?.let { text(it, 128) }

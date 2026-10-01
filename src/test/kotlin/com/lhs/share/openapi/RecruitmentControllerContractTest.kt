@@ -41,9 +41,12 @@ class RecruitmentControllerContractTest {
     private lateinit var mvc: MockMvc
 
     @BeforeEach fun setup() {
-        mvc = MockMvcBuilders.standaloneSetup(RecruitmentController(service, RecruitmentCatalog(mapper), helper, mapper))
-            .setControllerAdvice(RecruitmentExceptionHandler(), BetaExceptionHandler())
-            .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
+        mvc =
+            MockMvcBuilders.standaloneSetup(
+                RecruitmentController(service, RecruitmentCatalog(mapper, mockk(relaxed = true), mockk(relaxed = true)), helper, mapper),
+            )
+                .setControllerAdvice(RecruitmentExceptionHandler(), BetaExceptionHandler())
+                .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
 
     @Test fun `catalog is public and private roots retain beta policy`() {

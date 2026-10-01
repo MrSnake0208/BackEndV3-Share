@@ -10,6 +10,8 @@ import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportStats
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
+import com.lhs.share.hub.repository.entity.RecruitmentPool
+import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import java.time.Instant
 
 internal data class RecruitmentExchangePlan(
@@ -32,7 +34,7 @@ internal data class RecruitmentExchangePlan(
     )
 }
 
-/** One bounded, explicit merge policy. No catalog lookup, record resurrection or implicit state addition. */
+/** One bounded merge policy, after directory authorization. No record resurrection or implicit state addition. */
 internal fun recruitmentExchangePlan(
     current: RecruitmentArchive,
     currentEvents: List<RecruitmentEvent>,
@@ -61,7 +63,7 @@ internal fun recruitmentExchangePlan(
                 pools[pool.poolId] = pool.copy(progress = if (useState) pool.progress else null)
                 item("pool", pool.poolId, "add", "新增卡池快照；当前进度按状态策略处理")
             }
-            old.copy(progress = null) == pool.copy(progress = null) -> {
+            poolBusiness(old) == poolBusiness(pool) -> {
                 if (useState) pools[pool.poolId] = old.copy(progress = pool.progress)
                 item("pool", pool.poolId, "duplicate", "已有相同卡池快照")
             }
@@ -241,8 +243,26 @@ internal fun RecruitmentBatch.exchange() = RecruitmentExchangeBatch(
     importedAt,
 )
 
-// Target placement and storage clocks change on import/reorder; snapshots, spans, dates, notes, provenance and deletion remain business facts.
+// Directory display metadata can change without changing the stable pool/agent reference or personal facts.
+private fun snapshotBusiness(value: RecruitmentPoolSnapshot) = if (value.catalogPoolId == null) {
+    value
+} else {
+    RecruitmentPoolSnapshot("", value.game, value.catalogPoolId)
+}
+private fun poolBusiness(value: RecruitmentPool) = value.copy(
+    progress = null,
+    snapshot = snapshotBusiness(value.snapshot),
+    mappedSnapshot = value.mappedSnapshot?.let(::snapshotBusiness),
+)
+
+// Target placement and storage clocks change on import/reorder; spans, dates, notes, provenance and deletion remain business facts.
 private fun eventBusiness(value: RecruitmentExchangeEvent) = value.copy(
+    poolSnapshot = snapshotBusiness(value.poolSnapshot),
+    agentSnapshot = if (value.poolSnapshot.catalogPoolId != null && !value.agentSnapshot.temporary) {
+        value.agentSnapshot.copy(name = "", catalogRevision = null)
+    } else {
+        value.agentSnapshot
+    },
     sortOrder = 0,
     createdAt = Instant.EPOCH,
     updatedAt = Instant.EPOCH,

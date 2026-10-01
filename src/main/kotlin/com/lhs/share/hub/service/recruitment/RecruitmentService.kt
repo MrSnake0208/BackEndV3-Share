@@ -45,7 +45,7 @@ class RecruitmentService(
             val unknownProgress = current.pools.count { it.progress == null }
             RecruitmentArchiveResponse(
                 accountId, current.gameSnapshot, current.archiveRevision, current.baseline,
-                current.currentPoolId, current.pools, current.temporaryAgents,
+                current.currentPoolId, mutation.projectPools(current.pools), current.temporaryAgents,
                 RecruitmentSummary(
                     current.baseline + totals.recordedPulls + totals.batchPulls + progress, totals.recordedPulls, totals.batchPulls,
                     progress, totals.eventCount, totals.exactCount, totals.unknownCount, unknownProgress,
@@ -135,7 +135,7 @@ class RecruitmentService(
             } else {
                 null
             }
-            RecruitmentEventPage(items, next, revision)
+            RecruitmentEventPage(mutation.projectEvents(items), next, revision)
         },
     )
 

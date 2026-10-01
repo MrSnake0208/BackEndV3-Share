@@ -27,6 +27,7 @@ class RecruitmentExchangeService(
     private val accountService: SubAccountService,
     private val accounts: SubAccountRepository,
     private val recruitment: RecruitmentService,
+    private val catalog: RecruitmentCatalog,
     private val events: AccountEventService,
     private val mapper: ObjectMapper,
     @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionTemplate,
@@ -42,7 +43,20 @@ class RecruitmentExchangeService(
             val account = accountService.requireAccount(userId, accountId)
             val current = store.archive(userId, accountId) ?: recruitment.empty(userId, accountId, account.game)
             val (records, batches) = history(userId, accountId)
-            exchangeDocument(current, records, batches, clock.instant()).also {
+            val projected = catalog.projectPools(current.pools).associateBy { it.poolId }
+            val backup = current.copy(
+                pools = current.pools.map { pool ->
+                    val latest = projected.getValue(pool.poolId)
+                    pool.copy(
+                        snapshot = pool.snapshot.copy(upAgents = latest.snapshot.upAgents),
+                        mappedSnapshot = pool.mappedSnapshot?.copy(
+                            upAgents =
+                            latest.mappedSnapshot?.upAgents ?: pool.mappedSnapshot.upAgents,
+                        ),
+                    )
+                },
+            )
+            exchangeDocument(backup, records, batches, clock.instant()).also {
                 validation.validate(it)
                 if (mapper.writeValueAsBytes(it).size > RECRUITMENT_EXCHANGE_MAX_BYTES) {
                     throw recruitmentInvalid("完整备份超过5MiB，不能导出无法恢复的文件")
@@ -63,6 +77,7 @@ class RecruitmentExchangeService(
                 val current = store.archive(userId, input.accountId) ?: recruitment.empty(userId, input.accountId, account.game)
                 if (current.gameSnapshot != account.game) gameMismatch()
                 val (records, batches) = history(userId, input.accountId)
+                validation.validateImport(document, current, records, batches, catalog)
                 recruitmentExchangePlan(current, records, batches, document, input.options)
             },
         )
@@ -105,6 +120,7 @@ class RecruitmentExchangeService(
                     if (current.gameSnapshot != account.game) gameMismatch()
                     if (current.archiveRevision != input.expectedRevision) throw recruitmentConflict("目标档案已变化，请重新预览")
                     val (records, batches) = history(userId, input.accountId)
+                    validation.validateImport(document, current, records, batches, catalog)
                     val plan = recruitmentExchangePlan(current, records, batches, document, input.options)
                     if (!plan.canCommit) throw recruitmentInvalid("请明确确认候选总抽数后重新预览")
                     checkPlanSize(plan, clock.instant())

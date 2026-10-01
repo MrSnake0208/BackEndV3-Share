@@ -204,6 +204,13 @@
               "type": "null"
             }
           ]
+        },
+        "up_agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/up_agent"
+          },
+          "maxItems": 1000
         }
       },
       "required": [
@@ -557,7 +564,41 @@
         "total_pull_count",
         "created_at"
       ]
+    },
+    "up_agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operator_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "$comment": "Stable pool-local UP identity. operator_id=null is an administrator placeholder; binding preserves id. Snapshot metadata cannot create or overwrite the public directory."
     }
   },
-  "$comment": "UTF-8 serialized document <=5MiB. Server additionally validates unique IDs/order, game/snapshot agreement, graph references, tombstone metadata and batch arithmetic."
+  "$comment": "UTF-8 serialized document <=5MiB. Server additionally validates unique IDs/order, game/snapshot agreement, graph references, tombstone metadata and batch arithmetic. Import additionally authorizes existing administrator pools and their UP slot references; disabled pools and retired slots may restore history. New user-defined pools, temporary agents, legacy-pool events/batches and cross-pool slots are rejected; existing legacy facts remain exportable and comparable."
 }

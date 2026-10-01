@@ -10,13 +10,16 @@ import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportCommitR
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportOptions
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportPreviewRequest
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
@@ -72,9 +75,16 @@ class RecruitmentExchangeMongoTest {
         mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), tx, recruitmentRepository = store, accountEvents = publisher,
     )
-    private val mutation = RecruitmentMutation(store, mockk<OperatorCatalogRepository>(), RecruitmentCatalog(mapper), mapper)
+    private val directory = RecruitmentCatalogRepository(template)
+    private val operators = mockk<OperatorCatalogRepository> {
+        every { findByOperatorId(any()) } returns null
+        every { count() } returns 0
+        every { findAllByOrderByOperatorIdAsc() } returns emptyList()
+    }
+    private val catalog = RecruitmentCatalog(mapper, directory, operators)
+    private val mutation = RecruitmentMutation(store, catalog, mapper)
     private val core = RecruitmentService(store, accountService, accounts, mutation, publisher, mapper, tx)
-    private val service = RecruitmentExchangeService(store, accountService, accounts, core, publisher, mapper, tx)
+    private val service = RecruitmentExchangeService(store, accountService, accounts, core, catalog, publisher, mapper, tx)
 
     @BeforeEach fun setup() {
         listOf(
@@ -83,6 +93,7 @@ class RecruitmentExchangeMongoTest {
             RecruitmentEvent::class.java,
             RecruitmentBatch::class.java,
             RecruitmentRequestRecord::class.java,
+            RecruitmentCatalogPool::class.java,
         ).forEach { type ->
             template.createCollection(type)
             MongoPersistentEntityIndexResolver(template.converter.mappingContext).resolveIndexFor(type).forEach {
@@ -90,6 +101,15 @@ class RecruitmentExchangeMongoTest {
             }
         }
         listOf("a", "b").forEach { accounts.insert(SubAccount(userId = "u", accountId = it, name = it, game = "如鸢")) }
+        directory.save(
+            RecruitmentCatalogPool(
+                "test_pool",
+                "如鸢",
+                "管理员新池",
+                revision = 1,
+                upAgents = listOf(RecruitmentUpAgent("test_pool:up:A", "占位A")),
+            ),
+        )
     }
 
     @AfterEach fun cleanup() {
@@ -107,13 +127,12 @@ class RecruitmentExchangeMongoTest {
         ),
     )
     private fun initialize(accountId: String = "a") {
-        command(accountId, "pool_create", """{"pool_id":"p","name":"临时池","progress":0}""")
-        command(accountId, "temporary_agent_create", """{"agent_id":"tmp_A","name":"绝密A"}""")
+        command(accountId, "pool_create", """{"pool_id":"p","catalog_pool_id":"test_pool","progress":0}""")
     }
     private fun historical(accountId: String = "a", id: String = "E", span: Int = 17) = command(
         accountId,
         "event_create",
-        """{"pool_id":"p","mode":"historical","entries":[{"event_id":"$id","agent_id":"tmp_A","pull_span":$span,"acquired_date":"2026-09-30","note":"原始备注"}]}""",
+        """{"pool_id":"p","mode":"historical","entries":[{"event_id":"$id","agent_id":"test_pool:up:A","pull_span":$span,"acquired_date":"2026-09-30","note":"原始备注"}]}""",
     )
     private fun backup(): JsonNode = mapper.valueToTree(service.export("u", "a"))
     private fun prepared(
@@ -143,12 +162,12 @@ class RecruitmentExchangeMongoTest {
         command(
             "a",
             "batch_create",
-            """{"pool_id":"p","mode":"historical","batch_id":"B","total_pull_count":80,"entries":[{"event_id":"N","agent_id":"tmp_A","pull_span":null}]}""",
+            """{"pool_id":"p","mode":"historical","batch_id":"B","total_pull_count":80,"entries":[{"event_id":"N","agent_id":"test_pool:up:A","pull_span":null}]}""",
         )
         command(
             "a",
             "batch_create",
-            """{"pool_id":"p","mode":"historical","batch_id":"BD","total_pull_count":40,"entries":[{"event_id":"ND","agent_id":"tmp_A","pull_span":10}]}""",
+            """{"pool_id":"p","mode":"historical","batch_id":"BD","total_pull_count":40,"entries":[{"event_id":"ND","agent_id":"test_pool:up:A","pull_span":10}]}""",
         )
         command("a", "batch_delete", """{"batch_id":"BD","confirm_total_pull_count":40}""")
         val source = service.export("u", "a")
@@ -181,7 +200,7 @@ class RecruitmentExchangeMongoTest {
         assertTrue(repeated.eventIds.isEmpty())
         assertEquals(2L, repeated.archiveRevision)
         assertEquals(4, store.exchangeEvents("u", "b", 20_001).size)
-        val restarted = RecruitmentExchangeService(store, accountService, accounts, core, publisher, mapper, tx)
+        val restarted = RecruitmentExchangeService(store, accountService, accounts, core, catalog, publisher, mapper, tx)
         assertEquals(first, restarted.commit("u", input))
         assertEquals(2L, store.archive("u", "b")!!.archiveRevision)
         verify(exactly = 1) {
@@ -216,6 +235,50 @@ class RecruitmentExchangeMongoTest {
         assertNotNull(store.event("u", "b", "E")!!.deletedAt)
     }
 
+    @Test fun `placeholder binding inherits restored histories and old backup dedupes without rewriting personal facts`() {
+        initialize()
+        historical()
+        val raw = store.event("u", "a", "E")!!
+        val body = backup()
+        val sourceRevision = store.archive("u", "a")!!.archiveRevision
+        val definition = directory.find("test_pool")!!
+        assertTrue(
+            directory.save(
+                definition.copy(
+                    revision = definition.revision + 1,
+                    enabled = false,
+                    upAgents = definition.upAgents.map { it.copy(name = "杨修", operatorId = "char_001_yangxiu", active = false) },
+                ),
+            ),
+        )
+        assertEquals(sourceRevision, store.archive("u", "a")!!.archiveRevision)
+        assertEquals(raw, store.event("u", "a", "E"))
+        val reboundBackup = service.export("u", "a")
+        assertEquals("char_001_yangxiu", reboundBackup.pools.single().snapshot.upAgents.single().operatorId)
+        assertEquals("杨修", reboundBackup.pools.single().snapshot.upAgents.single().name)
+        assertEquals(raw.agentSnapshot, reboundBackup.events.single().agentSnapshot)
+        assertNull(store.archive("u", "a")!!.pools.single().snapshot.upAgents.single().operatorId)
+        assertEquals(sourceRevision, store.archive("u", "a")!!.archiveRevision)
+        val displayed = core.page("u", "a", null, null, 50, null, null).items.single()
+        assertEquals("杨修", displayed.agentSnapshot.name)
+        assertEquals("test_pool:up:A", displayed.agentSnapshot.agentId)
+        service.commit("u", prepared(body))
+        val target = store.event("u", "b", "E")!!
+        assertEquals(raw.agentSnapshot, target.agentSnapshot)
+        assertEquals(raw.poolSnapshot, target.poolSnapshot)
+        assertEquals(raw.pullSpan, target.pullSpan)
+        assertEquals(raw.acquiredDate, target.acquiredDate)
+        assertEquals(raw.note, target.note)
+        assertEquals("杨修", core.page("u", "b", null, null, 50, null, null).items.single().agentSnapshot.name)
+        assertEquals(17L, core.archive("u", "b").summary.knownTotalPulls)
+        assertThrows(RecruitmentApiException::class.java) { historical("b", "new") }
+        val beforeRepeat = store.archive("u", "b")!!
+        val duplicate = service.preview("u", RecruitmentImportPreviewRequest("b", body))
+        assertEquals("duplicate", duplicate.items.single { it.entityType == "event" }.status)
+        assertEquals(beforeRepeat, store.archive("u", "b"))
+        assertEquals(1, store.exchangeEvents("u", "b", 20_001).size)
+    }
+
     @Test fun `same IDs with changed facts conflict and reimport after target reorder remains duplicate`() {
         initialize()
         historical(id = "E1")
@@ -228,7 +291,7 @@ class RecruitmentExchangeMongoTest {
         command(
             "a",
             "event_update",
-            """{"event_id":"E1","entry":{"agent_id":"tmp_A","pull_span":18,"acquired_date":"2026-09-30","note":"原始备注"}}""",
+            """{"event_id":"E1","entry":{"agent_id":"test_pool:up:A","pull_span":18,"acquired_date":"2026-09-30","note":"原始备注"}}""",
         )
         val changed = service.preview("u", RecruitmentImportPreviewRequest("b", backup()))
         assertEquals("conflict", changed.items.single { it.id == "E1" }.status)
@@ -287,13 +350,13 @@ class RecruitmentExchangeMongoTest {
         command(
             "a",
             "batch_create",
-            """{"pool_id":"p","mode":"historical","batch_id":"B","total_pull_count":80,"entries":[{"event_id":"N","agent_id":"tmp_A","pull_span":null}]}""",
+            """{"pool_id":"p","mode":"historical","batch_id":"B","total_pull_count":80,"entries":[{"event_id":"N","agent_id":"test_pool:up:A","pull_span":null}]}""",
         )
         val input = prepared(backup())
         val fence = accounts.findByUserIdAndAccountId("u", "b")!!.recruitmentFence
         val failing = spyk(store)
         every { failing.insertRequest(any()) } throws IllegalStateException("synthetic post-write failure")
-        val broken = RecruitmentExchangeService(failing, accountService, accounts, core, publisher, mapper, tx)
+        val broken = RecruitmentExchangeService(failing, accountService, accounts, core, catalog, publisher, mapper, tx)
         val preview = broken.preview("u", RecruitmentImportPreviewRequest("b", input.document))
         val brokenInput = input.copy(previewToken = preview.previewToken, documentHash = preview.documentHash)
         assertThrows(IllegalStateException::class.java) { broken.commit("u", brokenInput) }
@@ -319,7 +382,7 @@ class RecruitmentExchangeMongoTest {
                 return accounts.fenceRecruitmentWrite(userId, accountId, expectedGame)
             }
         }
-        val racing = RecruitmentExchangeService(store, accountService, competing, core, publisher, mapper, tx)
+        val racing = RecruitmentExchangeService(store, accountService, competing, core, catalog, publisher, mapper, tx)
         val inputs = (1..2).map {
             val preview = racing.preview("u", RecruitmentImportPreviewRequest("b", node))
             RecruitmentImportCommitRequest(

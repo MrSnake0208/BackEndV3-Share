@@ -13,6 +13,9 @@ import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandRespo
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportItem
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportPreviewResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportStats
+import com.lhs.share.hub.repository.entity.RecruitmentPool
+import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.service.recruitment.RecruitmentApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentExchangeService
 import io.mockk.every
@@ -84,6 +87,41 @@ class RecruitmentExchangeControllerContractTest {
         ).andExpect(
             status().isOk,
         ).andExpect(jsonPath("$.data.archive_revision").value(8)).andExpect(jsonPath("$.data.event_ids[0]").value("e"))
+    }
+
+    @Test fun `export retains stable managed UP identity and import policy failure has no successful envelope`() {
+        every { helper.requireUserId() } returns "u"
+        every { service.export("u", "a") } returns RecruitmentExchangeDocument(
+            "yuanhub.recruitment.v1", Instant.parse("2026-10-01T00:00:00Z"), RecruitmentExchangeAccount("a"), "如鸢", 7, 0, "p",
+            listOf(
+                RecruitmentPool(
+                    "p",
+                    RecruitmentPoolSnapshot(
+                        "新池",
+                        "如鸢",
+                        "managed",
+                        upAgents = listOf(RecruitmentUpAgent("managed:up:1", "占位1")),
+                    ),
+                    0,
+                ),
+            ),
+            emptyList(), emptyList(), emptyList(),
+        )
+        mvc.perform(get("/v1/recruitment/export").param("account_id", "a")).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.pools[0].snapshot.up_agents[0].id").value("managed:up:1"))
+            .andExpect(jsonPath("$.data.pools[0].snapshot.up_agents[0].operator_id").isEmpty)
+            .andExpect(jsonPath("$.data.pools[0].snapshot.up_agents[0].active").value(true))
+        every { service.preview("u", any()) } throws RecruitmentApiException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "recruitment_invalid",
+            "不能通过备份新增用户自定义卡池",
+        )
+        mvc.perform(
+            post("/v1/recruitment/import/preview").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"account_id":"a","document":{}}"""),
+        ).andExpect(status().isUnprocessableEntity).andExpect(jsonPath("$.error.code").value("recruitment_invalid"))
+            .andExpect(jsonPath("$.data").doesNotExist())
+        verify(exactly = 0) { service.commit(any(), any()) }
     }
 
     @Test fun `exchange errors retain actual HTTP statuses and malformed envelopes never reach service`() {

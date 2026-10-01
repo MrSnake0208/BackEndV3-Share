@@ -1,6 +1,7 @@
 package com.lhs.share.hub.controller.recruitment.response
 
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
@@ -39,3 +40,5 @@ data class RecruitmentCommandResponse(
     val agentId: String? = null,
     val batchId: String? = null,
 )
+
+data class RecruitmentCatalogAdminResponse(val pools: List<RecruitmentCatalogPool>)
