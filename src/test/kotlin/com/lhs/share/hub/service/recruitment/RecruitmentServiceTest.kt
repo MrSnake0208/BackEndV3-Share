@@ -111,6 +111,104 @@ class RecruitmentServiceTest {
         """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":31},{"event_id":"C","agent_id":"catalog_p:up:C","pull_span":17}]}""",
     )
 
+    @Test fun `pool dialog updates existing spans adds repeated agents removes one result and replaces progress`() {
+        historical()
+        command("progress_set", """{"pool_id":"p","progress":21}""")
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":12}],"deleted_event_ids":["B"]}""",
+        )
+        assertEquals(20L, events.getValue("A").pullSpan)
+        assertEquals(12L, events.getValue("new").pullSpan)
+        assertEquals("catalog_p:up:A", events.getValue("new").agentSnapshot.agentId)
+        assertTrue(events.getValue("B").deletedAt != null)
+        assertEquals(17L, events.getValue("C").pullSpan)
+        assertEquals(70L, count())
+        assertEquals(21L, state.pools.single().progress)
+        val data = """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":12}]}"""
+        repeat(2) { command("pool_records_save", data) }
+        assertEquals(4, events.size)
+        assertEquals(70L, count())
+        assertEquals(5L, state.nextEventOrder)
+    }
+
+    @Test fun `dialog batches retain their total and reject edited spans beyond that total before writing`() {
+        command(
+            "batch_create",
+            """{"pool_id":"p","mode":"historical","batch_id":"b","total_pull_count":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":20}]}""",
+        )
+        val before = events.toMap()
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":25}]}""",
+            )
+        }
+        assertEquals(before, events)
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":25}],"deleted_event_ids":["B"]}""",
+        )
+        assertEquals(40L, count())
+        assertEquals("b", events.getValue("A").batchId)
+    }
+
+    @Test fun `stopped pool permits existing count edits removals and progress but rejects additions`() {
+        historical()
+        every { catalogStore.find("catalog_p") } returns managed.copy(enabled = false)
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20}],"deleted_event_ids":["B"]}""",
+        )
+        assertEquals(58L, count())
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            )
+        }
+        assertTrue("new" !in events)
+    }
+
+    @Test fun `dialog rejects bad integers duplicated IDs cross pool or deleted updates without writing`() {
+        historical()
+        val before = state
+        val records = events.toMap()
+        listOf(
+            """{"pool_id":"p","remaining_pulls":0,"entries":[]}""",
+            """{"pool_id":"p","remaining_pulls":41,"entries":[]}""",
+            """{"pool_id":"p","remaining_pulls":1.5,"entries":[]}""",
+            """{"pool_id":"p","remaining_pulls":"19","entries":[]}""",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[]}""",
+            """{"pool_id":"p","entries":[]}""",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"new","agent_id":"foreign:up:A","pull_span":17}]}""",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":0}]}""",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17}],"deleted_event_ids":["A"]}""",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[],"deleted_event_ids":["B","B"]}""",
+        ).forEach {
+            assertThrows(RecruitmentApiException::class.java) { command("pool_records_save", it) }
+            assertEquals(before, state)
+            assertEquals(records, events)
+        }
+        events["A"] = events.getValue("A").copy(poolId = "foreign-pool")
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            )
+        }
+        assertThrows(RecruitmentApiException::class.java) {
+            command("pool_records_save", """{"pool_id":"p","remaining_pulls":19,"entries":[],"deleted_event_ids":["A"]}""")
+        }
+        events["A"] = records.getValue("A").copy(deletedAt = now, deletedRevision = state.archiveRevision)
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            )
+        }
+    }
+
     @Test fun `new pool progress must be explicitly unknown zero or a validated known value`() {
         assertNull(RecruitmentPool("default", RecruitmentPoolSnapshot("默认", "如鸢")).progress)
         listOf(

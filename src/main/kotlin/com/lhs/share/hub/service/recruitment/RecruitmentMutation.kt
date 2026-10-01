@@ -11,6 +11,7 @@ import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventReorder
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventSelect
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventUpdate
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolCreate
+import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolRecordsSave
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolSelect
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentProgressSet
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
@@ -41,6 +42,7 @@ class RecruitmentMutation(
         val poolId = when (operation) {
             "set_current_pool" -> read<RecruitmentPoolSelect>(data).poolId
             "progress_set" -> read<RecruitmentProgressSet>(data).poolId
+            "pool_records_save" -> read<RecruitmentPoolRecordsSave>(data).poolId
             "event_create" -> read<RecruitmentEventCreate>(data).poolId
             "batch_create" -> read<RecruitmentBatchCreate>(data).poolId
             else -> null
@@ -85,6 +87,47 @@ class RecruitmentMutation(
                 if (!data.has("progress")) throw recruitmentInvalid("请提供当前进度；未知时填写null")
                 input.progress?.let { recruitmentCount(it, "progress") }
                 next = replacePool(current, pool(current, input.poolId).copy(progress = input.progress))
+            }
+            "pool_records_save" -> {
+                val input = read<RecruitmentPoolRecordsSave>(data)
+                if (input.remainingPulls !in 1..40 || input.entries.size > 120 || input.deletedEventIds.size > 120) {
+                    throw recruitmentInvalid("剩余抽数须为1–40，每次最多维护120条出货记录")
+                }
+                val ids = input.entries.map { validId(it.eventId ?: throw recruitmentInvalid("每条出货须提供稳定ID")) }
+                if ((ids + input.deletedEventIds).toSet().size != ids.size + input.deletedEventIds.size) {
+                    throw recruitmentInvalid("记录ID不能重复，也不能同时修改和删除")
+                }
+                input.deletedEventIds.forEach(::validId)
+                val oldEvents = input.entries.mapNotNull { entry ->
+                    store.event(current.userId, current.accountId, entry.eventId!!)?.let { old ->
+                        if (old.poolId != input.poolId || old.deletedAt != null) throw recruitmentInvalid("不能修改其他池或已删除的出货")
+                        old
+                    }
+                }.associateBy { it.eventId }
+                val removed = input.deletedEventIds.map { id ->
+                    liveEvent(current, id).also { if (it.poolId != input.poolId) throw recruitmentInvalid("不能删除其他卡池的出货") }
+                }
+                val changed = input.entries.mapNotNull { entry -> oldEvents[entry.eventId]?.let { updateEvent(current, it, entry, now) } }
+                val newEntries = input.entries.filter { it.eventId !in oldEvents }
+                val added = if (newEntries.isEmpty()) emptyList() else newEvents(current, input.poolId, newEntries, now)
+                val touchedBatches = (changed + removed).mapNotNull { it.batchId }.toSet()
+                touchedBatches.forEach { id ->
+                    val batch = liveBatch(current, id)
+                    val replacements = changed.associateBy { it.eventId }
+                    val removedIds = removed.map { it.eventId }.toSet()
+                    val spans = store.batchEvents(current.userId, current.accountId, id)
+                        .filter { it.deletedAt == null && it.eventId !in removedIds }
+                        .sumOf { (replacements[it.eventId] ?: it).pullSpan ?: 0 }
+                    if (spans > batch.totalPullCount) throw recruitmentInvalid("已知间隔之和超出批次总抽数，请核对记录")
+                }
+                changed.forEach(store::saveEvent)
+                added.forEach(store::insertEvent)
+                removed.forEach {
+                    store.saveEvent(it.copy(deletedAt = now, deletedRevision = current.archiveRevision + 1, updatedAt = now))
+                }
+                next = replacePool(current, pool(current, input.poolId).copy(progress = 40L - input.remainingPulls))
+                    .copy(nextEventOrder = current.nextEventOrder + added.size)
+                result = result.copy(poolId = input.poolId, eventIds = changed.map { it.eventId } + added.map { it.eventId })
             }
             "baseline_set" -> next = current.copy(baseline = recruitmentCount(read<RecruitmentBaselineSet>(data).baseline, "baseline"))
             "temporary_agent_create", "pool_map", "agent_map" ->

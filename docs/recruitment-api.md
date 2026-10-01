@@ -47,6 +47,7 @@ set_current_pool、progress_set、event_create、batch_create 可直接使用 ar
 | --- | --- |
 | pool_create | `{progress,pool_id?,catalog_pool_id}`，progress须显式null或非负整数；目录须为本游戏启用的管理员卡池，提供name或缺少目录ID拒绝422 |
 | set_current_pool | `{pool_id}` |
+| pool_records_save | `{pool_id,entries,remaining_pulls,deleted_event_ids?}`：每条entry须带event_id，修改/新增最多120条、删除最多120条；remaining_pulls严格整数1–40，同事务保存所有记录改动和progress=40-N |
 | progress_set | `{pool_id,progress}`，非负整数或null；N由客户端按40-N换算 |
 | baseline_set | `{baseline}`，账号级非负整数 |
 | event_create | `{pool_id,mode,entries,tail_progress?,extract_from_baseline?}` |
@@ -101,3 +102,16 @@ options可省略，默认为上述值。`state_strategy`只有`keep_current`/`us
 失效token409 `recruitment_preview_expired`；身份/文件/选择不匹配409 `recruitment_preview_mismatch`；并发目标变化409 `recruitment_revision_conflict`。完整导入失败保留当前档案。首版不提供清空、覆盖删除当前记录或跨游戏恢复。
 
 CSV由前端使用同一完整export文档生成，标准CSV转义并处理所有用户文本的公式注入，row_type区分event/baseline/pool_state；密探名称按同一个人卡池的固定UP身份采用当前绑定解释，无法匹配时回退原事件快照。CSV供阅读和迁移辅助，不保证往返恢复。
+
+
+## 卡池弹窗逐条保存（2026-10-01）
+
+`pool_records_save` 维护某个池的每次出货，同一agent_id允许重复，身份按event_id区分。entries仅包含改动或新增；存在ID更新原记录（保留排序和批次归属），新ID新增独立事件（按请求顺序追加），deleted_event_ids明确软删除指定有效节点。两组ID唯一且互不重叠，不能修改/删除其他池或已删除节点。未知span须显式null，已知span为正整数，未提交的历史不覆盖。新增/换密探沿用目录、游戏/稀有度、固定UP槽校验，停用池仍可改已有抽数和删除但不能新增。
+
+remaining_pulls按40抽口径替换当前进度0–39；span和尾抽各计一次，不额外消费或累加旧进度，不自动从基准拆出。改单条独立事件只替换其抽数贡献；删一条不改相邻跨度。批次内节点编辑/删除不改变批次总量，所有变更完成后的有效span之和须≤批次total。整次请求复用账号fence/CAS/幂等账本和Hub事务，任一校验或请求记录存储失败全部回滚；提交后才发SSE。旧current/historical命令、JSON/CSV备份和数据库结构不变。
+
+```json
+{"account_id":"a","expected_revision":1,"request_id":"dialog-1","operation":"pool_records_save","data":{"pool_id":"p","entries":[{"event_id":"E","agent_id":"catalog_p:up:A","pull_span":17}],"deleted_event_ids":[],"remaining_pulls":19}}
+```
+
+界面打开弹窗后分页读取本池events，并使用该页archive_revision提交。读取失败不可当空池覆盖；网络重试保留新event_id和request_id，409重读并核对草稿。再次保存相同已有event_id不会新增出货计数。
