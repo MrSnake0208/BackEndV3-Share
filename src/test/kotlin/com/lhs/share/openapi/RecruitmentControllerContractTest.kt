@@ -114,6 +114,28 @@ class RecruitmentControllerContractTest {
             .andExpect(jsonPath("$.data.event_ids[0]").value("B"))
     }
 
+    @Test fun `pool dialog forwards per result spans remaining pulls and stable record IDs`() {
+        every { helper.requireUserId() } returns "u"
+        every {
+            service.command(
+                "u",
+                match {
+                    it.accountId == "a" && it.requestId == "dialog" && it.expectedRevision == 1L &&
+                        it.operation == "pool_records_save" && it.data.path("pool_id").asText() == "p" &&
+                        it.data.path("remaining_pulls").asInt() == 19 && it.data.path("entries")[0].path("pull_span").asInt() == 17
+                },
+            )
+        } returns RecruitmentCommandResponse(2, listOf("E"), poolId = "p")
+        mvc.perform(
+            post("/v1/recruitment/commands").contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"account_id":"a","expected_revision":1,"request_id":"dialog","operation":"pool_records_save","data":{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"E","agent_id":"A","pull_span":17}],"deleted_event_ids":[]}}""",
+                ),
+        )
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.archive_revision").value(2))
+            .andExpect(jsonPath("$.data.pool_id").value("p")).andExpect(jsonPath("$.data.event_ids[0]").value("E"))
+    }
+
     @Test fun `command envelope rejects null decimal missing revision and unknown root fields`() {
         every { helper.requireUserId() } returns "u"
         listOf("null", "0.5", "\"0\"").forEach { revision ->

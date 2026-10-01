@@ -122,6 +122,75 @@ class RecruitmentMongoTest {
         mockk(relaxed = true), tx, recruitmentRepository = store, accountEvents = publisher,
     )
 
+    @Test fun `dialog saves repeated agents counts and progress atomically and retries without duplication`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+        )
+        val input = request(
+            store.archive("u", "a")!!.archiveRevision,
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":12}]}""",
+            "dialog-retry",
+        )
+        val first = service.command("u", input)
+        assertEquals(first, service.command("u", input))
+        assertEquals(2, store.poolEvents("u", "a", "p", 10).size)
+        assertEquals(listOf(20L, 12L), service.page("u", "a", "p", null, 10, null, null, "asc").items.map { it.pullSpan })
+        assertEquals(53L, service.archive("u", "a").summary.knownTotalPulls)
+        assertEquals(21L, service.archive("u", "a").pools.single().progress)
+        assertEquals(2L, service.archive("u", "a").summary.eventCount)
+        assertTrue(store.poolEvents("u", "b", "p", 10).isEmpty())
+        assertThrows(InventoryApiException::class.java) { service.command("other", input) }
+        command("pool_records_save", """{"pool_id":"p","remaining_pulls":19,"entries":[],"deleted_event_ids":["A"]}""")
+        assertEquals(33L, service.archive("u", "a").summary.knownTotalPulls)
+        assertEquals(12L, store.event("u", "a", "B")!!.pullSpan)
+    }
+
+    @Test fun `dialog failure rolls back edits additions removals progress and account fence together`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":31}]}""",
+        )
+        val archive = store.archive("u", "a")!!
+        val records = store.poolEvents("u", "a", "p", 10)
+        val fence = accounts.findByUserIdAndAccountId("u", "a")!!.recruitmentFence
+        val failing = spyk(store)
+        every { failing.insertRequest(any()) } throws IllegalStateException("synthetic dialog failure")
+        val failureService = RecruitmentService(failing, accountService, accounts, mutation, publisher, mapper, tx)
+        assertThrows(IllegalStateException::class.java) {
+            failureService.command(
+                "u",
+                request(
+                    archive.archiveRevision,
+                    "pool_records_save",
+                    """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":12}],"deleted_event_ids":["B"]}""",
+                    "failed-dialog",
+                ),
+            )
+        }
+        assertEquals(archive, store.archive("u", "a"))
+        assertEquals(records, store.poolEvents("u", "a", "p", 10))
+        assertNull(store.event("u", "a", "C"))
+        assertNull(store.request("u", "a", "failed-dialog"))
+        assertEquals(fence, accounts.findByUserIdAndAccountId("u", "a")!!.recruitmentFence)
+        verify(exactly = 0) {
+            publisher.publish(
+                "u",
+                "a",
+                "recruitment_changed",
+                any(),
+                match {
+                    (it as Map<*, *>).entries.any { entry ->
+                        entry.key == "archive_revision" && entry.value == archive.archiveRevision + 1
+                    }
+                },
+            )
+        }
+    }
+
     @Test fun `administrator binding and retirement inherit personal facts without rewriting archive or event documents`() {
         initialize()
         command("progress_set", """{"pool_id":"p","progress":8}""")
