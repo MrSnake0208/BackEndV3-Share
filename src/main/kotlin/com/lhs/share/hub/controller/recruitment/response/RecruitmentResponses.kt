@@ -42,3 +42,10 @@ data class RecruitmentCommandResponse(
 )
 
 data class RecruitmentCatalogAdminResponse(val pools: List<RecruitmentCatalogPool>)
+
+data class RecruitmentCatalogImportResponse(
+    val createdCount: Int,
+    val skippedCount: Int,
+    val createdPoolIds: List<String>,
+    val skippedPoolIds: List<String>,
+)

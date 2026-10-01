@@ -4,10 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCatalogWriteRequest
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogAdminResponse
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogImportResponse
 import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogSourcePage
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
@@ -19,6 +21,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 @Service
 class RecruitmentCatalog(
@@ -26,46 +29,8 @@ class RecruitmentCatalog(
     private val repository: RecruitmentCatalogRepository,
     private val operators: OperatorCatalogRepository,
 ) {
-    private val resource: JsonNode by lazy { ClassPathResource("recruitment/pools.json").inputStream.use(mapper::readTree) }
     private val operatorSeed: Map<String, JsonNode> by lazy {
         ClassPathResource("operator/operators.json").inputStream.use(mapper::readTree).associateBy { it.path("id").asText() }
-    }
-    private val seedBindings: Map<String, Map<String, String>> by lazy {
-        resource.path("pools").associate { node ->
-            val poolId = node.path("pool_id").asText()
-            val names = node.path("up_agent_names").map(JsonNode::asText)
-            val ids = node.path("up_agent_ids").map(JsonNode::asText)
-            val bindings = names.mapIndexedNotNull { index, name ->
-                val operatorId = if (names.size == ids.size) {
-                    ids.getOrNull(index)
-                } else {
-                    ids.firstOrNull { operatorSeed[it]?.path("name")?.asText() == name }
-                }
-                operatorId?.let { "$poolId:up:${index + 1}" to it }
-            }.toMap()
-            poolId to bindings
-        }
-    }
-    private val seeds: Map<String, RecruitmentCatalogPool> by lazy {
-        resource.path("pools").associate { node ->
-            val id = node.path("pool_id").asText()
-            val bindings = seedBindings[id].orEmpty()
-            val slots = node.path("up_agent_names").mapIndexed { index, name ->
-                val slotId = "$id:up:${index + 1}"
-                RecruitmentUpAgent(slotId, name.asText(), bindings[slotId])
-            }
-            fun date(field: String) = node[field]?.takeUnless { it.isNull }?.asText()?.let(LocalDate::parse)
-            id to RecruitmentCatalogPool(
-                id,
-                node.path("game").asText(),
-                node.path("name").asText(),
-                date("start_date"),
-                date("end_date"),
-                node["pool_type"]?.takeUnless { it.isNull }?.asText(),
-                upAgents = slots,
-                upStatus = node.path("up_status").asText("unknown"),
-            )
-        }
     }
 
     fun catalog(game: String): JsonNode {
@@ -75,23 +40,22 @@ class RecruitmentCatalog(
 
     fun listForAdmin(): RecruitmentCatalogAdminResponse {
         val names = operatorNames()
-        return RecruitmentCatalogAdminResponse(all().map {
-            val snapshot = snapshotOf(it, names)
-            it.copy(upAgents = snapshot.upAgents, upStatus = snapshot.upStatus)
-        })
+        return RecruitmentCatalogAdminResponse(
+            all().map {
+                val snapshot = snapshotOf(it, names)
+                it.copy(upAgents = snapshot.upAgents, upStatus = snapshot.upStatus)
+            },
+        )
     }
 
-    private fun all(): List<RecruitmentCatalogPool> = (seeds + repository.all().associateBy { it.poolId }).values
+    private fun all(): List<RecruitmentCatalogPool> = repository.all()
         .sortedWith(compareByDescending<RecruitmentCatalogPool> { it.startDate }.thenBy { it.poolId })
 
     private fun response(pools: List<RecruitmentCatalogPool>): JsonNode {
         val names = operatorNames()
         val items = mapper.createArrayNode()
         pools.forEach { pool ->
-            val item = resource.path("pools").firstOrNull { it.path("pool_id").asText() == pool.poolId }
-                ?.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>() ?: mapper.createObjectNode()
-            val fields = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(pool)
-            item.setAll<JsonNode>(fields)
+            val item = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(pool)
             val snapshot = snapshotOf(pool, names)
             item.set<JsonNode>("up_agents", mapper.valueToTree(snapshot.upAgents))
             item.set<JsonNode>("up_agent_ids", mapper.valueToTree(snapshot.upAgentIds))
@@ -100,19 +64,14 @@ class RecruitmentCatalog(
             item.put("up_status", snapshot.upStatus)
             items.add(item)
         }
+        val latest = pools.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH
         return mapper.createObjectNode().put(
             "catalog_revision",
-            "${resource.path("catalog_revision").asText()}:${pools.sumOf {
-                it.revision
-            }}:${pools.maxOfOrNull { it.updatedAt }}",
-        )
-            .set("pools", items)
+            "db:${pools.size}:${pools.sumOf { it.revision }}:$latest",
+        ).set("pools", items)
     }
 
-    fun findPool(game: String, poolId: String): RecruitmentCatalogPool? = (repository.find(poolId) ?: seeds[poolId])?.takeIf {
-        it.game ==
-            game
-    }
+    fun findPool(game: String, poolId: String): RecruitmentCatalogPool? = repository.find(poolId)?.takeIf { it.game == game }
 
     fun snapshot(game: String, poolId: String, requireEnabled: Boolean = true): RecruitmentPoolSnapshot {
         val pool = findPool(game, poolId) ?: throw RecruitmentApiException(
@@ -125,19 +84,25 @@ class RecruitmentCatalog(
     }
 
     private fun snapshotOf(pool: RecruitmentCatalogPool, names: Map<String, String> = emptyMap()): RecruitmentPoolSnapshot {
-        val bindings = seedBindings[pool.poolId].orEmpty()
         val slots = pool.upAgents.map { slot ->
-            val operatorId = slot.operatorId ?: bindings[slot.id]
-            if (operatorId == null) slot else slot.copy(operatorId = operatorId, name = names[operatorId] ?: slot.name)
+            val operatorId = slot.operatorId
+            if (operatorId == null) slot else slot.copy(name = names[operatorId] ?: slot.name)
         }
         val active = slots.filter { it.active }
         val upStatus = if (pool.upStatus == "partial" && active.isNotEmpty() && active.all { it.operatorId != null }) "verified" else pool.upStatus
         return RecruitmentPoolSnapshot(
-            name = pool.name, game = pool.game, catalogPoolId = pool.poolId, startDate = pool.startDate, endDate = pool.endDate,
-            upAgentIds = active.mapNotNull { it.operatorId }, upStatus = upStatus,
-            upAgentNames = active.map { it.name }, unmappedUpAgentNames = active.filter { it.operatorId == null }.map { it.name },
-            catalogRevision = "${resource.path("catalog_revision").asText()}:${pool.revision}",
-            poolType = pool.poolType, upAgents = slots,
+            name = pool.name,
+            game = pool.game,
+            catalogPoolId = pool.poolId,
+            startDate = pool.startDate,
+            endDate = pool.endDate,
+            upAgentIds = active.mapNotNull { it.operatorId },
+            upStatus = upStatus,
+            upAgentNames = active.map { it.name },
+            unmappedUpAgentNames = active.filter { it.operatorId == null }.map { it.name },
+            catalogRevision = "db:${pool.revision}:${pool.updatedAt}",
+            poolType = pool.poolType,
+            upAgents = slots,
         )
     }
 
@@ -153,10 +118,7 @@ class RecruitmentCatalog(
         return if (persisted.isEmpty()) {
             operatorSeed.mapValues { it.value.path("name").asText() }
         } else {
-            persisted.associate {
-                it.operatorId to
-                    it.name
-            }
+            persisted.associate { it.operatorId to it.name }
         }
     }
 
@@ -166,15 +128,14 @@ class RecruitmentCatalog(
         val games = persisted?.games ?: seed?.path("games")?.map(JsonNode::asText).orEmpty()
         val value = persisted?.let {
             RecruitmentAgentSnapshot(it.operatorId, it.name, catalogRevision = it.catalogVersion, rarity = it.rarity)
+        } ?: seed?.let {
+            RecruitmentAgentSnapshot(
+                id,
+                it.path("name").asText(),
+                catalogRevision = "operator-seed",
+                rarity = it.path("rarity").asInt(),
+            )
         }
-            ?: seed?.let {
-                RecruitmentAgentSnapshot(
-                    id,
-                    it.path("name").asText(),
-                    catalogRevision = "operator-seed",
-                    rarity = it.path("rarity").asInt(),
-                )
-            }
         if (value == null) throw recruitmentInvalid("图鉴中没有该密探，请刷新图鉴或联系管理员配置占位UP")
         if (value.rarity != 5 || game !in games) throw recruitmentInvalid("请选择当前游戏可用的绝密密探")
         return value
@@ -218,17 +179,212 @@ class RecruitmentCatalog(
     }
 
     fun create(actorUserId: String, input: RecruitmentCatalogWriteRequest): RecruitmentCatalogPool {
-        if (repository.find(input.poolId) != null || seeds.containsKey(input.poolId)) throw recruitmentConflict("该卡池ID已存在")
+        if (repository.find(input.poolId) != null) throw recruitmentConflict("该卡池ID已存在")
         if (input.expectedRevision != 0L) throw recruitmentConflict("新建卡池的expected_revision须为0")
         return save(actorUserId, input, null)
     }
 
     fun update(actorUserId: String, poolId: String, input: RecruitmentCatalogWriteRequest): RecruitmentCatalogPool {
         if (poolId != input.poolId) throw recruitmentInvalid("路径与请求的卡池ID必须一致")
-        val current = repository.find(poolId) ?: seeds[poolId] ?: throw recruitmentNotFound("catalog_pool")
+        val current = repository.find(poolId) ?: throw recruitmentNotFound("catalog_pool")
         if (current.game != input.game) throw recruitmentInvalid("已创建卡池不能修改所属游戏")
         if (current.revision != input.expectedRevision) throw recruitmentConflict("卡池已被其他管理员修改，请刷新后重试")
         return save(actorUserId, input, current)
+    }
+
+    fun importCatalog(actorUserId: String, document: JsonNode): RecruitmentCatalogImportResponse {
+        if (!document.isObject) throw recruitmentInvalid("导入文件必须是JSON对象")
+        val poolNodes = document.get("pools")
+        if (poolNodes == null || !poolNodes.isArray) throw recruitmentInvalid("导入文件必须包含pools数组")
+        if (poolNodes.size() > IMPORT_POOL_LIMIT) throw recruitmentInvalid("单次最多导入$IMPORT_POOL_LIMIT个卡池")
+
+        val knownNames = operatorNames()
+        val planned = poolNodes.mapIndexed { index, node -> parseImportPool(actorUserId, node, index + 1, knownNames) }
+        if (planned.map { it.poolId }.toSet().size != planned.size) throw recruitmentInvalid("导入文件包含重复卡池ID")
+
+        val existing = repository.all().map { it.poolId }.toMutableSet()
+        val created = mutableListOf<String>()
+        val skipped = mutableListOf<String>()
+        planned.forEach { pool ->
+            if (!existing.add(pool.poolId)) {
+                skipped += pool.poolId
+                return@forEach
+            }
+            try {
+                if (repository.save(pool)) {
+                    created += pool.poolId
+                } else {
+                    skipped += pool.poolId
+                }
+            } catch (_: DuplicateKeyException) {
+                skipped += pool.poolId
+            }
+        }
+        return RecruitmentCatalogImportResponse(created.size, skipped.size, created, skipped)
+    }
+
+    private fun parseImportPool(
+        actorUserId: String,
+        node: JsonNode,
+        position: Int,
+        knownNames: Map<String, String>,
+    ): RecruitmentCatalogPool {
+        if (!node.isObject) throw recruitmentInvalid("第$position个卡池必须是JSON对象")
+        val poolId = requiredText(node, "pool_id", position)
+        val game = requiredText(node, "game", position)
+        requireGame(game)
+        if (!POOL_ID.matches(poolId)) throw recruitmentInvalid("第$position个卡池ID格式不正确")
+        val name = validName(requiredText(node, "name", position))
+        val startDate = optionalDate(node, "start_date", position)
+        val endDate = optionalDate(node, "end_date", position)
+        if (startDate != null && endDate != null && startDate > endDate) throw recruitmentInvalid("第$position个卡池开始日期不能晚于结束日期")
+        val poolType = optionalText(node, "pool_type", position)?.trim()?.takeIf { it.isNotEmpty() }
+        if (poolType != null && poolType.length > 64) throw recruitmentInvalid("第$position个卡池类型不能超过64字")
+        val enabled = optionalBoolean(node, "enabled", position, true)
+        val slots = if (node.has("up_agents") && !node.get("up_agents").isNull) {
+            importSlots(node.get("up_agents"), poolId, game, position)
+        } else {
+            legacySlots(node, poolId, game, position, knownNames)
+        }
+        val requestedStatus = optionalText(node, "up_status", position)
+        val upStatus = requestedStatus ?: if (slots.any { it.active }) "verified" else "unknown"
+        if (upStatus !in UP_STATUSES) throw recruitmentInvalid("第$position个卡池UP状态不支持")
+        val sourceUpAgentNames = stringList(node, "source_up_agent_names", position)
+        val sourceUrl = optionalText(node, "source_url", position)
+        val sourceRevision = optionalLong(node, "source_revision", position)
+        val sourcePages = sourcePages(node, position)
+        val sourceNote = optionalText(node, "source_note", position)
+        return RecruitmentCatalogPool(
+            poolId = poolId,
+            game = game,
+            name = name,
+            startDate = startDate,
+            endDate = endDate,
+            poolType = poolType,
+            enabled = enabled,
+            revision = 1,
+            upAgents = slots,
+            upStatus = upStatus,
+            updatedBy = actorUserId,
+            updatedAt = Instant.now(),
+            sourceUpAgentNames = sourceUpAgentNames,
+            sourceUrl = sourceUrl,
+            sourceRevision = sourceRevision,
+            sourcePages = sourcePages,
+            sourceNote = sourceNote,
+        )
+    }
+
+    private fun importSlots(node: JsonNode, poolId: String, game: String, position: Int): List<RecruitmentUpAgent> {
+        if (!node.isArray) throw recruitmentInvalid("第$position个卡池up_agents必须是数组")
+        val slots = node.mapIndexed { index, slot ->
+            if (!slot.isObject) throw recruitmentInvalid("第$position个卡池第${index + 1}个UP必须是JSON对象")
+            RecruitmentUpAgent(
+                id = requiredText(slot, "id", position),
+                name = requiredText(slot, "name", position),
+                operatorId = optionalText(slot, "operator_id", position),
+                active = optionalBoolean(slot, "active", position, true),
+            )
+        }
+        return normalizeImportedSlots(poolId, game, position, slots)
+    }
+
+    private fun legacySlots(
+        node: JsonNode,
+        poolId: String,
+        game: String,
+        position: Int,
+        knownNames: Map<String, String>,
+    ): List<RecruitmentUpAgent> {
+        val names = stringList(node, "up_agent_names", position)
+        val ids = stringList(node, "up_agent_ids", position)
+        val slotNames = if (names.isNotEmpty()) names else ids.map { knownNames[it] ?: operatorSeed[it]?.path("name")?.asText() ?: it }
+        val slots = slotNames.mapIndexed { index, name ->
+            val operatorId = if (slotNames.size == ids.size) {
+                ids.getOrNull(index)
+            } else {
+                ids.firstOrNull { id -> knownNames[id] == name || operatorSeed[id]?.path("name")?.asText() == name }
+            }
+            RecruitmentUpAgent("$poolId:up:${index + 1}", name, operatorId)
+        }
+        return normalizeImportedSlots(poolId, game, position, slots)
+    }
+
+    private fun normalizeImportedSlots(
+        poolId: String,
+        game: String,
+        position: Int,
+        slots: List<RecruitmentUpAgent>,
+    ): List<RecruitmentUpAgent> {
+        if (slots.size > 500 || slots.count { it.active } > 120 || slots.map { it.id }.toSet().size != slots.size) {
+            throw recruitmentInvalid("第$position个卡池UP名单最多120个有效项、500个保留项，槽ID不能重复")
+        }
+        val normalized = slots.map { slot ->
+            if (!SLOT_ID.matches(slot.id) || !slot.id.startsWith("$poolId:up:")) {
+                throw recruitmentInvalid("第$position个卡池UP槽ID必须属于当前卡池且不超过128字")
+            }
+            val operator = slot.operatorId?.let { operator(game, it) }
+            slot.copy(name = operator?.name ?: validName(slot.name))
+        }
+        val bound = normalized.filter { it.active }.mapNotNull { it.operatorId }
+        if (bound.toSet().size != bound.size) throw recruitmentInvalid("第$position个卡池有效UP不能重复选择同一密探")
+        return normalized
+    }
+
+    private fun requiredText(node: JsonNode, field: String, position: Int): String {
+        val value = node.get(field)
+        if (value == null || !value.isTextual) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串")
+        return value.asText()
+    }
+
+    private fun optionalText(node: JsonNode, field: String, position: Int): String? {
+        val value = node.get(field) ?: return null
+        if (value.isNull) return null
+        if (!value.isTextual) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串或null")
+        return value.asText()
+    }
+
+    private fun optionalBoolean(node: JsonNode, field: String, position: Int, default: Boolean): Boolean {
+        val value = node.get(field) ?: return default
+        if (value.isNull) return default
+        if (!value.isBoolean) throw recruitmentInvalid("第$position个卡池字段$field必须是布尔值")
+        return value.asBoolean()
+    }
+
+    private fun optionalLong(node: JsonNode, field: String, position: Int): Long? {
+        val value = node.get(field) ?: return null
+        if (value.isNull) return null
+        if (!value.isIntegralNumber || !value.canConvertToLong()) throw recruitmentInvalid("第$position个卡池字段$field必须是整数或null")
+        return value.asLong()
+    }
+
+    private fun sourcePages(node: JsonNode, position: Int): List<RecruitmentCatalogSourcePage> {
+        val value = node.get("source_pages") ?: return emptyList()
+        if (value.isNull) return emptyList()
+        if (!value.isArray) throw recruitmentInvalid("第$position个卡池字段source_pages必须是数组")
+        return value.map { page ->
+            if (!page.isObject) throw recruitmentInvalid("第$position个卡池source_pages条目必须是JSON对象")
+            RecruitmentCatalogSourcePage(
+                url = requiredText(page, "url", position),
+                revision = optionalLong(page, "revision", position),
+            )
+        }
+    }
+
+    private fun optionalDate(node: JsonNode, field: String, position: Int): LocalDate? {
+        val value = optionalText(node, field, position) ?: return null
+        return try {
+            LocalDate.parse(value)
+        } catch (_: DateTimeParseException) {
+            throw recruitmentInvalid("第$position个卡池字段$field必须是YYYY-MM-DD日期")
+        }
+    }
+
+    private fun stringList(node: JsonNode, field: String, position: Int): List<String> {
+        val value = node.get(field) ?: return emptyList()
+        if (value.isNull) return emptyList()
+        if (!value.isArray || value.any { !it.isTextual }) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串数组")
+        return value.map(JsonNode::asText)
     }
 
     private fun save(actorUserId: String, input: RecruitmentCatalogWriteRequest, current: RecruitmentCatalogPool?): RecruitmentCatalogPool {
@@ -252,17 +408,23 @@ class RecruitmentCatalog(
         val bound = slots.filter { it.active }.mapNotNull { it.operatorId }
         if (bound.toSet().size != bound.size || slots.size > 500) throw recruitmentInvalid("有效UP不能重复选择同一密探，保留槽不能超过500项")
         val next = RecruitmentCatalogPool(
-            input.poolId, input.game, name, input.startDate, input.endDate, input.poolType?.trim()?.takeIf { it.isNotEmpty() },
-            input.enabled, input.expectedRevision + 1, slots,
-            if (slots.any {
-                    it.active
-                }
-            ) {
-                "verified"
-            } else {
-                "unknown"
-            },
-            actorUserId, Instant.now(),
+            input.poolId,
+            input.game,
+            name,
+            input.startDate,
+            input.endDate,
+            input.poolType?.trim()?.takeIf { it.isNotEmpty() },
+            input.enabled,
+            input.expectedRevision + 1,
+            slots,
+            if (slots.any { it.active }) "verified" else "unknown",
+            actorUserId,
+            Instant.now(),
+            sourceUpAgentNames = current?.sourceUpAgentNames.orEmpty(),
+            sourceUrl = current?.sourceUrl,
+            sourceRevision = current?.sourceRevision,
+            sourcePages = current?.sourcePages.orEmpty(),
+            sourceNote = current?.sourceNote,
         )
         try {
             if (!repository.save(next)) throw recruitmentConflict("卡池已变化，请刷新后重试")
@@ -273,11 +435,14 @@ class RecruitmentCatalog(
     }
 
     private fun validName(value: String) = value.trim().takeIf { it.length in 1..128 } ?: throw recruitmentInvalid("名称须为1至128字")
+
     private fun requireGame(game: String) {
         if (game !in SubAccountService.SUPPORTED_GAMES) throw recruitmentInvalid("游戏只支持代号鸢或如鸢")
     }
 
     private companion object {
+        const val IMPORT_POOL_LIMIT = 1000
+        val UP_STATUSES = setOf("unknown", "partial", "verified", "selection")
         val POOL_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$")
         val SLOT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
     }

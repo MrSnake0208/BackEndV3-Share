@@ -8,6 +8,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.RecruitmentExceptionHandler
 import com.lhs.share.hub.controller.recruitment.AdminRecruitmentCatalogController
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogAdminResponse
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogImportResponse
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
@@ -68,6 +69,7 @@ class AdminRecruitmentCatalogControllerContractTest {
         listOf(
             get("/v1/admin/recruitment-catalog"),
             post("/v1/admin/recruitment-catalog"),
+            post("/v1/admin/recruitment-catalog/import"),
             put("/v1/admin/recruitment-catalog/pool"),
         ).forEach { request ->
             mvc.perform(request.contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden)
@@ -80,11 +82,17 @@ class AdminRecruitmentCatalogControllerContractTest {
         admin()
         every { catalog.listForAdmin() } returns RecruitmentCatalogAdminResponse(listOf(pool))
         every { catalog.create("admin", any()) } returns pool
+        every { catalog.importCatalog("admin", any()) } returns RecruitmentCatalogImportResponse(1, 1, listOf("legacy"), listOf("pool"))
         every { catalog.update("admin", "pool", any()) } returns pool.copy(revision = 2)
         mvc.perform(get("/v1/admin/recruitment-catalog")).andExpect(status().isOk)
             .andExpect(jsonPath("$.data.pools[0].up_agents[0].id").value("pool:up:1"))
         mvc.perform(post("/v1/admin/recruitment-catalog").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk)
             .andExpect(jsonPath("$.data.pool_id").value("pool")).andExpect(jsonPath("$.data.revision").value(1))
+        mvc.perform(
+            post("/v1/admin/recruitment-catalog/import").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"pools":[{"pool_id":"legacy","game":"如鸢","name":"旧池","up_agent_ids":[],"up_agent_names":[]}]}"""),
+        ).andExpect(status().isOk).andExpect(jsonPath("$.data.created_count").value(1))
+            .andExpect(jsonPath("$.data.skipped_count").value(1))
         mvc.perform(
             put(
                 "/v1/admin/recruitment-catalog/pool",
@@ -92,6 +100,7 @@ class AdminRecruitmentCatalogControllerContractTest {
         )
             .andExpect(status().isOk).andExpect(jsonPath("$.data.revision").value(2))
         verify { catalog.create("admin", match { it.expectedRevision == 0L && it.upAgents.single().operatorId == null }) }
+        verify { catalog.importCatalog("admin", match { it.path("pools").size() == 1 }) }
         verify { catalog.update("admin", "pool", match { it.expectedRevision == 1L && it.upAgents.single().id == "pool:up:1" }) }
     }
 

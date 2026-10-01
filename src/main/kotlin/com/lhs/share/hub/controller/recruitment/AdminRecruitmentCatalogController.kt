@@ -9,6 +9,7 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCatalogWriteRequest
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogAdminResponse
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentCatalogImportResponse
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
@@ -50,6 +51,13 @@ class AdminRecruitmentCatalogController(
     fun create(@RequestBody body: JsonNode): ApiResult<RecruitmentCatalogPool> {
         val actor = requireAdmin()
         return success(catalog.create(actor, decoder.read(body, RecruitmentCatalogWriteRequest::class.java)))
+    }
+
+    @Operation(summary = "批量导入招募卡池，仅新增不存在的卡池")
+    @PostMapping("/import", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun importCatalog(@RequestBody body: JsonNode): ApiResult<RecruitmentCatalogImportResponse> {
+        val actor = requireAdmin()
+        return success(catalog.importCatalog(actor, body))
     }
 
     @Operation(summary = "按版本更新招募卡池，保留原UP槽身份")
