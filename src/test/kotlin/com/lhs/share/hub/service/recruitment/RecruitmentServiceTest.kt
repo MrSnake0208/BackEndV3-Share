@@ -136,6 +136,67 @@ class RecruitmentServiceTest {
         assertEquals(13L, state.pools.single { it.poolId == "known" }.progress)
     }
 
+    @Test fun `automatic pools can be calibrated selected and recorded without a pool create command`() {
+        state = state.copy(pools = emptyList(), currentPoolId = null)
+        val id = "catalog:catalog_p"
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "event_create",
+                """{"pool_id":"$id","mode":"current","tail_progress":0,"entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            )
+        }
+        assertTrue(state.pools.isEmpty())
+        assertTrue(events.isEmpty())
+        command("set_current_pool", """{"pool_id":"$id"}""")
+        assertNull(state.pools.single().progress)
+        command("progress_set", """{"pool_id":"$id","progress":0}""")
+        command("set_current_pool", """{"pool_id":"$id"}""")
+        command(
+            "event_create",
+            """{"pool_id":"$id","mode":"current","tail_progress":4,"entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""",
+        )
+        assertEquals(id, state.currentPoolId)
+        assertEquals(id, state.pools.single().poolId)
+        assertEquals(4L, state.pools.single().progress)
+        assertEquals(21L, count())
+    }
+
+    @Test fun `first historical batch saves only its automatic target pool and leaves progress unknown`() {
+        state = state.copy(pools = emptyList(), currentPoolId = null)
+        command(
+            "batch_create",
+            """{"pool_id":"catalog:catalog_p","mode":"historical","batch_id":"batch-new","total_pull_count":120,"entries":[{"agent_id":"catalog_p:up:A","pull_span":null}]}""",
+        )
+        assertEquals("catalog:catalog_p", state.pools.single().poolId)
+        assertNull(state.pools.single().progress)
+        assertEquals(120L, count())
+    }
+
+    @Test fun `disabled and foreign game automatic pools cannot accept new results`() {
+        state = state.copy(pools = emptyList(), currentPoolId = null)
+        val disabled = managed.copy(enabled = false)
+        every { catalogStore.all() } returns listOf(disabled)
+        every { catalogStore.find("catalog_p") } returns disabled
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                command(
+                    "event_create",
+                    """{"pool_id":"catalog:catalog_p","mode":"historical","entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""",
+                )
+            }.status.value(),
+        )
+        val foreign = catalog.projectPools(emptyList(), "代号鸢").first().poolId
+        assertEquals(
+            404,
+            assertThrows(RecruitmentApiException::class.java) {
+                command("progress_set", """{"pool_id":"$foreign","progress":0}""")
+            }.status.value(),
+        )
+        assertTrue(state.pools.isEmpty())
+        assertTrue(events.isEmpty())
+    }
+
     @Test fun `only this game absolute catalog agents are accepted and users cannot replace administrator mappings`() {
         fun operator(id: String, rarity: Int, game: String) = OperatorCatalogEntity(
             operatorId = id, name = id, rarity = rarity, games = listOf(game), prof = emptyList(), subProf = emptyList(),
@@ -350,13 +411,17 @@ class RecruitmentServiceTest {
             override fun rollback(status: TransactionStatus) = Unit
         })
         val readStore = mockk<RecruitmentRepository>()
-        every { accountService.requireAccount("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test")
+        every { accountService.requireAccount("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test", game = "如鸢")
         every { readStore.archive("u", "a") } returns null
         every { readStore.totals("u", "a") } returns RecruitmentTotals(0, 0, 0, 0, 0)
         every { readStore.poolTotals("u", "a") } returns emptyMap()
         val service = RecruitmentService(readStore, accountService, accounts, mutation, publisher, mapper, tx)
         repeat(3) {
-            assertEquals(0L, service.archive("u", "a").archiveRevision)
+            val visible = service.archive("u", "a")
+            assertEquals(0L, visible.archiveRevision)
+            assertEquals("catalog_p", visible.pools.single().snapshot.catalogPoolId)
+            assertNull(visible.pools.single().progress)
+            assertEquals(0, visible.summary.unknownProgressCount)
             assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
         }
         verify(exactly = 6) { accountService.requireAccount("u", "a") }

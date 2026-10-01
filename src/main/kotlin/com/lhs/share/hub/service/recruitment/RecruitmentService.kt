@@ -39,20 +39,21 @@ class RecruitmentService(
         transactions.execute {
             val account = accountService.requireAccount(userId, accountId)
             val current = store.archive(userId, accountId) ?: empty(userId, accountId, account.game)
+            val pools = mutation.projectPools(current.pools, account.game.takeIf { it == current.gameSnapshot })
             val totals = store.totals(userId, accountId)
             val byPool = store.poolTotals(userId, accountId)
             val progress = current.pools.sumOf { it.progress ?: 0 }
             val unknownProgress = current.pools.count { it.progress == null }
             RecruitmentArchiveResponse(
                 accountId, current.gameSnapshot, current.archiveRevision, current.baseline,
-                current.currentPoolId, mutation.projectPools(current.pools), current.temporaryAgents,
+                current.currentPoolId, pools, current.temporaryAgents,
                 RecruitmentSummary(
                     current.baseline + totals.recordedPulls + totals.batchPulls + progress, totals.recordedPulls, totals.batchPulls,
                     progress, totals.eventCount, totals.exactCount, totals.unknownCount, unknownProgress,
                     totals.unknownCount > 0 || unknownProgress > 0,
                 ),
                 current.gameSnapshot != account.game,
-                current.pools.associate { pool ->
+                pools.associate { pool ->
                     val count = byPool[pool.poolId]
                     val progress = pool.progress ?: 0
                     pool.poolId to RecruitmentSummary(
@@ -84,7 +85,7 @@ class RecruitmentService(
         order: String = "desc",
     ): RecruitmentEventPage = checkNotNull(
         transactions.execute {
-            accountService.requireAccount(userId, accountId)
+            val account = accountService.requireAccount(userId, accountId)
             if (order !in setOf("asc", "desc")) throw recruitmentInvalid("排序只允许asc或desc")
             if (limit !in 1..100 ||
                 dateFrom != null && dateTo != null && dateFrom > dateTo
@@ -92,7 +93,13 @@ class RecruitmentService(
                 throw recruitmentInvalid("分页数量或日期范围不正确")
             }
             val current = store.archive(userId, accountId)
-            if (poolId != null && current?.pools.orEmpty().none { it.poolId == poolId }) throw recruitmentNotFound("pool")
+            if (poolId != null && mutation.projectPools(
+                    current?.pools.orEmpty(),
+                    account.game.takeIf { current == null || it == current.gameSnapshot },
+                ).none { it.poolId == poolId }
+            ) {
+                throw recruitmentNotFound("pool")
+            }
             val revision = current?.archiveRevision ?: 0
             val scope = hash(mapper.valueToTree(listOf(userId, accountId, poolId, dateFrom?.toString(), dateTo?.toString(), order)))
             val after = cursor?.let {
@@ -141,10 +148,16 @@ class RecruitmentService(
 
     fun batches(userId: String, accountId: String, poolId: String?, cursor: String?, limit: Int): RecruitmentBatchResponse = checkNotNull(
         transactions.execute {
-            accountService.requireAccount(userId, accountId)
+            val account = accountService.requireAccount(userId, accountId)
             if (limit !in 1..100) throw recruitmentInvalid("分页数量须为1至100")
             val archive = store.archive(userId, accountId)
-            if (poolId != null && archive?.pools.orEmpty().none { it.poolId == poolId }) throw recruitmentNotFound("pool")
+            if (poolId != null && mutation.projectPools(
+                    archive?.pools.orEmpty(),
+                    account.game.takeIf { archive == null || it == archive.gameSnapshot },
+                ).none { it.poolId == poolId }
+            ) {
+                throw recruitmentNotFound("pool")
+            }
             val revision = archive?.archiveRevision ?: 0
             val scope = hash(mapper.valueToTree(listOf("batches", userId, accountId, poolId)))
             val after = cursor?.let {
