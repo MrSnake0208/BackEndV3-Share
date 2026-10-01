@@ -69,7 +69,7 @@ class RecruitmentExchangeMongoTest {
         JavaTimeModule(),
     ).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
     private val tx = TransactionTemplate(MongoTransactionManager(template.mongoDatabaseFactory))
-    private val publisher = spyk(AccountEventService(mockk(relaxed = true)))
+    private val publisher = spyk(AccountEventService(mockk(relaxed = true), mockk(relaxed = true)))
     private val accountService = SubAccountService(
         accounts, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),

@@ -70,7 +70,7 @@ class RecruitmentMongoTest {
     private val catalog = RecruitmentCatalog(mapper, catalogStore, operators)
     private val mutation = RecruitmentMutation(store, catalog, mapper)
     private val tx = TransactionTemplate(MongoTransactionManager(template.mongoDatabaseFactory))
-    private val publisher = spyk(AccountEventService(mockk(relaxed = true)))
+    private val publisher = spyk(AccountEventService(mockk(relaxed = true), mockk(relaxed = true)))
     private val accountService = lifecycle(accounts)
     private val service = RecruitmentService(store, accountService, accounts, mutation, publisher, mapper, tx)
 

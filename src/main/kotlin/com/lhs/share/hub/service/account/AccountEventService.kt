@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.service.beta.BetaService
+import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronization
@@ -11,14 +12,17 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
 @Service
-class AccountEventService(private val beta: BetaService) {
+class AccountEventService(
+    private val beta: BetaService,
+    private val recruitmentAccess: RecruitmentAccessService,
+) {
     private val subscribers = ConcurrentHashMap<SubscriberKey, CopyOnWriteArraySet<SseEmitter>>()
 
     fun subscribe(userId: String, accountId: String): SseEmitter = register(userId, accountId, SseEmitter(0L))
 
     internal fun register(userId: String, accountId: String, emitter: SseEmitter): SseEmitter {
-        beta.requireAccess(userId)
         val key = SubscriberKey(userId, accountId)
+        if (!authorize(key)) return emitter
         subscribers.computeIfAbsent(key) { CopyOnWriteArraySet() }.add(emitter)
         emitter.onCompletion { remove(key, emitter) }
         emitter.onTimeout { remove(key, emitter) }
@@ -33,7 +37,7 @@ class AccountEventService(private val beta: BetaService) {
 
     fun publish(userId: String, accountId: String, eventName: String, eventId: String, data: Any) {
         val key = SubscriberKey(userId, accountId)
-        if (subscribers.containsKey(key) && !authorize(key)) return
+        if (!authorize(key)) return
         subscribers[key]?.forEach { emitter ->
             try {
                 emitter.send(SseEmitter.event().id(eventId).name(eventName).data(data))
@@ -73,8 +77,12 @@ class AccountEventService(private val beta: BetaService) {
         beta.requireAccess(key.userId)
         true
     } catch (_: Exception) {
-        subscribers.remove(key)?.forEach { emitter -> runCatching { emitter.complete() } }
-        false
+        if (runCatching { recruitmentAccess.canAccess(key.userId) }.getOrDefault(false)) {
+            true
+        } else {
+            subscribers.remove(key)?.forEach { emitter -> runCatching { emitter.complete() } }
+            false
+        }
     }
 
     private fun remove(key: SubscriberKey, emitter: SseEmitter) {

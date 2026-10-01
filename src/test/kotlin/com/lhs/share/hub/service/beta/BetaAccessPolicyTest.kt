@@ -27,6 +27,8 @@ class BetaAccessPolicyTest {
         }
         listOf(
             "/v1/inventory/catalog",
+            "/v1/recruitment/archive",
+            "/v1/recruitment/import/preview",
             "/v1/operator/catalog",
             "/v1/operator/share/view/{token}",
             "/v1/works",

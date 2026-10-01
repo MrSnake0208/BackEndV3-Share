@@ -6,7 +6,6 @@ object BetaAccessPolicy {
         "/v1/accounts",
         "/v1/inventory",
         "/v1/operator",
-        "/v1/recruitment",
         "/v1/star-state",
         "/v1/star-loadout",
         "/v1/star-loadout-presets",

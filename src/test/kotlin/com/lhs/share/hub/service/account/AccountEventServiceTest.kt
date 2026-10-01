@@ -1,5 +1,8 @@
 package com.lhs.share.hub.service.account
 
+import com.lhs.share.hub.service.beta.BetaService
+import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
+
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.just
@@ -11,7 +14,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 class AccountEventServiceTest {
-    private val service = AccountEventService(io.mockk.mockk(relaxed = true))
+    private val beta = mockk<BetaService> { every { requireAccess(any()) } just runs }
+    private val recruitmentAccess = mockk<RecruitmentAccessService>(relaxed = true)
+    private val service = AccountEventService(beta, recruitmentAccess)
 
     @Test
     fun `events are delivered only to the matching user and account`() {

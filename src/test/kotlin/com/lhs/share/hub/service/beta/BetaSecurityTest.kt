@@ -1,8 +1,11 @@
 package com.lhs.share.hub.service.beta
 
+import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.controller.beta.BetaMeResponse
 import com.lhs.share.hub.controller.beta.BetaStatusResponse
 import com.lhs.share.hub.repository.entity.BetaMode
+import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.openapi.OpenApiTokenService
 import com.lhs.share.service.jwt.JwtService
 import org.junit.jupiter.api.Test
@@ -42,6 +45,10 @@ class BetaSecurityTest {
 
     @MockitoBean lateinit var tokens: OpenApiTokenService
 
+    @MockitoBean lateinit var recruitmentAccess: RecruitmentAccessService
+
+    @MockitoBean lateinit var accounts: SubAccountService
+
     @Test
     fun `only status is anonymous and response uses existing snake case envelope without caching`() {
         `when`(betaService.status()).thenReturn(
@@ -65,17 +72,30 @@ class BetaSecurityTest {
     }
 
     @Test
-    fun `valid JWT without beta produces beta403 not login failure and token listing remains possible`() {
+    fun `valid JWT without beta still gates inventory while token listing remains possible`() {
         val token = jwt.issueAuthToken("web-fixture", null, emptyList()).value
         doThrow(BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
             .`when`(betaService).requireAccess("web-fixture")
-        mvc.perform(get("/v1/accounts").header("Authorization", "Bearer $token"))
+        mvc.perform(get("/v1/inventory/current").param("account_id", "main").header("Authorization", "Bearer $token"))
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("beta_access_required"))
         `when`(tokens.list("web-fixture")).thenReturn(emptyList())
         mvc.perform(get("/user/open-api/tokens").header("Authorization", "Bearer $token"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status_code").value(200))
+    }
+
+    @Test
+    fun `recruitment access can use shared account endpoints without beta`() {
+        val token = jwt.issueAuthToken("recruitment-fixture", null, emptyList()).value
+        doThrow(BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("recruitment-fixture")
+        `when`(recruitmentAccess.canAccess("recruitment-fixture")).thenReturn(true)
+        `when`(accounts.list("recruitment-fixture")).thenReturn(emptyList<SubAccountResponse>())
+
+        mvc.perform(get("/v1/accounts").header("Authorization", "Bearer $token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isArray)
     }
 
     @Test
