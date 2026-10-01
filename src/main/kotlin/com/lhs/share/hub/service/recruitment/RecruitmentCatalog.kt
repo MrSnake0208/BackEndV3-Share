@@ -196,7 +196,7 @@ class RecruitmentCatalog(
         if (!document.isObject) throw recruitmentInvalid("导入文件必须是JSON对象")
         val poolNodes = document.get("pools")
         if (poolNodes == null || !poolNodes.isArray) throw recruitmentInvalid("导入文件必须包含pools数组")
-        if (poolNodes.size() > IMPORT_POOL_LIMIT) throw recruitmentInvalid("单次最多导入$IMPORT_POOL_LIMIT个卡池")
+        if (poolNodes.size() > IMPORT_POOL_LIMIT) throw recruitmentInvalid("单次最多导入${IMPORT_POOL_LIMIT}个卡池")
 
         val knownNames = operatorNames()
         val planned = poolNodes.mapIndexed { index, node -> parseImportPool(actorUserId, node, index + 1, knownNames) }
@@ -229,17 +229,17 @@ class RecruitmentCatalog(
         position: Int,
         knownNames: Map<String, String>,
     ): RecruitmentCatalogPool {
-        if (!node.isObject) throw recruitmentInvalid("第$position个卡池必须是JSON对象")
+        if (!node.isObject) throw recruitmentInvalid("第${position}个卡池必须是JSON对象")
         val poolId = requiredText(node, "pool_id", position)
         val game = requiredText(node, "game", position)
         requireGame(game)
-        if (!POOL_ID.matches(poolId)) throw recruitmentInvalid("第$position个卡池ID格式不正确")
+        if (!POOL_ID.matches(poolId)) throw recruitmentInvalid("第${position}个卡池ID格式不正确")
         val name = validName(requiredText(node, "name", position))
         val startDate = optionalDate(node, "start_date", position)
         val endDate = optionalDate(node, "end_date", position)
-        if (startDate != null && endDate != null && startDate > endDate) throw recruitmentInvalid("第$position个卡池开始日期不能晚于结束日期")
+        if (startDate != null && endDate != null && startDate > endDate) throw recruitmentInvalid("第${position}个卡池开始日期不能晚于结束日期")
         val poolType = optionalText(node, "pool_type", position)?.trim()?.takeIf { it.isNotEmpty() }
-        if (poolType != null && poolType.length > 64) throw recruitmentInvalid("第$position个卡池类型不能超过64字")
+        if (poolType != null && poolType.length > 64) throw recruitmentInvalid("第${position}个卡池类型不能超过64字")
         val enabled = optionalBoolean(node, "enabled", position, true)
         val slots = if (node.has("up_agents") && !node.get("up_agents").isNull) {
             importSlots(node.get("up_agents"), poolId, game, position)
@@ -248,7 +248,7 @@ class RecruitmentCatalog(
         }
         val requestedStatus = optionalText(node, "up_status", position)
         val upStatus = requestedStatus ?: if (slots.any { it.active }) "verified" else "unknown"
-        if (upStatus !in UP_STATUSES) throw recruitmentInvalid("第$position个卡池UP状态不支持")
+        if (upStatus !in UP_STATUSES) throw recruitmentInvalid("第${position}个卡池UP状态不支持")
         val sourceUpAgentNames = stringList(node, "source_up_agent_names", position)
         val sourceUrl = optionalText(node, "source_url", position)
         val sourceRevision = optionalLong(node, "source_revision", position)
@@ -276,9 +276,9 @@ class RecruitmentCatalog(
     }
 
     private fun importSlots(node: JsonNode, poolId: String, game: String, position: Int): List<RecruitmentUpAgent> {
-        if (!node.isArray) throw recruitmentInvalid("第$position个卡池up_agents必须是数组")
+        if (!node.isArray) throw recruitmentInvalid("第${position}个卡池up_agents必须是数组")
         val slots = node.mapIndexed { index, slot ->
-            if (!slot.isObject) throw recruitmentInvalid("第$position个卡池第${index + 1}个UP必须是JSON对象")
+            if (!slot.isObject) throw recruitmentInvalid("第${position}个卡池第${index + 1}个UP必须是JSON对象")
             RecruitmentUpAgent(
                 id = requiredText(slot, "id", position),
                 name = requiredText(slot, "name", position),
@@ -317,53 +317,53 @@ class RecruitmentCatalog(
         slots: List<RecruitmentUpAgent>,
     ): List<RecruitmentUpAgent> {
         if (slots.size > 500 || slots.count { it.active } > 120 || slots.map { it.id }.toSet().size != slots.size) {
-            throw recruitmentInvalid("第$position个卡池UP名单最多120个有效项、500个保留项，槽ID不能重复")
+            throw recruitmentInvalid("第${position}个卡池UP名单最多120个有效项、500个保留项，槽ID不能重复")
         }
         val normalized = slots.map { slot ->
             if (!SLOT_ID.matches(slot.id) || !slot.id.startsWith("$poolId:up:")) {
-                throw recruitmentInvalid("第$position个卡池UP槽ID必须属于当前卡池且不超过128字")
+                throw recruitmentInvalid("第${position}个卡池UP槽ID必须属于当前卡池且不超过128字")
             }
             val operator = slot.operatorId?.let { operator(game, it) }
             slot.copy(name = operator?.name ?: validName(slot.name))
         }
         val bound = normalized.filter { it.active }.mapNotNull { it.operatorId }
-        if (bound.toSet().size != bound.size) throw recruitmentInvalid("第$position个卡池有效UP不能重复选择同一密探")
+        if (bound.toSet().size != bound.size) throw recruitmentInvalid("第${position}个卡池有效UP不能重复选择同一密探")
         return normalized
     }
 
     private fun requiredText(node: JsonNode, field: String, position: Int): String {
         val value = node.get(field)
-        if (value == null || !value.isTextual) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串")
+        if (value == null || !value.isTextual) throw recruitmentInvalid("第${position}个卡池字段${field}必须是字符串")
         return value.asText()
     }
 
     private fun optionalText(node: JsonNode, field: String, position: Int): String? {
         val value = node.get(field) ?: return null
         if (value.isNull) return null
-        if (!value.isTextual) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串或null")
+        if (!value.isTextual) throw recruitmentInvalid("第${position}个卡池字段${field}必须是字符串或null")
         return value.asText()
     }
 
     private fun optionalBoolean(node: JsonNode, field: String, position: Int, default: Boolean): Boolean {
         val value = node.get(field) ?: return default
         if (value.isNull) return default
-        if (!value.isBoolean) throw recruitmentInvalid("第$position个卡池字段$field必须是布尔值")
+        if (!value.isBoolean) throw recruitmentInvalid("第${position}个卡池字段${field}必须是布尔值")
         return value.asBoolean()
     }
 
     private fun optionalLong(node: JsonNode, field: String, position: Int): Long? {
         val value = node.get(field) ?: return null
         if (value.isNull) return null
-        if (!value.isIntegralNumber || !value.canConvertToLong()) throw recruitmentInvalid("第$position个卡池字段$field必须是整数或null")
+        if (!value.isIntegralNumber || !value.canConvertToLong()) throw recruitmentInvalid("第${position}个卡池字段${field}必须是整数或null")
         return value.asLong()
     }
 
     private fun sourcePages(node: JsonNode, position: Int): List<RecruitmentCatalogSourcePage> {
         val value = node.get("source_pages") ?: return emptyList()
         if (value.isNull) return emptyList()
-        if (!value.isArray) throw recruitmentInvalid("第$position个卡池字段source_pages必须是数组")
+        if (!value.isArray) throw recruitmentInvalid("第${position}个卡池字段source_pages必须是数组")
         return value.map { page ->
-            if (!page.isObject) throw recruitmentInvalid("第$position个卡池source_pages条目必须是JSON对象")
+            if (!page.isObject) throw recruitmentInvalid("第${position}个卡池source_pages条目必须是JSON对象")
             RecruitmentCatalogSourcePage(
                 url = requiredText(page, "url", position),
                 revision = optionalLong(page, "revision", position),
@@ -376,14 +376,14 @@ class RecruitmentCatalog(
         return try {
             LocalDate.parse(value)
         } catch (_: DateTimeParseException) {
-            throw recruitmentInvalid("第$position个卡池字段$field必须是YYYY-MM-DD日期")
+            throw recruitmentInvalid("第${position}个卡池字段${field}必须是YYYY-MM-DD日期")
         }
     }
 
     private fun stringList(node: JsonNode, field: String, position: Int): List<String> {
         val value = node.get(field) ?: return emptyList()
         if (value.isNull) return emptyList()
-        if (!value.isArray || value.any { !it.isTextual }) throw recruitmentInvalid("第$position个卡池字段$field必须是字符串数组")
+        if (!value.isArray || value.any { !it.isTextual }) throw recruitmentInvalid("第${position}个卡池字段${field}必须是字符串数组")
         return value.map(JsonNode::asText)
     }
 
