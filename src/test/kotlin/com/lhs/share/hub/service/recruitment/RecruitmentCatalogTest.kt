@@ -63,9 +63,10 @@ class RecruitmentCatalogTest {
             val end = pool["end_date"]?.takeUnless { it.isNull }?.asText()?.let(LocalDate::parse)
             assertFalse(start != null && end != null && start > end)
             pool.path("up_agent_ids").forEach {
-                val operator = seed.getValue(it.asText())
-                assertEquals(5, operator.path("rarity").asInt())
-                assertTrue(operator.path("games").any { game -> game.asText() == "代号鸢" })
+                seed[it.asText()]?.let { operator ->
+                    assertEquals(5, operator.path("rarity").asInt())
+                    assertTrue(operator.path("games").any { game -> game.asText() == "代号鸢" })
+                }
             }
             val id = pool.path("pool_id").asText()
             assertTrue(pool.path("up_agents").all { it.path("id").asText().startsWith("$id:up:") })
@@ -75,6 +76,11 @@ class RecruitmentCatalogTest {
             assertTrue(pool.path("source_url").asText().isNotEmpty())
         }
         repeat(2) { catalog.listForAdmin() }
+        val byName = pools.associateBy { it.path("name").asText() }
+        assertEquals(listOf("char_132_shiwei", "char_131_weiyan"), byName.getValue("棺珠折骨").path("up_agent_ids").map(JsonNode::asText))
+        assertTrue(byName.getValue("棺珠折骨").path("unmapped_up_agent_names").isEmpty)
+        assertEquals(listOf("char_129_zhoutai", "char_130_chenlin"), byName.getValue("周庙之璋").path("up_agent_ids").map(JsonNode::asText))
+        assertTrue(byName.getValue("周庙之璋").path("unmapped_up_agent_names").isEmpty)
         verify(exactly = 0) { repository.save(any()) }
         verify(exactly = 0) { operators.save(any()) }
         verify(exactly = 4) { operators.findAllByOrderByOperatorIdAsc() }
