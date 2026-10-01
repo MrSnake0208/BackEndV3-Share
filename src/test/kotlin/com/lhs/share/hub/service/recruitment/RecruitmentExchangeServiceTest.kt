@@ -20,6 +20,7 @@ import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
@@ -45,14 +46,15 @@ class RecruitmentExchangeServiceTest {
         JavaTimeModule(),
     ).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
     private val now = Instant.parse("2026-10-01T00:00:00Z")
-    private val snapshot = RecruitmentPoolSnapshot("临时池", "如鸢", poolType = "限时")
+    private val slot = RecruitmentUpAgent("catalog:up:A", "占位A")
+    private val snapshot = RecruitmentPoolSnapshot("公共池", "如鸢", catalogPoolId = "catalog", poolType = "限时", upAgents = listOf(slot))
     private val state = RecruitmentArchive(
         "u:a", "u", "a", "如鸢", archiveRevision = 10, baseline = 100, currentPoolId = "p",
-        pools = listOf(RecruitmentPool("p", snapshot, 7)), temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_A", "A")),
+        pools = listOf(RecruitmentPool("p", snapshot, 7)),
         nextEventOrder = 11,
     )
     private fun record(id: String = "A", span: Long? = 17, order: Long = 1) = RecruitmentEvent(
-        "u:a:$id", "u", "a", id, "p", snapshot, RecruitmentAgentSnapshot("tmp_A", "A", true), span, order,
+        "u:a:$id", "u", "a", id, "p", snapshot, RecruitmentAgentSnapshot("catalog:up:A", "占位A"), span, order,
         acquiredDate = LocalDate.parse("2026-09-30"), createdAt = now, updatedAt = now,
     )
     private fun document(vararg records: RecruitmentEvent) = exchangeDocument(state, records.toList(), emptyList(), now)
@@ -64,13 +66,12 @@ class RecruitmentExchangeServiceTest {
         options: RecruitmentImportOptions = RecruitmentImportOptions(),
     ) = recruitmentExchangePlan(current, records, batches, backup, options)
 
-    @Test fun `empty target restores full logic snapshots unknown progress batch and tombstones`() {
+    @Test fun `empty target restores managed slot snapshots unknown progress batch and tombstones`() {
         val batch = RecruitmentBatch("u:a:B", "u", "a", "B", "p", 80, now)
         val dead = record("D", null, 2).copy(deletedAt = now, deletedRevision = 9)
         val source = exchangeDocument(
             state.copy(
-                pools = listOf(RecruitmentPool("p", snapshot, null, snapshot.copy(catalogPoolId = "offline_pool", name = "已下线池"))),
-                temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_A", "A", "offline_A", "已下线绝密A")),
+                pools = listOf(RecruitmentPool("p", snapshot, null)),
             ),
             listOf(record().copy(batchId = "B"), dead),
             listOf(batch),
@@ -88,7 +89,7 @@ class RecruitmentExchangeServiceTest {
 
     @Test fun `unknown progress and temporary pool are substantive and cannot silently restore backup state`() {
         listOf(
-            state.copy(baseline = 0, temporaryAgents = emptyList(), pools = listOf(RecruitmentPool("p", snapshot, 0))),
+            state.copy(baseline = 0, pools = listOf(RecruitmentPool("p", snapshot.copy(catalogPoolId = null), 0))),
             state.copy(
                 baseline = 0,
                 temporaryAgents = emptyList(),
@@ -137,14 +138,159 @@ class RecruitmentExchangeServiceTest {
             source.copy(note = "备注"),
             source.copy(source = "legacy"),
             source.copy(upStatus = "up"),
-            source.copy(poolSnapshot = snapshot.copy(name = "不同")),
-            source.copy(agentSnapshot = source.agentSnapshot.copy(name = "不同")),
+            source.copy(poolSnapshot = snapshot.copy(catalogPoolId = "another")),
+            source.copy(agentSnapshot = source.agentSnapshot.copy(agentId = "another_slot")),
             source.copy(deletedAt = now, deletedRevision = 10),
         ).forEach { changed ->
             val result =
                 plan(records = listOf(source), backup = document(changed), options = RecruitmentImportOptions(confirmCountChange = true))
             assertEquals("conflict", result.items.single { it.entityType == "event" }.status)
             assertTrue(result.eventsToAdd.isEmpty())
+        }
+    }
+
+    @Test fun `administrator binding and display changes keep managed references duplicate without changing personal facts`() {
+        val source = record()
+        val mappedSlot = slot.copy(name = "正式绝密A", operatorId = "official_A", active = false)
+        val changedSnapshot = snapshot.copy(name = "新池名称", catalogRevision = "new", upAgents = listOf(mappedSlot))
+        val current = state.copy(pools = listOf(RecruitmentPool("p", changedSnapshot, 7)))
+        val changedDisplay = source.copy(
+            poolSnapshot = changedSnapshot,
+            agentSnapshot = source.agentSnapshot.copy(name = "正式绝密A", catalogRevision = "new"),
+        )
+        val result = plan(current = current, records = listOf(changedDisplay))
+        assertEquals("duplicate", result.items.single { it.entityType == "pool" }.status)
+        assertEquals("duplicate", result.items.single { it.entityType == "event" }.status)
+        assertEquals(current.pools, result.archive.pools)
+        assertTrue(result.eventsToAdd.isEmpty())
+        assertEquals(124L, result.candidateKnownTotal)
+
+        val legacySnapshot = snapshot.copy(catalogPoolId = null, upAgents = emptyList())
+        val legacy = source.copy(poolSnapshot = legacySnapshot, agentSnapshot = RecruitmentAgentSnapshot("tmp_A", "A", true))
+        val legacyState = state.copy(
+            pools = listOf(RecruitmentPool("p", legacySnapshot, 7)),
+            temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_A", "A")),
+        )
+        val renamed = legacy.copy(agentSnapshot = legacy.agentSnapshot.copy(name = "用户改名"))
+        val legacyResult = plan(
+            current = legacyState,
+            records = listOf(legacy),
+            backup = exchangeDocument(legacyState, listOf(renamed), emptyList(), now),
+        )
+        assertEquals("conflict", legacyResult.items.single { it.entityType == "event" }.status)
+    }
+
+    @Test fun `backup cannot manufacture pools private agents cross-pool slots or mismatched catalog references`() {
+        val fixture = fixture()
+        val source = document(record())
+        val custom = snapshot.copy(catalogPoolId = null, upAgents = emptyList())
+        val invalid = listOf(
+            source.copy(pools = listOf(RecruitmentPool("custom", custom, 0)), currentPoolId = "custom", events = emptyList()),
+            source.copy(temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_forged", "用户自填"))),
+            source.copy(pools = listOf(RecruitmentPool("p", snapshot.copy(catalogPoolId = "forged"), 7))),
+            source.copy(events = listOf(source.events[0].copy(poolSnapshot = snapshot.copy(catalogPoolId = "another_pool")))),
+            source.copy(events = listOf(source.events[0].copy(agentSnapshot = RecruitmentAgentSnapshot("other_pool_slot", "其他池占位")))),
+            source.copy(pools = listOf(RecruitmentPool("p", snapshot.copy(upAgents = listOf(slot.copy(id = "forged_slot"))), 7))),
+            source.copy(events = listOf(source.events[0].copy(agentSnapshot = RecruitmentAgentSnapshot("wrong_game_or_rarity", "非本游戏绝密")))),
+        )
+        invalid.forEach { backup ->
+            assertEquals(
+                422,
+                assertThrows(RecruitmentApiException::class.java) {
+                    fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(backup)))
+                }.status.value(),
+            )
+        }
+        val nonUp = source.copy(events = listOf(source.events[0].copy(agentSnapshot = RecruitmentAgentSnapshot("official_A", "绝密A"))))
+        val allowed = fixture.service.preview(
+            "u",
+            RecruitmentImportPreviewRequest("a", mapper.valueToTree(nonUp), RecruitmentImportOptions(confirmCountChange = true)),
+        )
+        assertEquals("add", allowed.items.single { it.entityType == "event" }.status)
+        verify(exactly = 0) {
+            fixture.store.saveArchive(any(), any())
+            fixture.store.insertEvent(any())
+            fixture.fence.fenceRecruitmentWrite(any(), any(), any())
+            fixture.publisher.publishChange(any(), any(), any(), any())
+        }
+    }
+
+    @Test fun `disabled pool retired placeholder backup restores historical identity without accepting snapshot definitions`() {
+        val fixture = fixture()
+        every { fixture.catalog.findPool("如鸢", "catalog") } returns mockk(relaxed = true) {
+            every { enabled } returns false
+            every { upAgents } returns listOf(slot.copy(name = "正式绝密A", operatorId = "official_A", active = false))
+        }
+        val incoming = document(record())
+        val preview = fixture.service.preview(
+            "u",
+            RecruitmentImportPreviewRequest("a", mapper.valueToTree(incoming), RecruitmentImportOptions(confirmCountChange = true)),
+        )
+        assertEquals("add", preview.items.single { it.entityType == "event" }.status)
+        assertEquals(124L, preview.candidateKnownTotal)
+        assertTrue(preview.canCommit)
+        verify(exactly = 0) { fixture.catalog.operator(any(), any()) }
+    }
+
+    @Test fun `import validates each distinct pool and official agent once and commit rechecks directory references`() {
+        val fixture = fixture()
+        val repeatedOfficial = document(
+            *(1..20).map {
+                record("E$it", order = it.toLong()).copy(agentSnapshot = RecruitmentAgentSnapshot("official_A", "绝密A"))
+            }.toTypedArray(),
+        )
+        val node = mapper.valueToTree<JsonNode>(repeatedOfficial)
+        val options = RecruitmentImportOptions(confirmCountChange = true)
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", node, options))
+        assertEquals(20, preview.items.count { it.entityType == "event" && it.status == "add" })
+        verify(exactly = 1) { fixture.catalog.findPool("如鸢", "catalog") }
+        verify(exactly = 1) { fixture.catalog.operator("如鸢", "official_A") }
+        every { fixture.catalog.findPool("如鸢", "catalog") } returns null
+        val input = RecruitmentImportCommitRequest(
+            "a",
+            node,
+            options,
+            preview.previewToken,
+            preview.documentHash,
+            preview.targetRevision,
+            "r",
+        )
+        assertThrows(RecruitmentApiException::class.java) { fixture.service.commit("u", input) }
+        verify(exactly = 0) {
+            fixture.store.saveArchive(any(), any())
+            fixture.store.insertEvent(any())
+            fixture.fence.fenceRecruitmentWrite(any(), any(), any())
+            fixture.publisher.publishChange(any(), any(), any(), any())
+        }
+    }
+
+    @Test fun `existing private facts export and dedupe but backup cannot append new legacy results or batches`() {
+        val fixture = fixture()
+        val legacySnapshot = snapshot.copy(catalogPoolId = null, upAgents = emptyList())
+        val legacyState = state.copy(
+            pools = listOf(RecruitmentPool("p", legacySnapshot, 7)),
+            temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_A", "A")),
+        )
+        val old = record().copy(poolSnapshot = legacySnapshot, agentSnapshot = RecruitmentAgentSnapshot("tmp_A", "A", true))
+        every { fixture.store.archive("u", "a") } returns legacyState
+        every { fixture.store.exchangeEvents("u", "a", 20_001) } returns listOf(old)
+        val exported = fixture.service.export("u", "a")
+        assertEquals(legacyState.pools, exported.pools)
+        assertEquals(legacyState.temporaryAgents, exported.temporaryAgents)
+        val duplicate = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(exported)))
+        assertEquals("duplicate", duplicate.items.single { it.entityType == "event" }.status)
+        listOf(
+            exported.copy(events = exported.events + exported.events[0].copy(eventId = "new", sortOrder = 2)),
+            exported.copy(batches = listOf(RecruitmentBatch("u:a:B", "u", "a", "B", "p", 40, now).exchange())),
+        ).forEach {
+            assertThrows(RecruitmentApiException::class.java) {
+                fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(it)))
+            }
+        }
+        verify(exactly = 0) {
+            fixture.store.saveArchive(any(), any())
+            fixture.store.insertEvent(any())
+            fixture.store.insertBatch(any())
         }
     }
 
@@ -235,6 +381,35 @@ class RecruitmentExchangeServiceTest {
         confirmVerified(fixture.store)
     }
 
+    @Test fun `export includes current UP binding while preserving every original personal snapshot and revision`() {
+        val fixture = fixture()
+        val original = record()
+        val rebound = slot.copy(name = "正式绝密A", operatorId = "official_A")
+        every { fixture.store.exchangeEvents("u", "a", 20_001) } returns listOf(original)
+        every { fixture.catalog.projectPools(state.pools) } returns listOf(
+            state.pools.single().copy(snapshot = snapshot.copy(name = "管理员改名", upAgents = listOf(rebound))),
+        )
+        val exported = fixture.service.export("u", "a")
+        assertEquals("official_A", exported.pools.single().snapshot.upAgents.single().operatorId)
+        assertEquals(snapshot.name, exported.pools.single().snapshot.name)
+        assertEquals(state.archiveRevision, exported.archiveRevision)
+        assertEquals(state.baseline, exported.baseline)
+        assertEquals(state.pools.single().progress, exported.pools.single().progress)
+        assertEquals(original.agentSnapshot, exported.events.single().agentSnapshot)
+        assertEquals(original.poolSnapshot, exported.events.single().poolSnapshot)
+        assertEquals(original.pullSpan, exported.events.single().pullSpan)
+        assertEquals(original.acquiredDate, exported.events.single().acquiredDate)
+        assertEquals(original.note, exported.events.single().note)
+        assertEquals("duplicate", plan(records = listOf(original), backup = exported).items.single { it.entityType == "event" }.status)
+        assertEquals("duplicate", plan(records = listOf(original), backup = exported).items.single { it.entityType == "pool" }.status)
+        assertEquals(null, state.pools.single().snapshot.upAgents.single().operatorId)
+        verify(exactly = 0) {
+            fixture.store.saveArchive(any(), any())
+            fixture.store.insertEvent(any())
+            fixture.publisher.publishChange(any(), any(), any(), any())
+        }
+    }
+
     @Test fun `preview binding rejects changed document options account revision expiry and restart`() {
         val fixture = fixture()
         val node = mapper.valueToTree<JsonNode>(document(record()))
@@ -275,6 +450,7 @@ class RecruitmentExchangeServiceTest {
                 fixture.accounts,
                 fixture.fence,
                 fixture.recruitment,
+                fixture.catalog,
                 fixture.publisher,
                 mapper,
                 fixture.tx,
@@ -340,6 +516,7 @@ class RecruitmentExchangeServiceTest {
         val accounts = mockk<SubAccountService>()
         val fence = mockk<SubAccountRepository>()
         val recruitment = mockk<RecruitmentService>()
+        val catalog = mockk<RecruitmentCatalog>()
         val publisher = mockk<AccountEventService>()
         val manager = mockk<PlatformTransactionManager>()
         every { manager.getTransaction(any()) } returns SimpleTransactionStatus()
@@ -352,15 +529,23 @@ class RecruitmentExchangeServiceTest {
         every { store.exchangeBatches("u", "a", 20_001) } returns emptyList()
         every { recruitment.retry("u", any(), any(), any()) } returns null
         every { recruitment.hash(any()) } answers { mapper.writeValueAsString(firstArg<JsonNode>()).hashCode().toString() }
-        val service = RecruitmentExchangeService(store, accounts, fence, recruitment, publisher, mapper, tx)
+        every { catalog.findPool("如鸢", "catalog") } returns mockk(relaxed = true) {
+            every { upAgents } returns listOf(slot)
+        }
+        every { catalog.findPool("如鸢", neq("catalog")) } returns null
+        every { catalog.projectPools(any()) } answers { firstArg() }
+        every { catalog.operator(any(), any()) } throws recruitmentInvalid("密探不存在或不属于该游戏绝密图鉴")
+        every { catalog.operator("如鸢", "official_A") } returns RecruitmentAgentSnapshot("official_A", "绝密A")
+        val service = RecruitmentExchangeService(store, accounts, fence, recruitment, catalog, publisher, mapper, tx)
         service.clock = Clock.fixed(now, ZoneOffset.UTC)
-        return Fixture(store, accounts, fence, recruitment, publisher, tx, service)
+        return Fixture(store, accounts, fence, recruitment, catalog, publisher, tx, service)
     }
     private data class Fixture(
         val store: RecruitmentRepository,
         val accounts: SubAccountService,
         val fence: SubAccountRepository,
         val recruitment: RecruitmentService,
+        val catalog: RecruitmentCatalog,
         val publisher: AccountEventService,
         val tx: TransactionTemplate,
         val service: RecruitmentExchangeService,

@@ -35,6 +35,7 @@ class AdminAuthorizationServiceTest {
         every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))
 
         assertTrue(service.hasPermission("platform", AdminPermission.OPERATOR_CATALOG_WRITE))
+        assertTrue(service.hasPermission("platform", AdminPermission.RECRUITMENT_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.LEVEL_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_ROLE_MANAGE))
@@ -49,6 +50,7 @@ class AdminAuthorizationServiceTest {
         every { roleRepository.findById("root") } returns Optional.of(binding("root", AdminRole.SUPER_ADMIN))
 
         assertTrue(service.hasPermission("root", AdminPermission.OPERATOR_CATALOG_WRITE))
+        assertTrue(service.hasPermission("root", AdminPermission.RECRUITMENT_CATALOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.ADMIN_ROLE_MANAGE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_REVIEW))

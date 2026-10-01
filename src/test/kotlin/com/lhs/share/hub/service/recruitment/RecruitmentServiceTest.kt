@@ -5,17 +5,20 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.RecruitmentTotals
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
 import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
@@ -43,8 +46,19 @@ class RecruitmentServiceTest {
     ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
     private val store = mockk<RecruitmentRepository>()
     private val operators = mockk<OperatorCatalogRepository>()
-    private val catalog = RecruitmentCatalog(mapper)
-    private val mutation = RecruitmentMutation(store, operators, catalog, mapper)
+    private val catalogStore = mockk<RecruitmentCatalogRepository>()
+    private val managed = RecruitmentCatalogPool(
+        "catalog_p",
+        "如鸢",
+        "管理员池",
+        upAgents = listOf(
+            RecruitmentUpAgent("catalog_p:up:A", "A"),
+            RecruitmentUpAgent("catalog_p:up:B", "B"),
+            RecruitmentUpAgent("catalog_p:up:C", "C"),
+        ),
+    )
+    private val catalog = RecruitmentCatalog(mapper, catalogStore, operators)
+    private val mutation = RecruitmentMutation(store, catalog, mapper)
     private val events = mutableMapOf<String, RecruitmentEvent>()
     private val batches = mutableMapOf<String, RecruitmentBatch>()
     private val now = Instant.parse("2026-10-01T00:00:00Z")
@@ -54,15 +68,15 @@ class RecruitmentServiceTest {
             "u",
             "a",
             "如鸢",
-            pools = listOf(RecruitmentPool("p", RecruitmentPoolSnapshot("临时池", "如鸢"), progress = 0)),
-            temporaryAgents = listOf(
-                RecruitmentTemporaryAgent("tmp_A", "A"),
-                RecruitmentTemporaryAgent("tmp_B", "B"),
-                RecruitmentTemporaryAgent("tmp_C", "C"),
-            ),
+            pools = listOf(RecruitmentPool("p", RecruitmentPoolSnapshot("管理员池", "如鸢", catalogPoolId = "catalog_p"), progress = 0)),
         )
 
     init {
+        every { catalogStore.find(any()) } answers { managed.takeIf { it.poolId == firstArg<String>() } }
+        every { catalogStore.all() } returns listOf(managed)
+        every { operators.findByOperatorId(any()) } returns null
+        every { operators.count() } returns 0L
+        every { operators.findAllByOrderByOperatorIdAsc() } returns emptyList()
         every { store.event("u", "a", any()) } answers { events[thirdArg()] }
         every { store.insertEvent(any()) } answers {
             firstArg<RecruitmentEvent>().let { events[it.eventId] = it }
@@ -94,35 +108,35 @@ class RecruitmentServiceTest {
         batches.values.filter { it.deletedAt == null }.sumOf { it.totalPullCount }
     private fun historical() = command(
         "event_create",
-        """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17},{"event_id":"B","agent_id":"tmp_B","pull_span":31},{"event_id":"C","agent_id":"tmp_C","pull_span":17}]}""",
+        """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":31},{"event_id":"C","agent_id":"catalog_p:up:C","pull_span":17}]}""",
     )
 
     @Test fun `new pool progress must be explicitly unknown zero or a validated known value`() {
         assertNull(RecruitmentPool("default", RecruitmentPoolSnapshot("默认", "如鸢")).progress)
         listOf(
-            """{"pool_id":"bad","name":"新池"}""",
-            """{"pool_id":"bad","name":"新池","progress":-1}""",
-            """{"pool_id":"bad","name":"新池","progress":1.5}""",
-            """{"pool_id":"bad","name":"新池","progress":"0"}""",
-            """{"pool_id":"bad","name":"新池","progress":1000000001}""",
+            """{"pool_id":"bad","catalog_pool_id":"catalog_p"}""",
+            """{"pool_id":"bad","catalog_pool_id":"catalog_p","progress":-1}""",
+            """{"pool_id":"bad","catalog_pool_id":"catalog_p","progress":1.5}""",
+            """{"pool_id":"bad","catalog_pool_id":"catalog_p","progress":"0"}""",
+            """{"pool_id":"bad","catalog_pool_id":"catalog_p","progress":1000000001}""",
         ).forEach { input ->
             assertEquals(422, assertThrows(RecruitmentApiException::class.java) { command("pool_create", input) }.status.value())
         }
-        command("pool_create", """{"pool_id":"unknown","name":"未知进度","progress":null}""")
+        command("pool_create", """{"pool_id":"unknown","catalog_pool_id":"catalog_p","progress":null}""")
         assertNull(state.pools.single { it.poolId == "unknown" }.progress)
         assertThrows(RecruitmentApiException::class.java) {
             command(
                 "event_create",
-                """{"pool_id":"unknown","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_A","pull_span":17}]}""",
+                """{"pool_id":"unknown","mode":"current","tail_progress":0,"entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""",
             )
         }
-        command("pool_create", """{"pool_id":"zero","name":"确认从零开始","progress":0}""")
+        command("pool_create", """{"pool_id":"zero","catalog_pool_id":"catalog_p","progress":0}""")
         assertEquals(0L, state.pools.single { it.poolId == "zero" }.progress)
-        command("pool_create", """{"pool_id":"known","name":"已抽13次","progress":13}""")
+        command("pool_create", """{"pool_id":"known","catalog_pool_id":"catalog_p","progress":13}""")
         assertEquals(13L, state.pools.single { it.poolId == "known" }.progress)
     }
 
-    @Test fun `only this game absolute catalog agents are accepted and mapping preserves original snapshots`() {
+    @Test fun `only this game absolute catalog agents are accepted and users cannot replace administrator mappings`() {
         fun operator(id: String, rarity: Int, game: String) = OperatorCatalogEntity(
             operatorId = id, name = id, rarity = rarity, games = listOf(game), prof = emptyList(), subProf = emptyList(),
             discs = emptyList(), starStones = emptyList(), catalogVersion = "test-v1",
@@ -142,9 +156,12 @@ class RecruitmentServiceTest {
         assertTrue(events.isEmpty())
         historical()
         val original = events.getValue("A").agentSnapshot
-        command("agent_map", """{"agent_id":"tmp_A","catalog_agent_id":"valid"}""")
-        assertEquals("valid", state.temporaryAgents.single { it.agentId == "tmp_A" }.mappedAgentId)
-        assertEquals("A", state.temporaryAgents.single { it.agentId == "tmp_A" }.name)
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                command("agent_map", """{"agent_id":"catalog_p:up:A","catalog_agent_id":"valid"}""")
+            }.status.value(),
+        )
         assertEquals(original, events.getValue("A").agentSnapshot)
         command(
             "event_create",
@@ -152,6 +169,79 @@ class RecruitmentServiceTest {
         )
         assertEquals(5, events.getValue("valid-event").agentSnapshot.rarity)
         assertEquals("test-v1", events.getValue("valid-event").agentSnapshot.catalogRevision)
+    }
+
+    @Test fun `new mapped UP references use the stable slot without changing explicit user UP facts`() {
+        every { catalogStore.find("catalog_p") } returns managed.copy(
+            upAgents = managed.upAgents.map {
+                if (it.id ==
+                    "catalog_p:up:A"
+                ) {
+                    it.copy(operatorId = "char_001_yangxiu", name = "杨修")
+                } else {
+                    it
+                }
+            },
+        )
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"mapped","agent_id":"char_001_yangxiu","pull_span":17,"up_status":"non_up"}]}""",
+        )
+        assertEquals("catalog_p:up:A", events.getValue("mapped").agentSnapshot.agentId)
+        assertEquals("杨修", events.getValue("mapped").agentSnapshot.name)
+        assertEquals("non_up", events.getValue("mapped").upStatus)
+        assertEquals(17L, count())
+        command("event_update", """{"event_id":"mapped","entry":{"agent_id":"catalog_p:up:A","pull_span":17,"up_status":"unknown"}}""")
+        assertEquals("catalog_p:up:A", events.getValue("mapped").agentSnapshot.agentId)
+        assertEquals("unknown", events.getValue("mapped").upStatus)
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"changed","agent_id":"char_002_jiaxu","pull_span":18}]}""",
+        )
+        command(
+            "event_update",
+            """{"event_id":"changed","entry":{"agent_id":"char_001_yangxiu","pull_span":18,"up_status":"non_up"}}""",
+        )
+        assertEquals("catalog_p:up:A", events.getValue("changed").agentSnapshot.agentId)
+        assertEquals("non_up", events.getValue("changed").upStatus)
+    }
+
+    @Test fun `users cannot create custom pools agents or mappings and legacy facts remain maintainable`() {
+        listOf(
+            "pool_create" to """{"name":"自定义","progress":0}""",
+            "pool_create" to """{"catalog_pool_id":"missing","progress":0}""",
+            "temporary_agent_create" to """{"agent_id":"tmp_new","name":"私人占位"}""",
+            "pool_map" to """{"pool_id":"p","catalog_pool_id":"catalog_p"}""",
+            "agent_map" to """{"agent_id":"tmp_old","catalog_agent_id":"char_001_yangxiu"}""",
+        ).forEach { (operation, input) -> assertThrows(RecruitmentApiException::class.java) { command(operation, input) } }
+        assertEquals(0L, state.archiveRevision)
+        state = state.copy(temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_old", "旧占位")))
+        historical()
+        val managedEvent = events.getValue("A")
+        val managedRevision = state.archiveRevision
+        assertThrows(RecruitmentApiException::class.java) {
+            command("event_update", """{"event_id":"A","entry":{"agent_id":"tmp_old","pull_span":17}}""")
+        }
+        assertEquals(managedEvent, events.getValue("A"))
+        assertEquals(managedRevision, state.archiveRevision)
+        events.clear()
+        state = state.copy(
+            pools = listOf(RecruitmentPool("p", RecruitmentPoolSnapshot("旧临时池", "如鸢"), 3)),
+            temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_old", "旧占位")),
+        )
+        events["old"] = RecruitmentEvent(
+            "u:a:old", "u", "a", "old", "p", state.pools.single().snapshot,
+            com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot("tmp_old", "旧占位", temporary = true), 17, 1, createdAt = now,
+        )
+        command("event_update", """{"event_id":"old","entry":{"agent_id":"tmp_old","pull_span":18,"note":"维护旧记录"}}""")
+        assertEquals(21L, count())
+        command("event_delete", """{"event_id":"old"}""")
+        assertEquals(3L, count())
+        command("event_restore", """{"event_id":"old"}""")
+        assertEquals(21L, count())
+        assertThrows(RecruitmentApiException::class.java) {
+            command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"tmp_old","pull_span":17}]}""")
+        }
     }
 
     @Test fun `deleting B31 changes 65 to 34 and undo restores same ID without touching C or progress`() {
@@ -179,32 +269,41 @@ class RecruitmentServiceTest {
     @Test fun `current exact save consumes old progress and historical extraction preserves cumulative total`() {
         command("baseline_set", """{"baseline":100}""")
         command("progress_set", """{"pool_id":"p","progress":21}""")
-        command("event_create", """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_A","pull_span":27}]}""")
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"catalog_p:up:A","pull_span":27}]}""",
+        )
         assertEquals(127L, count())
         assertEquals(0L, state.pools.single().progress)
         command(
             "event_create",
-            """{"pool_id":"p","mode":"historical","extract_from_baseline":true,"entries":[{"agent_id":"tmp_B","pull_span":31}]}""",
+            """{"pool_id":"p","mode":"historical","extract_from_baseline":true,"entries":[{"agent_id":"catalog_p:up:B","pull_span":31}]}""",
         )
         assertEquals(69L, state.baseline)
         assertEquals(127L, count())
-        command("event_create", """{"pool_id":"p","mode":"current","tail_progress":null,"entries":[{"agent_id":"tmp_C","pull_span":17}]}""")
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"current","tail_progress":null,"entries":[{"agent_id":"catalog_p:up:C","pull_span":17}]}""",
+        )
         assertNull(state.pools.single().progress)
         assertThrows(RecruitmentApiException::class.java) {
-            command("event_create", """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"tmp_C","pull_span":1}]}""")
+            command(
+                "event_create",
+                """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"agent_id":"catalog_p:up:C","pull_span":1}]}""",
+            )
         }
     }
 
     @Test fun `unknown-position batch counts once and deleted node stays deleted across batch undo`() {
         command(
             "batch_create",
-            """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":null},{"event_id":"B","agent_id":"tmp_B","pull_span":null}]}""",
+            """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":null}]}""",
         )
         assertEquals(10L, count())
-        command("event_update", """{"event_id":"A","entry":{"agent_id":"tmp_A","pull_span":7}}""")
+        command("event_update", """{"event_id":"A","entry":{"agent_id":"catalog_p:up:A","pull_span":7}}""")
         assertEquals(10L, count())
         command("event_delete", """{"event_id":"A"}""")
-        command("event_update", """{"event_id":"B","entry":{"agent_id":"tmp_B","pull_span":10}}""")
+        command("event_update", """{"event_id":"B","entry":{"agent_id":"catalog_p:up:B","pull_span":10}}""")
         assertEquals(10L, count())
         command("batch_delete", """{"batch_id":"b","confirm_total_pull_count":10}""")
         assertEquals(0L, count())
@@ -219,7 +318,7 @@ class RecruitmentServiceTest {
         command("event_reorder", """{"pool_id":"p","event_ids":["C","A","B"]}""")
         assertEquals(65L, count())
         assertEquals(listOf("C", "A", "B"), events.values.sortedBy { it.sortOrder }.map { it.eventId })
-        command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"tmp_A","pull_span":null}]}""")
+        command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"catalog_p:up:A","pull_span":null}]}""")
         assertEquals(65L, count())
         assertNull(events.values.last().pullSpan)
     }
@@ -234,7 +333,7 @@ class RecruitmentServiceTest {
             assertThrows(RecruitmentApiException::class.java) {
                 command(
                     "event_create",
-                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17}]}""",
+                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17}]}""",
                 )
             }.status.value(),
         )

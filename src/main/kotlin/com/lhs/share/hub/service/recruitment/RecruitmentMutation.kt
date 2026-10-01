@@ -2,7 +2,6 @@ package com.lhs.share.hub.service.recruitment
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.lhs.share.hub.controller.recruitment.request.RecruitmentAgentMap
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentBaselineSet
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentBatchCreate
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentBatchSelect
@@ -12,13 +11,10 @@ import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventReorder
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventSelect
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentEventUpdate
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolCreate
-import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolMap
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentPoolSelect
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentProgressSet
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
-import com.lhs.share.hub.controller.recruitment.request.RecruitmentTemporaryAgentCreate
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
-import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
@@ -26,7 +22,6 @@ import com.lhs.share.hub.repository.entity.RecruitmentBatch
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
-import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -36,7 +31,6 @@ import java.util.UUID
 @Service
 class RecruitmentMutation(
     private val store: RecruitmentRepository,
-    private val operators: OperatorCatalogRepository,
     private val catalog: RecruitmentCatalog,
     mapper: ObjectMapper,
 ) {
@@ -54,8 +48,9 @@ class RecruitmentMutation(
                 if (current.pools.size >= 500) throw recruitmentInvalid("卡池档案已达500个上限")
                 val id = validId(input.poolId ?: newId("pool_"))
                 if (current.pools.any { it.poolId == id }) throw conflictId("pool")
-                val snapshot = input.catalogPoolId?.let { catalog.snapshot(current.gameSnapshot, it) }
-                    ?: RecruitmentPoolSnapshot(validName(input.name ?: throw recruitmentInvalid("请填写名称")), current.gameSnapshot)
+                if (input.name != null) throw recruitmentInvalid("卡池只能由管理员配置，请选择公共卡池")
+                val catalogId = input.catalogPoolId ?: throw recruitmentInvalid("请选择管理员配置的公共卡池")
+                val snapshot = catalog.snapshot(current.gameSnapshot, catalogId)
                 next =
                     current.copy(
                         pools = current.pools + RecruitmentPool(id, snapshot, input.progress),
@@ -77,33 +72,8 @@ class RecruitmentMutation(
                 next = replacePool(current, pool(current, input.poolId).copy(progress = input.progress))
             }
             "baseline_set" -> next = current.copy(baseline = recruitmentCount(read<RecruitmentBaselineSet>(data).baseline, "baseline"))
-            "temporary_agent_create" -> {
-                val input = read<RecruitmentTemporaryAgentCreate>(data)
-                if (current.temporaryAgents.size >= 1000) throw recruitmentInvalid("临时密探已达1000个上限")
-                val id = validId(input.agentId ?: newId("tmp_"))
-                if (!id.startsWith("tmp_")) throw recruitmentInvalid("临时密探ID必须以tmp_开头")
-                if (current.temporaryAgents.any { it.agentId == id }) throw conflictId("agent")
-                next = current.copy(temporaryAgents = current.temporaryAgents + RecruitmentTemporaryAgent(id, validName(input.name)))
-                result = result.copy(agentId = id)
-            }
-            "pool_map" -> {
-                val input = read<RecruitmentPoolMap>(data)
-                val pool = pool(current, input.poolId)
-                if (pool.snapshot.catalogPoolId != null) throw recruitmentInvalid("只有临时卡池可以关联公共目录")
-                next = replacePool(current, pool.copy(mappedSnapshot = catalog.snapshot(current.gameSnapshot, input.catalogPoolId)))
-            }
-            "agent_map" -> {
-                val input = read<RecruitmentAgentMap>(data)
-                val temporary =
-                    current.temporaryAgents.firstOrNull { it.agentId == input.agentId } ?: throw recruitmentNotFound("temporary_agent")
-                val target = agent(current, input.catalogAgentId)
-                if (target.temporary) throw recruitmentInvalid("请选择公共目录中的绝密密探")
-                next = current.copy(
-                    temporaryAgents = current.temporaryAgents.map {
-                        if (it.agentId == temporary.agentId) it.copy(mappedAgentId = target.agentId, mappedName = target.name) else it
-                    },
-                )
-            }
+            "temporary_agent_create", "pool_map", "agent_map" ->
+                throw recruitmentInvalid("卡池及UP占位密探只能由管理员管理")
             "event_create" -> {
                 val input = read<RecruitmentEventCreate>(data)
                 val events = newEvents(current, input.poolId, input.entries, now)
@@ -282,6 +252,8 @@ class RecruitmentMutation(
         now: Instant,
     ): List<RecruitmentEvent> {
         val pool = pool(current, poolId)
+        val catalogId = pool.snapshot.catalogPoolId ?: throw recruitmentInvalid("旧临时卡池仅支持维护已有记录，请选择管理员卡池新增")
+        val poolSnapshot = catalog.snapshot(current.gameSnapshot, catalogId)
         if (entries.isEmpty() || entries.size > 120) throw recruitmentInvalid("每次请填写1至120条绝密结果")
         val seen = HashSet<String>()
         return entries.mapIndexed { index, entry ->
@@ -289,10 +261,10 @@ class RecruitmentMutation(
             if (!seen.add(id) || store.event(current.userId, current.accountId, id) != null) throw conflictId("event")
             val event = RecruitmentEvent(
                 scoped(current, id), current.userId, current.accountId, id, poolId,
-                pool.mappedSnapshot ?: pool.snapshot,
-                agent(current, entry.agentId), entry.pullSpan, current.nextEventOrder + index, createdAt = now,
+                poolSnapshot,
+                agent(current, poolSnapshot, entry.agentId), entry.pullSpan, current.nextEventOrder + index, createdAt = now,
             )
-            updateEvent(current, event, entry, now)
+            updateEvent(current, event, entry.copy(agentId = event.agentSnapshot.agentId), now)
         }
     }
 
@@ -311,7 +283,7 @@ class RecruitmentMutation(
             ) {
                 old.agentSnapshot
             } else {
-                agent(current, entry.agentId)
+                agent(current, old.poolSnapshot, entry.agentId, refreshCatalog = true)
             },
             pullSpan = entry.pullSpan,
             upStatus = entry.upStatus,
@@ -323,18 +295,26 @@ class RecruitmentMutation(
         )
     }
 
-    internal fun agent(current: RecruitmentArchive, id: String): RecruitmentAgentSnapshot {
-        current.temporaryAgents.firstOrNull {
-            it.agentId == id
-        }?.let { return RecruitmentAgentSnapshot(it.agentId, it.name, temporary = true) }
-        val operator = operators.findByOperatorId(id) ?: throw recruitmentInvalid("目录中没有该密探，请先创建临时密探")
-        if (operator.rarity != 5 ||
-            current.gameSnapshot !in operator.games
-        ) {
-            throw recruitmentInvalid("请选择当前游戏可用的绝密密探")
+    internal fun agent(
+        current: RecruitmentArchive,
+        poolSnapshot: RecruitmentPoolSnapshot,
+        id: String,
+        refreshCatalog: Boolean = false,
+    ): RecruitmentAgentSnapshot {
+        val latest = if (refreshCatalog && poolSnapshot.catalogPoolId != null) {
+            catalog.snapshot(current.gameSnapshot, poolSnapshot.catalogPoolId)
+        } else {
+            poolSnapshot
         }
-        return RecruitmentAgentSnapshot(operator.operatorId, operator.name, catalogRevision = operator.catalogVersion)
+        latest.upAgents.firstOrNull { it.id == id || it.active && it.operatorId == id }?.let { slot ->
+            if (!slot.active) throw recruitmentInvalid("该UP密探已退役，不能新增选择")
+            return RecruitmentAgentSnapshot(slot.id, slot.name, catalogRevision = latest.catalogRevision)
+        }
+        return catalog.operator(current.gameSnapshot, id)
     }
+
+    internal fun projectPools(pools: List<RecruitmentPool>): List<RecruitmentPool> = catalog.projectPools(pools)
+    internal fun projectEvents(events: List<RecruitmentEvent>): List<RecruitmentEvent> = catalog.projectEvents(events)
 
     private fun pool(current: RecruitmentArchive, id: String) =
         current.pools.firstOrNull { it.poolId == id } ?: throw recruitmentNotFound("pool")
@@ -366,7 +346,6 @@ class RecruitmentMutation(
         }
     }
     private inline fun <reified T> read(data: JsonNode): T = decoder.read(data, T::class.java)
-    private fun validName(name: String) = name.trim().takeIf { it.length in 1..128 } ?: throw recruitmentInvalid("名称须为1至128个字符")
     private fun validId(id: String) =
         id.takeIf { Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$").matches(it) } ?: throw recruitmentInvalid("记录ID格式不正确")
     private fun newId(prefix: String) = prefix + UUID.randomUUID().toString()

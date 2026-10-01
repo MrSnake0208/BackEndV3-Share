@@ -37,6 +37,15 @@ data class RecruitmentPoolSnapshot(
     val unmappedUpAgentNames: List<String> = emptyList(),
     val catalogRevision: String? = null,
     val poolType: String? = null,
+    val upAgents: List<RecruitmentUpAgent> = emptyList(),
+)
+
+/** Stable pool-owned identity. Binding a placeholder never changes its id. */
+data class RecruitmentUpAgent(
+    val id: String,
+    val name: String,
+    val operatorId: String? = null,
+    val active: Boolean = true,
 )
 
 data class RecruitmentPool(

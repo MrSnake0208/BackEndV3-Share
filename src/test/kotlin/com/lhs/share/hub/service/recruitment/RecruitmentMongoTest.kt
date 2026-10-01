@@ -3,15 +3,19 @@ package com.lhs.share.hub.service.recruitment
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.hub.controller.recruitment.request.RecruitmentCatalogWriteRequest
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
 import com.lhs.share.hub.repository.OperatorCatalogRepository
+import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
@@ -61,17 +65,22 @@ class RecruitmentMongoTest {
     private val mapper = jacksonObjectMapper().registerModule(
         JavaTimeModule(),
     ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-    private val catalog = RecruitmentCatalog(mapper)
     private val operators = mockk<OperatorCatalogRepository>()
-    private val mutation = RecruitmentMutation(store, operators, catalog, mapper)
+    private val catalogStore = RecruitmentCatalogRepository(template)
+    private val catalog = RecruitmentCatalog(mapper, catalogStore, operators)
+    private val mutation = RecruitmentMutation(store, catalog, mapper)
     private val tx = TransactionTemplate(MongoTransactionManager(template.mongoDatabaseFactory))
     private val publisher = spyk(AccountEventService(mockk(relaxed = true)))
     private val accountService = lifecycle(accounts)
     private val service = RecruitmentService(store, accountService, accounts, mutation, publisher, mapper, tx)
 
     @BeforeEach fun setup() {
+        every { operators.findByOperatorId(any()) } returns null
+        every { operators.count() } returns 0L
+        every { operators.findAllByOrderByOperatorIdAsc() } returns emptyList()
         listOf(
             SubAccount::class.java,
+            RecruitmentCatalogPool::class.java,
             RecruitmentArchive::class.java,
             RecruitmentEvent::class.java,
             RecruitmentBatch::class.java,
@@ -82,6 +91,15 @@ class RecruitmentMongoTest {
                 template.indexOps(type).ensureIndex(it)
             }
         }
+        template.insert(
+            RecruitmentCatalogPool(
+                "catalog_p",
+                "如鸢",
+                "管理员池",
+                revision = 1,
+                upAgents = listOf(RecruitmentUpAgent("catalog_p:up:A", "A")),
+            ),
+        )
         accounts.insert(SubAccount(userId = "u", accountId = "a", name = "A", game = "如鸢"))
         accounts.insert(SubAccount(userId = "u", accountId = "b", name = "B", game = "如鸢"))
     }
@@ -96,14 +114,85 @@ class RecruitmentMongoTest {
     private fun command(operation: String, json: String) =
         service.command("u", request(store.archive("u", "a")?.archiveRevision ?: 0, operation, json))
     private fun initialize() {
-        command("pool_create", """{"pool_id":"p","name":"临时卡池","progress":0}""")
-        command("temporary_agent_create", """{"agent_id":"tmp_A","name":"A"}""")
+        command("pool_create", """{"pool_id":"p","catalog_pool_id":"catalog_p","progress":0}""")
     }
     private fun lifecycle(repository: SubAccountRepository) = SubAccountService(
         repository, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), tx, recruitmentRepository = store, accountEvents = publisher,
     )
+
+    @Test fun `administrator binding and retirement inherit personal facts without rewriting archive or event documents`() {
+        initialize()
+        command("progress_set", """{"pool_id":"p","progress":8}""")
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17,"note":"原始备注","acquired_date":"2026-10-01"}]}""",
+        )
+        val archive = store.archive("u", "a")!!
+        val event = store.event("u", "a", "A")!!
+        catalog.update(
+            "admin",
+            "catalog_p",
+            RecruitmentCatalogWriteRequest(
+                "catalog_p",
+                "如鸢",
+                "管理员池",
+                1,
+                upAgents = listOf(RecruitmentUpAgent("catalog_p:up:A", "占位", "char_001_yangxiu")),
+            ),
+        )
+        assertEquals(archive, store.archive("u", "a"))
+        assertEquals(event, store.event("u", "a", "A"))
+        val shown = service.page("u", "a", "p", null, 10, null, null).items.single()
+        assertEquals("杨修", shown.agentSnapshot.name)
+        assertEquals("catalog_p:up:A", shown.agentSnapshot.agentId)
+        assertEquals(17L, shown.pullSpan)
+        assertEquals(event.acquiredDate, shown.acquiredDate)
+        assertEquals("原始备注", shown.note)
+        assertEquals(25L, service.archive("u", "a").summary.knownTotalPulls)
+        assertEquals(archive.archiveRevision, service.archive("u", "a").archiveRevision)
+        catalog.update("admin", "catalog_p", RecruitmentCatalogWriteRequest("catalog_p", "如鸢", "管理员池", 2, upAgents = emptyList()))
+        assertFalse(catalog.findPool("如鸢", "catalog_p")!!.upAgents.single().active)
+        assertEquals("杨修", service.page("u", "a", "p", null, 10, null, null).items.single().agentSnapshot.name)
+        assertThrows(RecruitmentApiException::class.java) {
+            command("event_create", """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""")
+        }
+        assertEquals(archive, store.archive("u", "a"))
+        assertEquals(event, store.event("u", "a", "A"))
+    }
+
+    @Test fun `catalog CAS permits one concurrent administrator update and retains all retired identities`() {
+        val input = RecruitmentCatalogWriteRequest("catalog_p", "如鸢", "更新", 1, upAgents = emptyList())
+        val executor = Executors.newFixedThreadPool(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        try {
+            val results = (1..2).map { index ->
+                executor.submit(
+                    Callable {
+                        ready.countDown()
+                        check(start.await(10, TimeUnit.SECONDS))
+                        runCatching { catalog.update("admin$index", "catalog_p", input) }
+                    },
+                )
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            val completed = results.map { it.get(15, TimeUnit.SECONDS) }
+            assertEquals(1, completed.count { it.isSuccess })
+            assertEquals(409, (completed.single { it.isFailure }.exceptionOrNull() as RecruitmentApiException).status.value())
+            val stored = catalog.findPool("如鸢", "catalog_p")!!
+            assertEquals(2L, stored.revision)
+            assertEquals("catalog_p:up:A", stored.upAgents.single().id)
+            assertFalse(stored.upAgents.single().active)
+            assertEquals(0L, template.getCollection("recruitment_archives").countDocuments())
+            assertEquals(0L, template.getCollection("recruitment_events").countDocuments())
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
+    }
 
     @Test fun `real transaction consumes progress once retries old revision and preserves owner isolation`() {
         initialize()
@@ -113,7 +202,7 @@ class RecruitmentMongoTest {
             request(
                 revision,
                 "event_create",
-                """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":27}]}""",
+                """{"pool_id":"p","mode":"current","tail_progress":0,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":27}]}""",
                 "retry",
             )
         val first = service.command("u", input)
@@ -157,7 +246,7 @@ class RecruitmentMongoTest {
                 request(
                     previous.archiveRevision,
                     "event_create",
-                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"failed","agent_id":"tmp_A","pull_span":17}]}""",
+                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"failed","agent_id":"catalog_p:up:A","pull_span":17}]}""",
                 ),
             )
         }
@@ -202,7 +291,7 @@ class RecruitmentMongoTest {
                                 request(
                                     revision,
                                     "event_create",
-                                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"e$index","agent_id":"tmp_A","pull_span":17}]}""",
+                                    """{"pool_id":"p","mode":"historical","entries":[{"event_id":"e$index","agent_id":"catalog_p:up:A","pull_span":17}]}""",
                                 ),
                             )
                         }
@@ -239,7 +328,9 @@ class RecruitmentMongoTest {
         try {
             val write = executor.submit(
                 Callable {
-                    runCatching { firstWrite.command("u", request(0, "pool_create", """{"pool_id":"p","name":"临时池","progress":0}""")) }
+                    runCatching {
+                        firstWrite.command("u", request(0, "pool_create", """{"pool_id":"p","catalog_pool_id":"catalog_p","progress":0}"""))
+                    }
                 },
             )
             assertTrue(fenced.await(10, TimeUnit.SECONDS))
@@ -249,10 +340,9 @@ class RecruitmentMongoTest {
             assertTrue(write.get(15, TimeUnit.SECONDS).isSuccess)
             assertTrue(gameChange.get(15, TimeUnit.SECONDS).isFailure)
             assertEquals("如鸢", accounts.findByUserIdAndAccountId("u", "a")!!.game)
-            command("temporary_agent_create", """{"agent_id":"tmp_A","name":"A"}""")
             command(
                 "event_create",
-                """{"pool_id":"p","mode":"historical","entries":[{"event_id":"e","agent_id":"tmp_A","pull_span":17}]}""",
+                """{"pool_id":"p","mode":"historical","entries":[{"event_id":"e","agent_id":"catalog_p:up:A","pull_span":17}]}""",
             )
             command("event_delete", """{"event_id":"e"}""")
             assertEquals(
@@ -291,7 +381,7 @@ class RecruitmentMongoTest {
             assertTrue(fenced.await(10, TimeUnit.SECONDS))
             val create = executor.submit(
                 Callable {
-                    runCatching { race.command("u", request(0, "pool_create", """{"name":"临时池","progress":0}""")) }
+                    runCatching { race.command("u", request(0, "pool_create", """{"catalog_pool_id":"catalog_p","progress":0}""")) }
                 },
             )
             assertTrue(writing.await(10, TimeUnit.SECONDS))
@@ -331,7 +421,7 @@ class RecruitmentMongoTest {
         initialize()
         command(
             "event_create",
-            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17},{"event_id":"B","agent_id":"tmp_A","pull_span":31},{"event_id":"C","agent_id":"tmp_A","pull_span":17}]}""",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":31},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":17}]}""",
         )
         val first = service.page("u", "a", "p", null, 2, null, null)
         val second = service.page("u", "a", "p", first.nextCursor, 2, null, null)
@@ -362,7 +452,7 @@ class RecruitmentMongoTest {
         initialize()
         command(
             "event_create",
-            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":17},{"event_id":"B","agent_id":"tmp_A","pull_span":31},{"event_id":"C","agent_id":"tmp_A","pull_span":17}]}""",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":31},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":17}]}""",
         )
         template.updateMulti(
             org.springframework.data.mongodb.core.query.Query.query(
@@ -383,7 +473,7 @@ class RecruitmentMongoTest {
         initialize()
         command(
             "batch_create",
-            """{"batch_id":"batch","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":null},{"event_id":"B","agent_id":"tmp_A","pull_span":null}]}""",
+            """{"batch_id":"batch","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":null}]}""",
         )
         assertEquals(10L, service.archive("u", "a").summary.knownTotalPulls)
         assertEquals(2L, service.archive("u", "a").poolSummaries.getValue("p").eventCount)
@@ -405,7 +495,7 @@ class RecruitmentMongoTest {
         initialize()
         command(
             "batch_create",
-            """{"batch_id":"batch","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"tmp_A","pull_span":null}]}""",
+            """{"batch_id":"batch","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null}]}""",
         )
         command("event_delete", """{"event_id":"A"}""")
         service.command("u", RecruitmentCommandRequest("b", 0, "other", "baseline_set", mapper.readTree("""{"baseline":55}""")))
@@ -423,7 +513,7 @@ class RecruitmentMongoTest {
         (1..3).forEach { index ->
             command(
                 "batch_create",
-                """{"batch_id":"b$index","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"agent_id":"tmp_A","pull_span":null}]}""",
+                """{"batch_id":"b$index","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"agent_id":"catalog_p:up:A","pull_span":null}]}""",
             )
         }
         template.updateMulti(
@@ -473,7 +563,7 @@ class RecruitmentMongoTest {
             initialize()
             command(
                 "event_create",
-                """{"pool_id":"p","mode":"historical","entries":[{"event_id":"dated","agent_id":"tmp_A","pull_span":17,"acquired_date":"2026-10-01"}]}""",
+                """{"pool_id":"p","mode":"historical","entries":[{"event_id":"dated","agent_id":"catalog_p:up:A","pull_span":17,"acquired_date":"2026-10-01"}]}""",
             )
             val current = store.archive("u", "a")!!
             val snapshot = current.pools.single().snapshot.copy(startDate = date.minusDays(2), endDate = date.plusDays(2))

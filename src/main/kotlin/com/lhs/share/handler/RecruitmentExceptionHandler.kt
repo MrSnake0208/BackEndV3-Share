@@ -2,6 +2,7 @@ package com.lhs.share.handler
 
 import com.lhs.share.hub.controller.inventory.response.InventoryError
 import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
+import com.lhs.share.hub.controller.recruitment.AdminRecruitmentCatalogController
 import com.lhs.share.hub.controller.recruitment.RecruitmentController
 import com.lhs.share.hub.controller.recruitment.RecruitmentExchangeController
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -19,7 +20,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.server.ResponseStatusException
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = [RecruitmentController::class, RecruitmentExchangeController::class])
+@RestControllerAdvice(
+    assignableTypes = [RecruitmentController::class, RecruitmentExchangeController::class, AdminRecruitmentCatalogController::class],
+)
 class RecruitmentExceptionHandler {
     private val log = KotlinLogging.logger { }
 
