@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.springframework.core.io.ClassPathResource
 import java.time.LocalDate
 
 class RecruitmentCatalogTest {
@@ -49,43 +48,64 @@ class RecruitmentCatalogTest {
         every { operators.count() } returns 0L
     }
 
-    @Test fun `versioned catalog is pure scoped and keeps honest seed metadata and pool owned identities`() {
+    @Test fun `catalog reads persisted pools only scopes by game and keeps pool owned identities`() {
+        saved["yuan-pool"] = RecruitmentCatalogPool(
+            "yuan-pool",
+            "代号鸢",
+            "代号鸢池",
+            revision = 3,
+            upAgents = listOf(RecruitmentUpAgent("yuan-pool:up:1", "杨修", "char_001_yangxiu")),
+            upStatus = "verified",
+        )
+        saved["ru-pool"] = RecruitmentCatalogPool("ru-pool", "如鸢", "如鸢池", revision = 1)
         val response = catalog.catalog("代号鸢")
         val pools = response.path("pools")
-        assertEquals(58, pools.size())
-        assertEquals(58, pools.map { it.path("pool_id").asText() }.toSet().size)
-        assertTrue(response.path("catalog_revision").asText().isNotEmpty())
-        assertTrue(catalog.catalog("如鸢").path("pools").isEmpty)
-        assertEquals(2, pools.count { it.path("up_status").asText() == "selection" })
-        val seed = ClassPathResource("operator/operators.json").inputStream.use(mapper::readTree).associateBy { it.path("id").asText() }
-        pools.forEach { pool ->
-            val start = pool["start_date"]?.takeUnless { it.isNull }?.asText()?.let(LocalDate::parse)
-            val end = pool["end_date"]?.takeUnless { it.isNull }?.asText()?.let(LocalDate::parse)
-            assertFalse(start != null && end != null && start > end)
-            pool.path("up_agent_ids").forEach {
-                seed[it.asText()]?.let { operator ->
-                    assertEquals(5, operator.path("rarity").asInt())
-                    assertTrue(operator.path("games").any { game -> game.asText() == "代号鸢" })
-                }
-            }
-            val id = pool.path("pool_id").asText()
-            assertTrue(pool.path("up_agents").all { it.path("id").asText().startsWith("$id:up:") })
-            val snapshot = catalog.snapshot("代号鸢", id)
-            assertEquals(pool.path("up_status").asText(), snapshot.upStatus)
-            assertEquals(pool.path("name").asText(), snapshot.name)
-            assertTrue(pool.path("source_url").asText().isNotEmpty())
-        }
-        repeat(2) { catalog.listForAdmin() }
-        val byName = pools.associateBy { it.path("name").asText() }
-        assertEquals(listOf("char_132_shiwei", "char_131_weiyan"), byName.getValue("棺珠折骨").path("up_agent_ids").map(JsonNode::asText))
-        assertTrue(byName.getValue("棺珠折骨").path("unmapped_up_agent_names").isEmpty)
-        assertEquals(listOf("char_129_zhoutai", "char_130_chenlin"), byName.getValue("周庙之璋").path("up_agent_ids").map(JsonNode::asText))
-        assertTrue(byName.getValue("周庙之璋").path("unmapped_up_agent_names").isEmpty)
+        assertEquals(1, pools.size())
+        assertEquals("yuan-pool", pools.first().path("pool_id").asText())
+        assertTrue(response.path("catalog_revision").asText().startsWith("db:"))
+        assertEquals(listOf("char_001_yangxiu"), pools.first().path("up_agent_ids").map { it.asText() })
+        assertEquals("yuan-pool:up:1", pools.first().path("up_agents").first().path("id").asText())
+        assertEquals("yuan-pool", catalog.snapshot("代号鸢", "yuan-pool").catalogPoolId)
+        assertEquals(1, catalog.catalog("如鸢").path("pools").size())
         verify(exactly = 0) { repository.save(any()) }
         verify(exactly = 0) { operators.save(any()) }
-        verify(exactly = 4) { operators.findAllByOrderByOperatorIdAsc() }
         assertThrows(RecruitmentApiException::class.java) { catalog.catalog("other") }
-        assertThrows(RecruitmentApiException::class.java) { catalog.snapshot("如鸢", pools.first().path("pool_id").asText()) }
+        assertThrows(RecruitmentApiException::class.java) { catalog.snapshot("如鸢", "yuan-pool") }
+    }
+
+    @Test fun `legacy json import creates only missing pools and converts stable legacy slots`() {
+        saved["existing"] = RecruitmentCatalogPool("existing", "如鸢", "已存在", revision = 4)
+        val document = mapper.readTree(
+            """
+            {
+              "catalog_revision":"legacy",
+              "pools":[
+                {"pool_id":"existing","game":"如鸢","name":"旧文件中的同ID","up_agent_ids":[],"up_agent_names":[]},
+                {"pool_id":"legacy-pool","game":"如鸢","name":"迁移池","pool_type":"限定","up_status":"verified",
+                 "up_agent_ids":["char_001_yangxiu"],"up_agent_names":["杨修"],"source_up_agent_names":["杨修"],
+                 "source_url":"https://example.invalid/source","source_revision":115070,
+                 "source_pages":[{"url":"https://example.invalid/source","revision":115070}],"source_note":"legacy source"}
+              ]
+            }
+            """.trimIndent(),
+        )
+        val result = catalog.importCatalog("admin", document)
+        assertEquals(1, result.createdCount)
+        assertEquals(listOf("legacy-pool"), result.createdPoolIds)
+        assertEquals(listOf("existing"), result.skippedPoolIds)
+        assertEquals("已存在", saved.getValue("existing").name)
+        val imported = saved.getValue("legacy-pool")
+        assertEquals(1L, imported.revision)
+        assertEquals("legacy-pool:up:1", imported.upAgents.single().id)
+        assertEquals("char_001_yangxiu", imported.upAgents.single().operatorId)
+        assertEquals("verified", imported.upStatus)
+        assertEquals("admin", imported.updatedBy)
+        assertEquals("https://example.invalid/source", imported.sourceUrl)
+        assertEquals(115070L, imported.sourceRevision)
+        assertEquals("https://example.invalid/source", imported.sourcePages.single().url)
+        assertEquals("legacy source", imported.sourceNote)
+        assertEquals("https://example.invalid/source", catalog.catalog("如鸢").path("pools").first { it.path("pool_id").asText() == "legacy-pool" }.path("source_url").asText())
+        assertTrue(catalog.catalog("如鸢").path("catalog_revision").asText().startsWith("db:"))
     }
 
     @Test fun `account view includes all same game pools preserves saved identities and keeps export projection scoped`() {

@@ -8,6 +8,11 @@ import org.springframework.data.mongodb.core.mapping.FieldType
 import java.time.Instant
 import java.time.LocalDate
 
+data class RecruitmentCatalogSourcePage(
+    val url: String,
+    val revision: Long? = null,
+)
+
 @Document("recruitment_catalog")
 data class RecruitmentCatalogPool(
     @Id val poolId: String,
@@ -22,4 +27,9 @@ data class RecruitmentCatalogPool(
     val upStatus: String = "unknown",
     @JsonIgnore val updatedBy: String? = null,
     @JsonIgnore val updatedAt: Instant = Instant.EPOCH,
+    val sourceUpAgentNames: List<String> = emptyList(),
+    val sourceUrl: String? = null,
+    val sourceRevision: Long? = null,
+    val sourcePages: List<RecruitmentCatalogSourcePage> = emptyList(),
+    val sourceNote: String? = null,
 )
