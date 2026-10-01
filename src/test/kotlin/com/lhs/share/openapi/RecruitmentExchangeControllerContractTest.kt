@@ -17,9 +17,12 @@ import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.service.recruitment.RecruitmentApiException
+import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.hub.service.recruitment.RecruitmentExchangeService
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -37,6 +40,7 @@ import java.time.Instant
 
 class RecruitmentExchangeControllerContractTest {
     private val service = mockk<RecruitmentExchangeService>()
+    private val access = mockk<RecruitmentAccessService>()
     private val helper = mockk<AuthenticationHelper>()
     private val mapper = jacksonObjectMapper().registerModule(
         JavaTimeModule(),
@@ -44,7 +48,8 @@ class RecruitmentExchangeControllerContractTest {
     private lateinit var mvc: MockMvc
 
     @BeforeEach fun setup() {
-        mvc = MockMvcBuilders.standaloneSetup(RecruitmentExchangeController(service, helper, mapper))
+        every { access.requireAccess(any()) } just runs
+        mvc = MockMvcBuilders.standaloneSetup(RecruitmentExchangeController(service, access, helper, mapper))
             .setControllerAdvice(RecruitmentExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
 

@@ -5,6 +5,7 @@ import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OpenApiToken
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.openapi.OpenApiPermission
 import com.lhs.share.openapi.OpenApiTokenService
 import com.lhs.share.openapi.TokenCacheData
@@ -72,29 +73,24 @@ class BetaOpenApiGateTest {
     }
 
     @Test
-    fun `existing SSE closes before publishing data after access becomes unavailable`() {
-        every { beta.requireAccess("u") } just runs
-        val events = AccountEventService(beta)
+    fun `account SSE accepts beta or recruitment access and closes when both disappear`() {
+        val recruitmentAccess = mockk<RecruitmentAccessService>()
+        every { beta.requireAccess("u") } throws deny()
+        every { recruitmentAccess.canAccess("u") } returns true
+        val events = AccountEventService(beta, recruitmentAccess)
         val emitter = mockk<SseEmitter>(relaxed = true)
         events.register("u", "a", emitter)
         clearMocks(emitter, answers = false)
-        every { beta.requireAccess("u") } throws deny()
-        events.publish("u", "a", "private-data", "id", mapOf("value" to 42))
+
+        events.publish("u", "a", "account-data", "id", mapOf("value" to 42))
+        events.keepAlive()
+        verify(exactly = 2) { emitter.send(any<SseEmitter.SseEventBuilder>()) }
+        verify(exactly = 0) { emitter.complete() }
+
+        clearMocks(emitter, answers = false)
+        every { recruitmentAccess.canAccess("u") } returns false
+        events.publish("u", "a", "blocked", "id-2", emptyMap<String, Any>())
         verify(exactly = 1) { emitter.complete() }
         verify(exactly = 0) { emitter.send(any<SseEmitter.SseEventBuilder>()) }
-    }
-
-    @Test
-    fun `SSE heartbeat closes each instance connection on maintenance while pause can retain access`() {
-        every { beta.requireAccess("u") } just runs
-        val events = AccountEventService(beta)
-        val emitter = mockk<SseEmitter>(relaxed = true)
-        events.register("u", "a", emitter)
-        clearMocks(emitter, answers = false)
-        events.keepAlive()
-        verify(exactly = 1) { emitter.send(any<SseEmitter.SseEventBuilder>()) }
-        every { beta.requireAccess("u") } throws BetaApiException(HttpStatus.FORBIDDEN, "beta_service_closed", "closed")
-        events.keepAlive()
-        verify(exactly = 1) { emitter.complete() }
     }
 }

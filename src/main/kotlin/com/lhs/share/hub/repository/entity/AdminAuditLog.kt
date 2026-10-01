@@ -13,6 +13,9 @@ enum class AdminAuditAction {
     FEEDBACK_ACCESS_DELETED,
     FEEDBACK_CATEGORY_CREATED,
     FEEDBACK_CATEGORY_RENAMED,
+    RECRUITMENT_ACCESS_MODE_UPDATED,
+    RECRUITMENT_ACCESS_GRANTED,
+    RECRUITMENT_ACCESS_REVOKED,
     CHANGELOG_PUBLISHED,
     CHANGELOG_REJECTED,
     CHANGELOG_WITHDRAWN,
@@ -26,6 +29,7 @@ data class AdminAuditSnapshot(
     val feedbackRoles: Set<String>? = null,
     val operatorAreas: Set<String>? = null,
     val developerAreas: Set<String>? = null,
+    val recruitmentAccess: Map<String, String>? = null,
     val feedbackCategoryLabel: String? = null,
 )
 
