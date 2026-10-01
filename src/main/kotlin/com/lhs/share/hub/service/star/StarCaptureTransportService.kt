@@ -6,12 +6,15 @@ import com.lhs.share.config.external.ShareProperties
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.core.io.FileSystemResource
 import org.springframework.core.io.Resource
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
+import java.io.File
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -33,7 +36,119 @@ class StarCaptureTransportService(
     private val accountService: SubAccountService,
     private val accountEventService: AccountEventService,
     private val stateStore: StarCaptureStateStore,
+    private val uploadSessions: StarCaptureUploadSessionStore,
 ) {
+    private val log = KotlinLogging.logger { }
+
+    fun initUpload(userId: String, accountId: String, rawManifest: String): StarCaptureUploadSessionResponse {
+        accountService.requireAccount(userId, accountId)
+        cleanupExpired()
+        val node = try {
+            objectMapper.readTree(rawManifest) as? ObjectNode ?: invalid("manifest 必须是 JSON 对象")
+        } catch (_: Exception) {
+            invalid("manifest 不是有效 JSON")
+        }
+        val manifest = parseFullManifest(node, null)
+        val key = StarCaptureKey(userId, accountId, manifest.captureId)
+        rejectFormalUpload(key)
+        val existing = uploadSessions.find(key)
+        if (existing != null) {
+            if (existing.manifest != manifest) conflict("capture_id 已被不同 manifest 使用")
+            return StarCaptureUploadSessionResponse(manifest.captureId, manifest.images.size)
+        }
+        val session = StarCaptureUploadSession(
+            key = key,
+            rawManifest = rawManifest,
+            manifest = manifest,
+            directory = storageRoot().resolve("upload-" + UUID.randomUUID()).toString(),
+            expiresAt = Instant.now().plus(properties.starCapture.ttlMinutes.coerceAtLeast(1), ChronoUnit.MINUTES),
+        )
+        if (!uploadSessions.create(session, properties.starCapture.ttlMinutes.coerceAtLeast(1) * 60)) {
+            val winner = uploadSessions.find(key) ?: conflict("capture_id 正在初始化，请重试")
+            if (winner.manifest != manifest) conflict("capture_id 已被不同 manifest 使用")
+        }
+        return StarCaptureUploadSessionResponse(manifest.captureId, manifest.images.size)
+    }
+
+    fun uploadImage(
+        userId: String,
+        accountId: String,
+        captureId: String,
+        sourceImageId: String,
+        file: MultipartFile,
+    ): StarCaptureImageUploadResponse {
+        accountService.requireAccount(userId, accountId)
+        cleanupExpired()
+        val key = StarCaptureKey(userId, accountId, captureId)
+        rejectFormalUpload(key)
+        val session = requireUploadSession(key)
+        val expected = session.manifest.images.singleOrNull { it.sourceImageId == sourceImageId }
+            ?: invalid("source_image_id 不在 manifest 中")
+        if (file.originalFilename != expected.fileName || file.isEmpty ||
+            file.contentType?.substringBefore(';') != "image/png" || !hasPngSignature(file)
+        ) {
+            invalid("PNG 文件与 manifest 不匹配")
+        }
+        val directory = Path.of(session.directory)
+        Files.createDirectories(directory)
+        val temporary = Files.createTempFile(directory, "image-", ".part")
+        val destination = directory.resolve(UUID.randomUUID().toString() + ".png")
+        try {
+            file.inputStream.use { Files.copy(it, temporary, StandardCopyOption.REPLACE_EXISTING) }
+            // Publish only a fully written file; Redis SET NX chooses the immutable image winner.
+            Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE)
+            val image = StoredStarCaptureImage(sourceImageId, expected.sourceOrder, expected.fileName, destination.toString())
+            when (uploadSessions.putImage(key, image)) {
+                1L -> Unit
+                0L -> {
+                    val existing = uploadSessions.image(key, sourceImageId) ?: conflict("图片正在提交，请重试")
+                    if (!Files.readAllBytes(Path.of(existing.path)).contentEquals(Files.readAllBytes(destination))) {
+                        Files.deleteIfExists(destination)
+                        conflict("source_image_id 已被不同内容使用")
+                    }
+                    Files.deleteIfExists(destination)
+                }
+                else -> {
+                    Files.deleteIfExists(destination)
+                    missing("星石上传会话已过期")
+                }
+            }
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        return StarCaptureImageUploadResponse(captureId, sourceImageId)
+    }
+
+    fun finalizeUpload(userId: String, accountId: String, captureId: String): StarCaptureFinalizeResult {
+        accountService.requireAccount(userId, accountId)
+        cleanupExpired()
+        val key = StarCaptureKey(userId, accountId, captureId)
+        stateStore.find(key)?.let {
+            if (it.consumed) conflict("星石采集已被消费")
+            return StarCaptureFinalizeResult(capture = it.toUploadResponse())
+        }
+        val session = requireUploadSession(key)
+        val images = session.manifest.images.map { uploadSessions.image(key, it.sourceImageId) }
+        val missingIds = session.manifest.images.filterIndexed { index, _ ->
+            val image = images[index]
+            image == null || !Files.isRegularFile(Path.of(image.path))
+        }.map { it.sourceImageId }
+        if (missingIds.isNotEmpty()) return StarCaptureFinalizeResult(missingSourceImageIds = missingIds)
+        // Reuse the existing formal upload path, including its SET NX capture-id claim.
+        // It copies into a separate capture directory, so session TTL never deletes ready files.
+        val files = images.filterNotNull().map { UploadSessionFile(it.fileName, Path.of(it.path)) }
+        return StarCaptureFinalizeResult(capture = upload(userId, accountId, session.rawManifest, files))
+    }
+
+    private fun requireUploadSession(key: StarCaptureKey): StarCaptureUploadSession {
+        val session = uploadSessions.find(key) ?: missing("星石上传会话不存在或已过期")
+        if (!Instant.now().isBefore(session.expiresAt)) missing("星石上传会话已过期")
+        return session
+    }
+
+    private fun rejectFormalUpload(key: StarCaptureKey) {
+        stateStore.find(key)?.let { conflict(if (it.consumed) "星石采集已被消费" else "星石采集已完成上传") }
+    }
 
     fun upload(userId: String, accountId: String, rawManifest: String, files: List<MultipartFile>): StarCaptureUploadResponse {
         accountService.requireAccount(userId, accountId)
@@ -74,20 +189,25 @@ class StarCaptureTransportService(
                 if (!sameContent(winner, manifest, files)) conflict("capture_id 已被不同内容使用")
                 return winner.toUploadResponse()
             }
-            accountEventService.publish(
-                userId,
-                accountId,
-                STAR_CAPTURE_READY_EVENT,
-                "star-capture:${manifest.captureId}",
-                StarCaptureReadyEvent(
-                    eventId = "star-capture:${manifest.captureId}",
-                    accountId = accountId,
-                    captureId = manifest.captureId,
-                    section = manifest.section,
-                    imageCount = manifest.images.size,
-                    occurredAt = now,
-                ),
-            )
+            // The formal capture is already committed. Pending recovery covers notification failure.
+            runCatching {
+                accountEventService.publish(
+                    userId,
+                    accountId,
+                    STAR_CAPTURE_READY_EVENT,
+                    "star-capture:${manifest.captureId}",
+                    StarCaptureReadyEvent(
+                        eventId = "star-capture:${manifest.captureId}",
+                        accountId = accountId,
+                        captureId = manifest.captureId,
+                        section = manifest.section,
+                        imageCount = manifest.images.size,
+                        occurredAt = now,
+                    ),
+                )
+            }.onFailure { error ->
+                log.warn { "star_capture_ready publish failed captureId=${manifest.captureId} exception=${error.javaClass.simpleName}" }
+            }
             return stored.toUploadResponse()
         } catch (exception: InventoryApiException) {
             deleteDirectory(directory)
@@ -129,6 +249,13 @@ class StarCaptureTransportService(
 
     /** Focused tests call this directly; the scheduler invokes the same path. */
     fun cleanupExpired(now: Instant = Instant.now()) {
+        uploadSessions.dueCleanup(now).forEach { entry ->
+            val directory = Path.of(entry.directory).toAbsolutePath().normalize()
+            if (directory.startsWith(storageRoot())) {
+                deleteDirectory(directory)
+                uploadSessions.completeCleanup(entry)
+            }
+        }
         while (true) {
             val batch = stateStore.dueCleanup(now)
             if (batch.isEmpty()) return
@@ -227,7 +354,7 @@ class StarCaptureTransportService(
         return StarCaptureManifest(schemaVersion, captureId, gameVersion, section, stopReason, images, relations)
     }
 
-    private fun parseFullManifest(node: ObjectNode, files: List<MultipartFile>): StarCaptureManifest {
+    private fun parseFullManifest(node: ObjectNode, files: List<MultipartFile>?): StarCaptureManifest {
         if (node.fieldNames().asSequence().any { it !in FULL_MANIFEST_FIELDS }) invalid("manifest 包含未知字段")
         val schemaVersion = node.path("schema_version").asInt(-1)
         val captureId = node.path("capture_id").asText().trim()
@@ -246,11 +373,13 @@ class StarCaptureTransportService(
         }
         val images = sections.values.flatMap { it.images }.sortedBy { it.sourceOrder }
         if (images.map { it.sourceOrder } != (1..images.size).toList()) invalid("manifest source_order 必须全局连续")
-        val uploaded = files.associateBy { it.originalFilename }
-        if (uploaded.size != files.size || uploaded.keys != seenNames ||
-            files.any { it.isEmpty || it.contentType?.substringBefore(';') != "image/png" || !hasPngSignature(it) }
-        ) {
-            invalid("PNG 文件与 manifest 不匹配")
+        if (files != null) {
+            val uploaded = files.associateBy { it.originalFilename }
+            if (uploaded.size != files.size || uploaded.keys != seenNames ||
+                files.any { it.isEmpty || it.contentType?.substringBefore(';') != "image/png" || !hasPngSignature(it) }
+            ) {
+                invalid("PNG 文件与 manifest 不匹配")
+            }
         }
         return StarCaptureManifest(
             schemaVersion = schemaVersion,
@@ -405,6 +534,26 @@ data class StarCaptureSection(
     val stopReason: String,
 )
 data class StarCaptureUploadResponse(val captureId: String, val section: String, val imageCount: Int, val createdAt: Instant)
+data class StarCaptureUploadSessionResponse(val captureId: String, val imageCount: Int)
+data class StarCaptureImageUploadResponse(val captureId: String, val sourceImageId: String)
+data class StarCaptureFinalizeResult(
+    val capture: StarCaptureUploadResponse? = null,
+    val missingSourceImageIds: List<String> = emptyList(),
+)
+data class StarCaptureMissingImagesResponse(val captureId: String, val missingSourceImageIds: List<String>)
+
+private class UploadSessionFile(private val fileName: String, private val path: Path) : MultipartFile {
+    override fun getName(): String = "files"
+    override fun getOriginalFilename(): String = fileName
+    override fun getContentType(): String = "image/png"
+    override fun isEmpty(): Boolean = size == 0L
+    override fun getSize(): Long = Files.size(path)
+    override fun getBytes(): ByteArray = Files.readAllBytes(path)
+    override fun getInputStream(): InputStream = Files.newInputStream(path)
+    override fun transferTo(dest: File) {
+        Files.copy(path, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }
+}
 data class StarCapturePendingResponse(
     val captureId: String,
     val section: String,
