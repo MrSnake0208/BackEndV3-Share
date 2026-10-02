@@ -1,6 +1,7 @@
 package com.lhs.share.openapi
 
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.RecruitmentExceptionHandler
@@ -30,7 +31,9 @@ import java.time.Instant
 class RecruitmentAccessControllerContractTest {
     private val service = mockk<RecruitmentAccessService>()
     private val helper = mockk<AuthenticationHelper>()
-    private val mapper = jacksonObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+    private val mapper = jacksonObjectMapper().registerModule(
+        JavaTimeModule(),
+    ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
     private lateinit var mvc: MockMvc
 
     @BeforeEach

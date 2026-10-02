@@ -47,6 +47,9 @@ class DevelopmentGoalSecurityTest {
 
     @MockitoBean lateinit var betaService: BetaService
 
+    @MockitoBean
+    lateinit var recruitmentAccessService: com.lhs.share.hub.service.recruitment.RecruitmentAccessService
+
     @MockitoBean lateinit var jwtService: JwtService
 
     @MockitoBean lateinit var stringRedisTemplate: StringRedisTemplate
