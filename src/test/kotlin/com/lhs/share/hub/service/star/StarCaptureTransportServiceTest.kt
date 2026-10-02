@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.springframework.http.MediaType
 import org.springframework.mock.web.MockMultipartFile
+import java.io.IOException
+import java.io.InputStream
+import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 
@@ -29,6 +32,7 @@ class StarCaptureTransportServiceTest {
     private val accountService = mockk<SubAccountService>()
     private val eventService = mockk<AccountEventService>(relaxed = true)
     private lateinit var stateStore: FakeStarCaptureStateStore
+    private lateinit var uploadSessions: FakeStarCaptureUploadSessionStore
     private lateinit var service: StarCaptureTransportService
 
     @BeforeEach
@@ -41,7 +45,198 @@ class StarCaptureTransportServiceTest {
             starCapture.ttlMinutes = 30
         }
         stateStore = FakeStarCaptureStateStore()
-        service = StarCaptureTransportService(jacksonObjectMapper(), properties, accountService, eventService, stateStore)
+        uploadSessions = FakeStarCaptureUploadSessionStore()
+        service = StarCaptureTransportService(jacksonObjectMapper(), properties, accountService, eventService, stateStore, uploadSessions)
+    }
+
+    @Test
+    fun `init is private idempotent and rejects conflicting or incomplete manifests`() {
+        assertEquals(4, service.initUpload("u1", "acc1", fullManifest()).imageCount)
+        val session = uploadSessions.find(fullKey())!!
+        service.initUpload("u1", "acc1", fullManifest())
+        assertEquals(session, uploadSessions.find(fullKey()))
+        assertEquals(null, service.pending("u1", "acc1"))
+        assertThrows(InventoryApiException::class.java) { service.manifest("u1", "acc1", "capture-full") }
+        assertThrows(InventoryApiException::class.java) { service.image("u1", "acc1", "capture-full", "capture-full:main:000") }
+        assertEquals(
+            409,
+            assertThrows(InventoryApiException::class.java) {
+                service.initUpload("u1", "acc1", fullManifest().replace("如鸢", "代号鸢"))
+            }.status.value(),
+        )
+        assertEquals(
+            422,
+            assertThrows(InventoryApiException::class.java) {
+                service.initUpload("u1", "acc1", fullManifest().replace("\"complete\":true", "\"complete\":false"))
+            }.status.value(),
+        )
+        verify(exactly = 0) { eventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `single image is immutable idempotent and account scoped`() {
+        service.initUpload("u1", "acc1", fullManifest())
+        val file = fullFiles().first()
+        repeat(2) { service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", file) }
+        val stored = uploadSessions.image(fullKey(), "capture-full:main:000")!!
+        assertTrue(file.bytes.contentEquals(Files.readAllBytes(Path.of(stored.path))))
+        assertEquals(1L, Files.list(Path.of(uploadSessions.find(fullKey())!!.directory)).use { it.count() })
+        assertEquals(
+            409,
+            assertThrows(InventoryApiException::class.java) {
+                service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", fullFile("main-000.png", "changed"))
+            }.status.value(),
+        )
+        assertThrows(InventoryApiException::class.java) {
+            service.uploadImage("u2", "acc1", "capture-full", "capture-full:main:000", file)
+        }
+        assertThrows(InventoryApiException::class.java) {
+            service.uploadImage("u1", "acc2", "capture-full", "capture-full:main:000", file)
+        }
+        assertEquals(null, service.pending("u1", "acc1"))
+        verify(exactly = 0) { eventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `single image rejects unknown id wrong filename and invalid PNG`() {
+        service.initUpload("u1", "acc1", fullManifest())
+        for ((id, file) in listOf(
+            "unknown" to fullFiles().first(),
+            "capture-full:main:000" to fullFiles()[1],
+            "capture-full:main:000" to MockMultipartFile("file", "main-000.png", "image/png", "invalid".toByteArray()),
+        )) {
+            assertEquals(
+                422,
+                assertThrows(InventoryApiException::class.java) {
+                    service.uploadImage("u1", "acc1", "capture-full", id, file)
+                }.status.value(),
+            )
+        }
+        assertEquals(null, uploadSessions.image(fullKey(), "capture-full:main:000"))
+    }
+
+    @Test
+    fun `interrupted file write never registers an image or leaves a partial file`() {
+        service.initUpload("u1", "acc1", fullManifest())
+        var reads = 0
+        val file = object : MockMultipartFile("file", "main-000.png", "image/png", PNG_SIGNATURE + byteArrayOf(1)) {
+            override fun getInputStream(): InputStream {
+                if (++reads == 1) return super.getInputStream()
+                return object : InputStream() {
+                    override fun read(): Int = throw IOException("disconnected")
+                }
+            }
+        }
+        assertThrows(IOException::class.java) {
+            service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", file)
+        }
+        assertEquals(null, uploadSessions.image(fullKey(), "capture-full:main:000"))
+        assertEquals(0L, Files.list(Path.of(uploadSessions.find(fullKey())!!.directory)).use { it.count() })
+    }
+
+    @Test
+    fun `finalize missing images stays private and reports exactly the missing ids`() {
+        service.initUpload("u1", "acc1", fullManifest())
+        service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", fullFiles().first())
+        val result = service.finalizeUpload("u1", "acc1", "capture-full")
+        assertEquals(null, result.capture)
+        assertEquals(
+            listOf("capture-full:main:001", "capture-full:support:000", "capture-full:experience:000"),
+            result.missingSourceImageIds,
+        )
+        assertEquals(null, service.pending("u1", "acc1"))
+        verify(exactly = 0) { eventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `finalize reuses the formal capture contract and duplicate finalize publishes once`() {
+        uploadFullSession()
+        val first = service.finalizeUpload("u1", "acc1", "capture-full").capture!!
+        assertEquals(first, service.finalizeUpload("u1", "acc1", "capture-full").capture)
+        assertEquals("capture-full", service.pending("u1", "acc1")!!.captureId)
+        val expected = service.manifest("u1", "acc1", "capture-full")
+        assertEquals("full", expected.section)
+        assertEquals(listOf(1, 2, 3, 4), expected.images.map { it.sourceOrder })
+        assertEquals(listOf("main", "support", "experience"), expected.sections!!.keys.toList())
+        val sessionDirectory = uploadSessions.find(fullKey())!!.directory
+        assertFalse(stateStore.find(fullKey())!!.directory == sessionDirectory)
+        fullFiles().zip(expected.images).forEach { (file, image) ->
+            assertTrue(file.bytes.contentEquals(service.image("u1", "acc1", "capture-full", image.sourceImageId).inputStream.readBytes()))
+        }
+        service.upload("u1", "acc2", fullManifest(), fullFiles())
+        assertEquals(service.manifest("u1", "acc2", "capture-full"), expected)
+        assertEquals(
+            409,
+            assertThrows(InventoryApiException::class.java) {
+                service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", fullFiles().first())
+            }.status.value(),
+        )
+        assertThrows(InventoryApiException::class.java) { service.initUpload("u1", "acc1", fullManifest()) }
+        verify(exactly = 1) { eventService.publish("u1", "acc1", any(), any(), any()) }
+        repeat(2) { assertTrue(service.consume("u1", "acc1", "capture-full").consumed) }
+        assertThrows(InventoryApiException::class.java) { service.finalizeUpload("u1", "acc1", "capture-full") }
+        assertThrows(InventoryApiException::class.java) {
+            service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", fullFiles().first())
+        }
+        assertEquals(null, service.pending("u1", "acc1"))
+    }
+
+    @Test
+    fun `session expiry deletes incomplete files and temporary files using the existing TTL`() {
+        uploadFullSession()
+        val session = uploadSessions.find(fullKey())!!
+        Files.writeString(Path.of(session.directory).resolve("abandoned.part"), "partial")
+        service.cleanupExpired(session.expiresAt.plusSeconds(1))
+        assertFalse(Files.exists(Path.of(session.directory)))
+        assertEquals(null, uploadSessions.find(fullKey()))
+        assertEquals(null, uploadSessions.image(fullKey(), "capture-full:main:000"))
+        assertEquals(null, service.pending("u1", "acc1"))
+    }
+
+    @Test
+    fun `session cleanup cannot delete a finalized capture`() {
+        uploadFullSession()
+        service.finalizeUpload("u1", "acc1", "capture-full")
+        val session = uploadSessions.find(fullKey())!!
+        // Expire only the temporary session; formal capture has its own existing cleanup record.
+        uploadSessions.expireAll()
+        service.cleanupExpired()
+        assertFalse(Files.exists(Path.of(session.directory)))
+        assertTrue(service.image("u1", "acc1", "capture-full", "capture-full:main:000").exists())
+        assertEquals("capture-full", service.finalizeUpload("u1", "acc1", "capture-full").capture!!.captureId)
+    }
+
+    @Test
+    fun `ready publish failure does not roll back formal files and finalize retry stays idempotent`() {
+        uploadFullSession()
+        every { eventService.publish(any(), any(), any(), any(), any()) } throws IllegalStateException("SSE failure")
+        assertEquals("capture-full", service.finalizeUpload("u1", "acc1", "capture-full").capture!!.captureId)
+        assertEquals("capture-full", service.pending("u1", "acc1")!!.captureId)
+        assertTrue(service.image("u1", "acc1", "capture-full", "capture-full:main:000").exists())
+        service.finalizeUpload("u1", "acc1", "capture-full")
+        verify(exactly = 1) { eventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `finalize losing the existing atomic capture claim returns the winner without deleting its files`() {
+        uploadFullSession()
+        stateStore.beforeCreate = {
+            stateStore.beforeCreate = null
+            service.upload("u1", "acc1", fullManifest(), fullFiles())
+        }
+        assertEquals("capture-full", service.finalizeUpload("u1", "acc1", "capture-full").capture!!.captureId)
+        assertTrue(service.image("u1", "acc1", "capture-full", "capture-full:main:000").exists())
+        assertEquals("capture-full", service.pending("u1", "acc1")!!.captureId)
+        verify(exactly = 1) { eventService.publish(any(), any(), any(), any(), any()) }
+    }
+
+    private fun fullKey() = StarCaptureKey("u1", "acc1", "capture-full")
+
+    private fun uploadFullSession() {
+        service.initUpload("u1", "acc1", fullManifest())
+        fullFiles().zip(listOf("main:000", "main:001", "support:000", "experience:000")).forEach { (file, suffix) ->
+            service.uploadImage("u1", "acc1", "capture-full", "capture-full:$suffix", file)
+        }
     }
 
     @Test
@@ -228,10 +423,12 @@ class StarCaptureTransportServiceTest {
 
 private class FakeStarCaptureStateStore : StarCaptureStateStore {
     private val captures = linkedMapOf<StarCaptureKey, StoredStarCapture>()
+    var beforeCreate: (() -> Unit)? = null
 
     override fun find(key: StarCaptureKey): StoredStarCapture? = captures[key]
 
     override fun create(capture: StoredStarCapture, ttlSeconds: Long): Boolean {
+        beforeCreate?.invoke()
         if (captures.containsKey(capture.key)) return false
         captures[capture.key] = capture
         return true
@@ -270,5 +467,39 @@ private class FakeStarCaptureStateStore : StarCaptureStateStore {
     override fun completeCleanup(record: StarCaptureCleanupRecord) {
         val current = captures[record.entry.key]
         if (current == null || current.directory == record.entry.directory) captures.remove(record.entry.key)
+    }
+}
+
+private class FakeStarCaptureUploadSessionStore : StarCaptureUploadSessionStore {
+    private val sessions = linkedMapOf<StarCaptureKey, StarCaptureUploadSession>()
+    private val images = linkedMapOf<Pair<StarCaptureKey, String>, StoredStarCaptureImage>()
+
+    override fun find(key: StarCaptureKey): StarCaptureUploadSession? = sessions[key]
+    override fun create(session: StarCaptureUploadSession, ttlSeconds: Long): Boolean {
+        if (sessions.containsKey(session.key)) return false
+        sessions[session.key] = session
+        return true
+    }
+
+    override fun image(key: StarCaptureKey, sourceImageId: String): StoredStarCaptureImage? = images[key to sourceImageId]
+    override fun putImage(key: StarCaptureKey, image: StoredStarCaptureImage): Long {
+        val session = sessions[key] ?: return -1
+        if (!Instant.now().isBefore(session.expiresAt)) return -1
+        if (images.containsKey(key to image.sourceImageId)) return 0
+        images[key to image.sourceImageId] = image
+        return 1
+    }
+
+    override fun dueCleanup(now: Instant): List<StarCaptureUploadCleanup> = sessions.values
+        .filter { !now.isBefore(it.expiresAt) }
+        .map { StarCaptureUploadCleanup(it.key, it.directory, it.manifest.images.map { image -> image.sourceImageId }) }
+
+    override fun completeCleanup(entry: StarCaptureUploadCleanup) {
+        sessions.remove(entry.key)
+        entry.sourceImageIds.forEach { images.remove(entry.key to it) }
+    }
+
+    fun expireAll() {
+        sessions.replaceAll { _, session -> session.copy(expiresAt = Instant.EPOCH) }
     }
 }
