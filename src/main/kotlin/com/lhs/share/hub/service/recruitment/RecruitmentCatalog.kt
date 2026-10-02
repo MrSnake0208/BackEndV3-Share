@@ -89,7 +89,13 @@ class RecruitmentCatalog(
             if (operatorId == null) slot else slot.copy(name = names[operatorId] ?: slot.name)
         }
         val active = slots.filter { it.active }
-        val upStatus = if (pool.upStatus == "partial" && active.isNotEmpty() && active.all { it.operatorId != null }) "verified" else pool.upStatus
+        val upStatus = if (pool.upStatus == "partial" && active.isNotEmpty() &&
+            active.all { it.operatorId != null }
+        ) {
+            "verified"
+        } else {
+            pool.upStatus
+        }
         return RecruitmentPoolSnapshot(
             name = pool.name,
             game = pool.game,

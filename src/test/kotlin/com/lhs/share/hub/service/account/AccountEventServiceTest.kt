@@ -2,7 +2,6 @@ package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
-
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.just

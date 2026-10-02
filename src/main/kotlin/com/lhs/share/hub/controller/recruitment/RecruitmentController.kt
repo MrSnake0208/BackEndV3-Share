@@ -7,8 +7,8 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
-import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
 import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
+import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
 import com.lhs.share.hub.service.recruitment.RecruitmentService
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
