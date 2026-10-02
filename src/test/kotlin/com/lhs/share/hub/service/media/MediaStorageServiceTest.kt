@@ -137,6 +137,19 @@ class MediaStorageServiceTest {
         assertFalse(Files.exists(tempDir.resolve("outside.png")))
     }
 
+    @Test
+    fun `authorized machine read resolves both image and private file inside their own roots`() {
+        every { repository.save(any()) } answers { firstArg() }
+        val service = storage()
+        val imageBytes = pngBytes()
+        val textBytes = "debug log".toByteArray()
+        val image = service.upload("user-1", file("screen.png", "image/png", imageBytes))
+        val attachment = service.upload("user-1", file("debug.log", "text/plain", textBytes))
+
+        assertArrayEquals(imageBytes, service.loadAuthorizedAsset(image).inputStream.readBytes())
+        assertArrayEquals(textBytes, service.loadAuthorizedAsset(attachment).inputStream.readBytes())
+    }
+
     private fun storage(maxSize: Long = 10 * 1024 * 1024): MediaStorageService {
         val properties = ShareProperties().apply {
             media = ShareProperties.Media(publicDir().toString(), maxSize, privateDir().toString())

@@ -254,6 +254,69 @@ class FeedbackReportService(
         sortBy: String,
         sortOrder: String,
         queue: String? = null,
+    ): FeedbackReportListResponse = listInternal(
+        currentUserId = currentUserId,
+        page = page,
+        pageSize = pageSize,
+        status = status,
+        type = type,
+        category = category,
+        area = area,
+        mine = mine,
+        reporterUserId = reporterUserId,
+        keyword = keyword,
+        sortBy = sortBy,
+        sortOrder = sortOrder,
+        queue = queue,
+        allowedAreas = null,
+    )
+
+    fun listForAutomation(
+        currentUserId: String,
+        page: Int,
+        pageSize: Int,
+        status: String?,
+        type: String?,
+        category: String?,
+        area: String?,
+        reporterUserId: String?,
+        keyword: String?,
+        sortBy: String,
+        sortOrder: String,
+        queue: String? = null,
+        allowedAreas: Set<String>? = null,
+    ): FeedbackReportListResponse = listInternal(
+        currentUserId = currentUserId,
+        page = page,
+        pageSize = pageSize,
+        status = status,
+        type = type,
+        category = category,
+        area = area,
+        mine = false,
+        reporterUserId = reporterUserId,
+        keyword = keyword,
+        sortBy = sortBy,
+        sortOrder = sortOrder,
+        queue = queue,
+        allowedAreas = allowedAreas,
+    )
+
+    private fun listInternal(
+        currentUserId: String,
+        page: Int,
+        pageSize: Int,
+        status: String?,
+        type: String?,
+        category: String?,
+        area: String?,
+        mine: Boolean,
+        reporterUserId: String?,
+        keyword: String?,
+        sortBy: String,
+        sortOrder: String,
+        queue: String? = null,
+        allowedAreas: Set<String>? = null,
     ): FeedbackReportListResponse {
         if (page < 1) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
@@ -285,8 +348,17 @@ class FeedbackReportService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortOrder 只允许 asc 或 desc")
         }
 
-        val grantedAreas = feedbackAccessService.operatorAreas(currentUserId)
-        val developerAreas = if (mine) emptySet() else feedbackAccessService.developerAreas(currentUserId)
+        val normalizedAllowedAreas = allowedAreas?.mapTo(linkedSetOf()) { it.trim().uppercase() }
+        val grantedAreas = feedbackAccessService.operatorAreas(currentUserId).let { current ->
+            normalizedAllowedAreas?.let(current::intersect) ?: current
+        }
+        val developerAreas = if (mine) {
+            emptySet()
+        } else {
+            feedbackAccessService.developerAreas(currentUserId).let { current ->
+                normalizedAllowedAreas?.let(current::intersect) ?: current
+            }
+        }
         if (!mine && grantedAreas.isEmpty() && developerAreas.isEmpty()) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有任何反馈模块的管理权限")
         }
@@ -388,6 +460,23 @@ class FeedbackReportService(
         )
     }
 
+    /**
+     * Machine-facing admin read that intentionally does not advance the shared team-read cursor.
+     *
+     * Unlike [getById], this path never treats the token owner as a reporter: backend feedback
+     * visibility is required even when the same user happened to submit the ticket.
+     */
+    fun getByIdForAutomation(currentUserId: String, ticketId: String, allowedAreas: Set<String>? = null): FeedbackReportResponse {
+        val ticket = requireAutomationTicket(currentUserId, ticketId, allowedAreas)
+        return toResponse(ticket, currentUserId, adminMode = true).copy(
+            mergedSourceIds = if (ticket.mergedCount > 0) {
+                feedbackTicketRepository.findByMergedIntoId(ticketId).mapNotNull { it.id }
+            } else {
+                emptyList()
+            },
+        )
+    }
+
     /** 返回经过工单范围授权且仍可用的普通文件元数据。 */
     fun getAttachment(currentUserId: String, ticketId: String, mediaId: String): MediaAsset {
         val ticket = requireViewableTicket(currentUserId, ticketId)
@@ -398,6 +487,31 @@ class FeedbackReportService(
             ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
         }
         if (asset.deletedAt != null || asset.effectiveKind() != MediaKind.FILE) {
+            throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        return asset
+    }
+
+    /** Machine-facing private attachment lookup with strict backend-ticket authorization. */
+    fun getAttachmentForAutomation(
+        currentUserId: String,
+        ticketId: String,
+        mediaId: String,
+        allowedAreas: Set<String>? = null,
+    ): MediaAsset {
+        val ticket = requireAutomationTicket(currentUserId, ticketId, allowedAreas)
+        val referencedAsImage = ticket.messages.any { message -> message.images.any { it.id == mediaId } }
+        val referencedAsFile = ticket.messages.any { message -> message.files.any { it.id == mediaId } }
+        if (!referencedAsImage && !referencedAsFile) {
+            throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        val asset = mediaAssetRepository.findById(mediaId).orElseThrow {
+            ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
+        }
+        val kindMatchesReference =
+            (referencedAsImage && asset.effectiveKind() == MediaKind.IMAGE) ||
+                (referencedAsFile && asset.effectiveKind() == MediaKind.FILE)
+        if (asset.deletedAt != null || !kindMatchesReference) {
             throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
         }
         return asset
@@ -741,6 +855,20 @@ class FeedbackReportService(
         val fields = normalizedTicketFields(ticket)
         if (!isReporter && !feedbackAccessService.canViewTicket(currentUserId, ticket)) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的查看权限")
+        }
+        return ticket
+    }
+
+    private fun requireAutomationTicket(currentUserId: String, ticketId: String, allowedAreas: Set<String>?): FeedbackTicket {
+        val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
+            ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
+        }
+        if (!feedbackAccessService.canViewTicket(currentUserId, ticket)) {
+            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的后台查看权限")
+        }
+        val normalizedAllowedAreas = allowedAreas?.mapTo(linkedSetOf()) { it.trim().uppercase() }
+        if (normalizedAllowedAreas != null && FeedbackWorkflow.area(ticket) !in normalizedAllowedAreas) {
+            throw ApiResultException(HttpStatus.FORBIDDEN.value(), "Integration token 不允许访问该反馈板块")
         }
         return ticket
     }
