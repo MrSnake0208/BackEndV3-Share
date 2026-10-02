@@ -158,10 +158,11 @@ class MediaStorageService(
     fun loadAuthorizedAsset(asset: MediaAsset): Resource {
         val kind = asset.effectiveKind()
         val storageKey = when (kind) {
-            MediaKind.IMAGE -> asset.storagePath
-                .takeIf { it.startsWith("/media/") }
-                ?.removePrefix("/media/")
-                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+            MediaKind.IMAGE ->
+                asset.storagePath
+                    .takeIf { it.startsWith("/media/") }
+                    ?.removePrefix("/media/")
+                    ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
             MediaKind.FILE -> asset.storagePath
         }
         val relativePath = try {
@@ -276,8 +277,14 @@ class MediaStorageService(
         private val TEXT_FILE_MIMES = setOf("", "text/plain", "text/x-log", "application/octet-stream")
         private val JPEG_SIGNATURE = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())
         private val PNG_SIGNATURE = byteArrayOf(
-            0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(),
-            0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(), 0x0A.toByte(),
+            0x89.toByte(),
+            0x50.toByte(),
+            0x4E.toByte(),
+            0x47.toByte(),
+            0x0D.toByte(),
+            0x0A.toByte(),
+            0x1A.toByte(),
+            0x0A.toByte(),
         )
         private val RIFF_SIGNATURE = byteArrayOf(0x52, 0x49, 0x46, 0x46)
             .map { it.toByte() }

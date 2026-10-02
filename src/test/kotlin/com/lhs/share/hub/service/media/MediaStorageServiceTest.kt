@@ -161,8 +161,7 @@ class MediaStorageServiceTest {
 
     private fun privateDir(): Path = tempDir.resolve("private")
 
-    private fun file(name: String, mime: String?, bytes: ByteArray): MockMultipartFile =
-        MockMultipartFile("file", name, mime, bytes)
+    private fun file(name: String, mime: String?, bytes: ByteArray): MockMultipartFile = MockMultipartFile("file", name, mime, bytes)
 
     private fun assertStatus(status: HttpStatus, block: () -> Unit) {
         val exception = assertThrows(ResponseStatusException::class.java, block)

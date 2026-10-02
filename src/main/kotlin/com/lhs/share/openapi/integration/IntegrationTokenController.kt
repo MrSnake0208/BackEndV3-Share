@@ -28,14 +28,14 @@ class IntegrationTokenController(
 
     @PostMapping
     fun create(@Valid @RequestBody request: IntegrationTokenCreateRequest): ApiResult<IntegrationTokenCreatedResponse> = success(
-            service.create(
-                ownerUserId = helper.requireUserId(),
-                name = request.name,
-                scopes = request.scopes,
-                feedbackAreas = request.feedbackAreas,
-                expiresAt = request.expiresAt,
-            ),
-        )
+        service.create(
+            ownerUserId = helper.requireUserId(),
+            name = request.name,
+            scopes = request.scopes,
+            feedbackAreas = request.feedbackAreas,
+            expiresAt = request.expiresAt,
+        ),
+    )
 
     @GetMapping
     fun list(): ApiResult<List<IntegrationTokenListItemResponse>> = success(service.list(helper.requireUserId()))
