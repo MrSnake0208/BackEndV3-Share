@@ -149,6 +149,37 @@ class MediaStorageService(
         return FileSystemResource(path)
     }
 
+    /**
+     * Safe machine-facing read for an already authorized feedback media asset.
+     *
+     * The caller must prove ticket ownership/reference first. This method only
+     * resolves the stored asset inside the configured root for its actual kind.
+     */
+    fun loadAuthorizedAsset(asset: MediaAsset): Resource {
+        val kind = asset.effectiveKind()
+        val storageKey = when (kind) {
+            MediaKind.IMAGE -> asset.storagePath
+                .takeIf { it.startsWith("/media/") }
+                ?.removePrefix("/media/")
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+            MediaKind.FILE -> asset.storagePath
+        }
+        val relativePath = try {
+            Path.of(storageKey)
+        } catch (_: Exception) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        if (relativePath.isAbsolute || relativePath.nameCount != 1 || relativePath.fileName.toString() != storageKey) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        val root = storageRoot(kind)
+        val path = root.resolve(relativePath).normalize()
+        if (!path.startsWith(root) || !Files.isRegularFile(path)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+        }
+        return FileSystemResource(path)
+    }
+
     private fun classify(originalName: String, contentType: String?): UploadType {
         val extension = originalName.substringAfterLast('.', "").lowercase(Locale.ROOT)
         val declaredMime = contentType

@@ -1079,6 +1079,44 @@ class FeedbackReportServiceTest {
         }
     }
 
+    @Test
+    fun `automation detail read requires backend access and never advances team read cursor`() {
+        val ticket = openTicket().copy(
+            category = FeedbackArea.UI,
+            area = FeedbackArea.UI,
+            workArea = FeedbackArea.UI,
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "admin",
+            teamReadReporterIndex = -1,
+        )
+        prepareTicket(ticket, "admin", canManage = true)
+        every { accessService.canView("admin", FeedbackArea.UI) } returns true
+
+        val response = service.getByIdForAutomation("admin", "rpt_1", setOf(FeedbackArea.UI))
+
+        assertEquals(FeedbackArea.UI, response.workArea)
+        assertTrue(response.teamUnread)
+        verify(exactly = 0) { queryRepository.advanceTeamRead(any(), any()) }
+        verify(exactly = 0) { notificationService.clearFeedbackReminders(any(), any()) }
+    }
+
+    @Test
+    fun `automation detail read enforces token area restriction even for an authorized operator`() {
+        val ticket = openTicket().copy(
+            category = FeedbackArea.UI,
+            area = FeedbackArea.UI,
+            workArea = FeedbackArea.UI,
+        )
+        prepareTicket(ticket, "admin", canManage = true)
+        every { accessService.canView("admin", FeedbackArea.UI) } returns true
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.getByIdForAutomation("admin", "rpt_1", setOf(FeedbackArea.STAR))
+        }
+
+        assertEquals(403, error.statusCode)
+    }
+
     private fun prepareTicket(ticket: FeedbackTicket, currentUserId: String, canManage: Boolean) {
         every { ticketRepository.findById(checkNotNull(ticket.id)) } returns Optional.of(ticket)
         every { ticketRepository.save(any()) } answers { firstArg() }
