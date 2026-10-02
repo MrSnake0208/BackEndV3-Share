@@ -22,7 +22,12 @@ import org.springframework.web.server.ResponseStatusException
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
-    assignableTypes = [RecruitmentController::class, RecruitmentExchangeController::class, RecruitmentAccessController::class, AdminRecruitmentCatalogController::class],
+    assignableTypes = [
+        RecruitmentController::class,
+        RecruitmentExchangeController::class,
+        RecruitmentAccessController::class,
+        AdminRecruitmentCatalogController::class,
+    ],
 )
 class RecruitmentExceptionHandler {
     private val log = KotlinLogging.logger { }

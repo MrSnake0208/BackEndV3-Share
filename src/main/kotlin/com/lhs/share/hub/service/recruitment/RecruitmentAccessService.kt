@@ -32,8 +32,7 @@ class RecruitmentAccessService(
     private val authorization: AdminAuthorizationService,
     private val audit: AdminAuditService,
 ) {
-    private fun config(): RecruitmentAccessConfig =
-        configRepository.findById(CONFIG_ID).orElse(RecruitmentAccessConfig())
+    private fun config(): RecruitmentAccessConfig = configRepository.findById(CONFIG_ID).orElse(RecruitmentAccessConfig())
 
     fun me(userId: String): RecruitmentAccessMeResponse {
         requireActiveUser(userId)
@@ -88,7 +87,11 @@ class RecruitmentAccessService(
                 actorUserId = actor,
                 action = AdminAuditAction.RECRUITMENT_ACCESS_MODE_UPDATED,
                 targetResource = "recruitment_access_config/$CONFIG_ID",
-                before = AdminAuditSnapshot(recruitmentAccess = mapOf("access_mode" to (before?.accessMode ?: RecruitmentAccessMode.LIMITED).name)),
+                before = AdminAuditSnapshot(
+                    recruitmentAccess = mapOf(
+                        "access_mode" to (before?.accessMode ?: RecruitmentAccessMode.LIMITED).name,
+                    ),
+                ),
                 after = AdminAuditSnapshot(recruitmentAccess = mapOf("access_mode" to saved.accessMode.name)),
                 occurredAt = now,
             ),
@@ -151,14 +154,13 @@ class RecruitmentAccessService(
         )
     }
 
-    private fun adminResponse(config: RecruitmentAccessConfig): RecruitmentAccessAdminResponse =
-        RecruitmentAccessAdminResponse(
-            accessMode = config.accessMode,
-            version = config.version?.plus(1) ?: 0L,
-            grants = grantRepository.findAll()
-                .map(::grantResponse)
-                .sortedWith(compareBy({ it.userName }, { it.userId })),
-        )
+    private fun adminResponse(config: RecruitmentAccessConfig): RecruitmentAccessAdminResponse = RecruitmentAccessAdminResponse(
+        accessMode = config.accessMode,
+        version = config.version?.plus(1) ?: 0L,
+        grants = grantRepository.findAll()
+            .map(::grantResponse)
+            .sortedWith(compareBy({ it.userName }, { it.userId })),
+    )
 
     private fun grantResponse(grant: RecruitmentAccessGrant): RecruitmentAccessGrantResponse {
         val user = users.get(grant.userId)

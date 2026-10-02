@@ -104,7 +104,13 @@ class RecruitmentCatalogTest {
         assertEquals(115070L, imported.sourceRevision)
         assertEquals("https://example.invalid/source", imported.sourcePages.single().url)
         assertEquals("legacy source", imported.sourceNote)
-        assertEquals("https://example.invalid/source", catalog.catalog("如鸢").path("pools").first { it.path("pool_id").asText() == "legacy-pool" }.path("source_url").asText())
+        assertEquals(
+            "https://example.invalid/source",
+            catalog.catalog("如鸢").path("pools").first {
+                it.path("pool_id").asText() ==
+                    "legacy-pool"
+            }.path("source_url").asText(),
+        )
         assertTrue(catalog.catalog("如鸢").path("catalog_revision").asText().startsWith("db:"))
     }
 

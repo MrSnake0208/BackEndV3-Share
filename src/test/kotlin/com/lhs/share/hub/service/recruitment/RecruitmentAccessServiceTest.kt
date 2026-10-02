@@ -45,7 +45,10 @@ class RecruitmentAccessServiceTest {
         every { grants.save(any()) } answers {
             firstArg<RecruitmentAccessGrant>().also { grantState[it.userId] = it }
         }
-        every { grants.deleteById(any()) } answers { grantState.remove(firstArg()); Unit }
+        every { grants.deleteById(any()) } answers {
+            grantState.remove(firstArg())
+            Unit
+        }
         every { users.get("u") } returns MaaUserInfo("u", "测试用户", true)
         every { users.get("other") } returns MaaUserInfo("other", "公开用户", true)
         every { authorization.hasPermission("admin", AdminPermission.RECRUITMENT_ACCESS_MANAGE) } returns true

@@ -39,8 +39,7 @@ class RecruitmentAccessController(
         @RequestParam q: String,
         @RequestParam page: Int = 1,
         @RequestParam size: Int = 10,
-    ): ApiResult<List<RecruitmentAccessUserCandidateResponse>> =
-        success(service.searchCandidates(helper.requireUserId(), q, page, size))
+    ): ApiResult<List<RecruitmentAccessUserCandidateResponse>> = success(service.searchCandidates(helper.requireUserId(), q, page, size))
 
     @PutMapping("/v1/admin/recruitment-access/users/{userId}")
     fun grant(@PathVariable userId: String): ApiResult<RecruitmentAccessGrantResponse> =

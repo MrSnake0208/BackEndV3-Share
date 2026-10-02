@@ -9,8 +9,8 @@ import com.lhs.share.handler.RecruitmentExceptionHandler
 import com.lhs.share.hub.controller.recruitment.RecruitmentController
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentEventPage
-import com.lhs.share.hub.service.recruitment.RecruitmentApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
+import com.lhs.share.hub.service.recruitment.RecruitmentApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
 import com.lhs.share.hub.service.recruitment.RecruitmentService
 import io.mockk.every
@@ -45,7 +45,13 @@ class RecruitmentControllerContractTest {
         every { access.requireAccess(any()) } just runs
         mvc =
             MockMvcBuilders.standaloneSetup(
-                RecruitmentController(service, RecruitmentCatalog(mapper, mockk(relaxed = true), mockk(relaxed = true)), access, helper, mapper),
+                RecruitmentController(
+                    service,
+                    RecruitmentCatalog(mapper, mockk(relaxed = true), mockk(relaxed = true)),
+                    access,
+                    helper,
+                    mapper,
+                ),
             )
                 .setControllerAdvice(RecruitmentExceptionHandler())
                 .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
@@ -69,7 +75,8 @@ class RecruitmentControllerContractTest {
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a")).andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("unauthorized"))
         every { helper.requireUserId() } returns "u"
-        every { access.requireAccess("u") } throws RecruitmentApiException(HttpStatus.FORBIDDEN, "recruitment_access_required", "Access required")
+        every { access.requireAccess("u") } throws
+            RecruitmentApiException(HttpStatus.FORBIDDEN, "recruitment_access_required", "Access required")
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a")).andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("recruitment_access_required"))
         verify(exactly = 0) { service.archive(any(), any()) }
