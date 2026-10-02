@@ -230,6 +230,25 @@ class StarCaptureTransportServiceTest {
         verify(exactly = 1) { eventService.publish(any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `stale expiry entry cannot delete a newer session for the same capture id`() {
+        service.initUpload("u1", "acc1", fullManifest())
+        val stale = uploadSessions.find(fullKey())!!
+        // A retry of the same capture id replaces the expired session before the reader reaps the stale entry.
+        uploadSessions.replaceWithEmptySession(fullKey())
+        val current = uploadSessions.find(fullKey())!!
+        assertFalse(stale.directory == current.directory)
+        val staleRecord = StarCaptureUploadCleanupRecord(
+            redisMember = "",
+            entry = StarCaptureUploadCleanup(fullKey(), stale.directory, emptyList()),
+        )
+        assertTrue(uploadSessions.claimCleanup(staleRecord))
+        uploadSessions.completeCleanup(staleRecord)
+        assertTrue(uploadSessions.find(fullKey()) != null)
+        service.uploadImage("u1", "acc1", "capture-full", "capture-full:main:000", fullFiles().first())
+        assertEquals(3, service.finalizeUpload("u1", "acc1", "capture-full").missingSourceImageIds.size)
+    }
+
     private fun fullKey() = StarCaptureKey("u1", "acc1", "capture-full")
 
     private fun uploadFullSession() {
@@ -474,10 +493,15 @@ private class FakeStarCaptureUploadSessionStore : StarCaptureUploadSessionStore 
     private val sessions = linkedMapOf<StarCaptureKey, StarCaptureUploadSession>()
     private val images = linkedMapOf<Pair<StarCaptureKey, String>, StoredStarCaptureImage>()
 
+    /** Mirrors the real expiry index: 条目独立于会话键存活, 直到被回收。 */
+    private val index = linkedMapOf<StarCaptureUploadCleanupRecord, Instant>()
+    private val locks = linkedSetOf<StarCaptureKey>()
+
     override fun find(key: StarCaptureKey): StarCaptureUploadSession? = sessions[key]
     override fun create(session: StarCaptureUploadSession, ttlSeconds: Long): Boolean {
         if (sessions.containsKey(session.key)) return false
         sessions[session.key] = session
+        index[recordOf(session)] = session.expiresAt
         return true
     }
 
@@ -490,16 +514,36 @@ private class FakeStarCaptureUploadSessionStore : StarCaptureUploadSessionStore 
         return 1
     }
 
-    override fun dueCleanup(now: Instant): List<StarCaptureUploadCleanup> = sessions.values
-        .filter { !now.isBefore(it.expiresAt) }
-        .map { StarCaptureUploadCleanup(it.key, it.directory, it.manifest.images.map { image -> image.sourceImageId }) }
+    override fun dueCleanup(now: Instant): List<StarCaptureUploadCleanupRecord> = index.filterValues { !now.isBefore(it) }.keys.toList()
 
-    override fun completeCleanup(entry: StarCaptureUploadCleanup) {
-        sessions.remove(entry.key)
-        entry.sourceImageIds.forEach { images.remove(entry.key to it) }
+    override fun claimCleanup(record: StarCaptureUploadCleanupRecord): Boolean = locks.add(record.entry.key)
+
+    override fun completeCleanup(record: StarCaptureUploadCleanupRecord) {
+        val current = sessions[record.entry.key]
+        if (current == null || current.directory == record.entry.directory) {
+            sessions.remove(record.entry.key)
+            record.entry.sourceImageIds.forEach { images.remove(record.entry.key to it) }
+        }
+        index.remove(record)
+        locks.remove(record.entry.key)
     }
+
+    private fun recordOf(session: StarCaptureUploadSession) = StarCaptureUploadCleanupRecord(
+        redisMember = "",
+        entry = StarCaptureUploadCleanup(session.key, session.directory, session.manifest.images.map { it.sourceImageId }),
+    )
 
     fun expireAll() {
         sessions.replaceAll { _, session -> session.copy(expiresAt = Instant.EPOCH) }
+        index.replaceAll { _, _ -> Instant.EPOCH }
+    }
+
+    /** Same capture id, new directory: the previous generation's files are gone. */
+    fun replaceWithEmptySession(key: StarCaptureKey) {
+        val previous = sessions.getValue(key)
+        sessions[key] = previous.copy(directory = previous.directory + "-next", expiresAt = Instant.now().plusSeconds(600))
+        images.keys.removeIf { it.first == key }
+        index.clear()
+        index[recordOf(sessions.getValue(key))] = sessions.getValue(key).expiresAt
     }
 }

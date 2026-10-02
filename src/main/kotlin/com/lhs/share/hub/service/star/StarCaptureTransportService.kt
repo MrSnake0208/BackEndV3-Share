@@ -249,12 +249,11 @@ class StarCaptureTransportService(
 
     /** Focused tests call this directly; the scheduler invokes the same path. */
     fun cleanupExpired(now: Instant = Instant.now()) {
-        uploadSessions.dueCleanup(now).forEach { entry ->
-            val directory = Path.of(entry.directory).toAbsolutePath().normalize()
-            if (directory.startsWith(storageRoot())) {
-                deleteDirectory(directory)
-                uploadSessions.completeCleanup(entry)
-            }
+        uploadSessions.dueCleanup(now).forEach { record ->
+            if (!uploadSessions.claimCleanup(record)) return@forEach
+            val directory = Path.of(record.entry.directory).toAbsolutePath().normalize()
+            if (directory.startsWith(storageRoot())) deleteDirectory(directory)
+            uploadSessions.completeCleanup(record)
         }
         while (true) {
             val batch = stateStore.dueCleanup(now)
