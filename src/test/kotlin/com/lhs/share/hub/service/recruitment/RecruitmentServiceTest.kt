@@ -284,7 +284,11 @@ class RecruitmentServiceTest {
                 )
             }.status.value(),
         )
-        val foreign = catalog.projectPools(emptyList(), "代号鸢").first().poolId
+        assertTrue(catalog.projectPools(emptyList(), "代号鸢").isEmpty())
+        val foreignPool = managed.copy(game = "代号鸢")
+        every { catalogStore.all() } returns listOf(foreignPool)
+        every { catalogStore.find("catalog_p") } returns foreignPool
+        val foreign = catalog.projectPools(emptyList(), "代号鸢").single().poolId
         assertEquals(
             404,
             assertThrows(RecruitmentApiException::class.java) {

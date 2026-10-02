@@ -42,6 +42,9 @@ class ChangelogOpenApiContractTest {
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
 
+    @MockitoBean
+    lateinit var recruitmentAccessService: com.lhs.share.hub.service.recruitment.RecruitmentAccessService
+
     @Autowired
     lateinit var mockMvc: MockMvc
 
