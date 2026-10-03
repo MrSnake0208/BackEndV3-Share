@@ -2,11 +2,14 @@ package com.lhs.share.openapi
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.controller.response.ApiResult
+import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
+import com.lhs.share.hub.controller.operator.response.OperatorAnnotationResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.operator.OperatorService
+import com.lhs.share.hub.service.operator.OperatorSubjectiveService
 import com.lhs.share.hub.service.operator.OperatorV3ImportService
 import io.mockk.every
 import io.mockk.mockk
@@ -14,8 +17,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import com.lhs.share.hub.service.operator.OperatorSubjectiveService
-import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
 import java.time.Instant
 
 class OpenApiOperatorControllerContractTest {
@@ -30,7 +31,10 @@ class OpenApiOperatorControllerContractTest {
         val api = OpenApiOperatorController(tokenService, service, accountService, subjectiveService = subjective)
         every { tokenService.validateAuthorization("Bearer read", OpenApiPermission.OPERATOR_READ) } returns
             OpenApiPrincipal("u1", "acc1")
-        val expected = OperatorAnnotationListResponse("acc1", emptyList())
+        val expected = OperatorAnnotationListResponse(
+            "acc1",
+            listOf(OperatorAnnotationResponse("op1", "discarded", "保留备注", 3, Instant.EPOCH)),
+        )
         every { subjective.annotations("u1", "acc1") } returns expected
         assertEquals(expected, api.annotations("Bearer read").data)
         verify(exactly = 1) { subjective.annotations("u1", "acc1") }

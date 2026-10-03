@@ -17,13 +17,15 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class OperatorV3ExportServiceTest {
     private val mapper = jacksonObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
 
-    @Test
-    fun `v3 full export contains objective and complete subjective backup and validates schema`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["active", "graduated", "skip", "discarded"])
+    fun `v3 full export contains objective and complete subjective backup and validates schema`(state: String) {
         val accounts = mockk<SubAccountRepository>()
         val currents = mockk<OperatorCurrentRepository>()
         val annotations = mockk<OperatorAnnotationRepository>()
@@ -41,7 +43,7 @@ class OperatorV3ExportServiceTest {
             ),
         )
         every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "a1") } returns listOf(
-            OperatorAnnotation(userId = "u1", accountId = "a1", operatorId = "op1", growthState = "graduated", note = "继续收集"),
+            OperatorAnnotation(userId = "u1", accountId = "a1", operatorId = "op1", growthState = state, note = "继续收集"),
         )
         every { targets.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "a1") } returns listOf(
             OperatorGrowthTarget(userId = "u1", accountId = "a1", operatorId = "op1", targetStarLevel = 31),
@@ -59,7 +61,7 @@ class OperatorV3ExportServiceTest {
         assertEquals(2, exported.path("records").size())
         val subjective = exported.path("records").first { it.path("record_type").asText() == "operator_annotation_snapshot" }
         val entry = subjective.path("entries").single()
-        assertEquals("graduated", entry.path("growth_state").asText())
+        assertEquals(state, entry.path("growth_state").asText())
         assertTrue(entry.path("favorite").booleanValue())
         assertEquals("继续收集", entry.path("note").asText())
         assertEquals(31, entry.path("targets").path("star_level").intValue())

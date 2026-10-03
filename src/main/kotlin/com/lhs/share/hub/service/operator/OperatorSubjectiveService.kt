@@ -357,7 +357,7 @@ class OperatorSubjectiveService(
 
     companion object {
         const val ACTIVE = "active"
-        val GROWTH_STATES = setOf(ACTIVE, "graduated", "skip")
+        val GROWTH_STATES = setOf(ACTIVE, "graduated", "skip", "discarded")
         val TARGET_FIELDS = setOf("level", "elite", "star_level", "heart_paper")
     }
 }

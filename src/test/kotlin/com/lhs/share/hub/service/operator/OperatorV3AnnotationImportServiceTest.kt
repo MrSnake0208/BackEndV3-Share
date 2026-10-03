@@ -143,6 +143,57 @@ class OperatorV3AnnotationImportServiceTest {
         verify(exactly = 0) { subjective.applyAnnotationEntry(any(), any(), any()) }
     }
 
+    @Test
+    fun `listed and full discarded imports preview state changes and preserve the imported value`() {
+        for (document in listOf(listedDocument(), fullDocument())) {
+            val entry = document.path("records").first().path("entries").first() as com.fasterxml.jackson.databind.node.ObjectNode
+            entry.put("growth_state", "discarded")
+            val preview = service.previewBrowser("u1", wrapped(document))
+            assertEquals("discarded", preview.items.single().changes.getValue("growth_state").after)
+            val captured = slot<com.fasterxml.jackson.databind.node.ObjectNode>()
+            every { subjective.applyAnnotationEntry("u1", "a1", capture(captured)) } returns 3
+            assertEquals(1, service.commitBrowser("u1", wrapped(document)).accepted)
+            assertEquals("discarded", captured.captured.path("growth_state").asText())
+        }
+    }
+
+    @Test
+    fun `objective snapshots and scans never write or reset a discarded annotation`() {
+        every { subjective.subjectiveState("u1", "a1", "op1") } returns linkedMapOf(
+            "growth_state" to "discarded",
+            "favorite" to true,
+            "note" to "保留备注",
+            "targets" to null,
+        )
+        every { operators.current("u1", "a1", "如鸢") } returns emptyList()
+        val after = com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto.of(
+            com.lhs.share.hub.repository.entity.OperatorEntry(level = 90, elite = 15, starLevel = 1, revision = 1),
+        )
+        every { operators.previewCurrentPatch(any(), any(), any(), any(), any()) } returns
+            OperatorCurrentPatchPreview(null, after, stale = false)
+        every { operators.patchCurrent(any(), any(), any(), any(), any()) } returns after
+        every { operators.completeFullImport(any(), any(), any(), any(), any()) } just runs
+        val reviews = mockk<OperatorScanReviewRepository>()
+        every { reviews.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) } just runs
+        val objectiveService = OperatorV3ImportService(
+            mapper, OperatorV3SchemaValidator(mapper), accounts, catalog, operators, audits, events,
+            reviews, subjective, transactionTemplate,
+        )
+        val doc = document(
+            """
+            {"account_id":"source","record_id":"objective:discarded","record_type":"operator_snapshot",
+              "game":"如鸢","effective_at":"2026-08-23T12:00:00+08:00","snapshot_scope":"listed","source_kind":"scan",
+              "coverage":{"complete":false,"record_count":1,"unmatched_count":0,"interrupted":false},
+              "entries":[{"operator_id":"op1","level":90,"elite":15,"star_level":1}]}
+            """.trimIndent(),
+        )
+        objectiveService.commitBrowser("u1", wrapped(doc))
+        objectiveService.commitScan("u1", "a1", doc)
+        verify(exactly = 0) { subjective.applyAnnotationEntry(any(), any(), any()) }
+        verify(exactly = 0) { subjective.resetFull(any(), any()) }
+        assertEquals("discarded", subjective.subjectiveState("u1", "a1", "op1")["growth_state"])
+    }
+
     private fun wrapped(document: com.fasterxml.jackson.databind.node.ObjectNode) = mapper.createObjectNode().also { root ->
         root.set<com.fasterxml.jackson.databind.JsonNode>("document", document)
         root.set<com.fasterxml.jackson.databind.JsonNode>("account_mapping", mapper.createObjectNode().put("source", "a1"))

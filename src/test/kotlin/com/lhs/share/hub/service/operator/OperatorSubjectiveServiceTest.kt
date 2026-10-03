@@ -157,6 +157,69 @@ class OperatorSubjectiveServiceTest {
     }
 
     @Test
+    fun `discarded can be restored without changing note favorite or targets and respects revision and owner`() {
+        favoriteData += Triple("u1", "a1", "op1")
+        service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree(
+                """{"heart_paper":180,"expected_revision":0}""",
+            ) as com.fasterxml.jackson.databind.node.ObjectNode,
+        )
+        val saved = service.putAnnotation(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree(
+                """{"growth_state":"discarded","note":"保留备注","expected_revision":0}""",
+            ) as com.fasterxml.jackson.databind.node.ObjectNode,
+        )
+        assertEquals("discarded", service.annotations("u1", "a1").items.single().growthState)
+        assertTrue(service.annotations("u1", "a2").items.isEmpty())
+        assertTrue(service.annotations("u2", "a1").items.isEmpty())
+        val conflict = assertThrows(OperatorApiException::class.java) {
+            service.putAnnotation(
+                "u1",
+                "a1",
+                "op1",
+                mapper.readTree(
+                    """{"growth_state":"active","expected_revision":0}""",
+                ) as com.fasterxml.jackson.databind.node.ObjectNode,
+            )
+        }
+        assertEquals("annotation_revision_conflict", conflict.code)
+        var revision = saved.revision
+        for (state in listOf("active", "graduated", "skip", "discarded")) {
+            val restored = service.putAnnotation(
+                "u1",
+                "a1",
+                "op1",
+                mapper.readTree(
+                    """{"growth_state":"$state","expected_revision":$revision}""",
+                ) as com.fasterxml.jackson.databind.node.ObjectNode,
+            )
+            assertEquals(state, restored.growthState)
+            assertEquals("保留备注", restored.note)
+            assertTrue(Triple("u1", "a1", "op1") in favoriteData)
+            assertEquals(180, service.targets("u1", "a1").items.single().heartPaper)
+            revision = restored.revision
+        }
+        val invalid = assertThrows(OperatorApiException::class.java) {
+            service.putAnnotation(
+                "u1",
+                "a1",
+                "op1",
+                mapper.readTree(
+                    """{"growth_state":"future","expected_revision":$revision}""",
+                ) as com.fasterxml.jackson.databind.node.ObjectNode,
+            )
+        }
+        assertEquals("invalid_growth_state", invalid.code)
+        assertEquals("discarded", service.annotations("u1", "a1").items.single().growthState)
+    }
+
+    @Test
     fun `growth state and favorite remain independent`() {
         favoriteData += Triple("u1", "a1", "op1")
         service.putAnnotation(
