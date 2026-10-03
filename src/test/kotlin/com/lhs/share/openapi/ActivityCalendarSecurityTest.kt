@@ -7,13 +7,23 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.config.security.JwtAuthenticationTokenFilter
 import com.lhs.share.config.security.SecurityConfig
 import com.lhs.share.hub.controller.calendar.ActivityCalendarController
+import com.lhs.share.hub.controller.calendar.ActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarController
+import com.lhs.share.hub.controller.calendar.AdminActivityCalendarSuggestionController
+import com.lhs.share.hub.controller.calendar.request.ActivityCalendarSuggestionSubmitRequest
+import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminResponse
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarResponse
+import com.lhs.share.hub.controller.calendar.response.ActivityCalendarSuggestionPage
+import com.lhs.share.hub.controller.calendar.response.ActivityCalendarSuggestionResponse
+import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
+import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionOriginal
+import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionStatus
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
+import com.lhs.share.hub.service.calendar.ActivityCalendarSuggestionService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtAuthToken
 import com.lhs.share.service.jwt.JwtService
@@ -34,9 +44,15 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
+import java.time.LocalDate
 
 @ActiveProfiles("test")
-@WebMvcTest(controllers = [ActivityCalendarController::class, AdminActivityCalendarController::class])
+@WebMvcTest(
+    controllers = [
+        ActivityCalendarController::class, AdminActivityCalendarController::class,
+        ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
+    ],
+)
 @EnableConfigurationProperties(ShareProperties::class)
 @Import(
     SecurityConfig::class,
@@ -50,6 +66,8 @@ class ActivityCalendarSecurityTest {
     @Autowired lateinit var mvc: MockMvc
 
     @MockitoBean lateinit var service: ActivityCalendarService
+
+    @MockitoBean lateinit var suggestions: ActivityCalendarSuggestionService
 
     @MockitoBean lateinit var authorization: AdminAuthorizationService
 
@@ -93,5 +111,51 @@ class ActivityCalendarSecurityTest {
         `when`(service.adminItems(null, null, null, null, null, null)).thenReturn(ActivityCalendarAdminResponse(emptyList()))
         mvc.perform(get("/v1/admin/activity-calendar").header("Authorization", "Bearer synthetic")).andExpect(status().isOk)
         verifyNoInteractions(stringRedisTemplate)
+    }
+
+    @Test
+    fun `suggestion methods explicitly require JWT and ordinary authenticated user may read mine without calendar permission`() {
+        val path = "/v1/activity-calendar/suggestions"
+        val admin = "/v1/admin/activity-calendar/suggestions"
+        listOf(
+            post(path),
+            get("$path/mine"),
+            get("$path/sug_one"),
+            get(admin),
+            post("$admin/sug_one/accept"),
+            post("$admin/sug_one/reject"),
+        ).forEach {
+            mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized)
+        }
+        verifyNoInteractions(suggestions, authorization)
+        val now = Instant.now()
+        val token = JwtAuthToken("ordinary", "suggestion-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
+        token.isAuthenticated = true
+        `when`(jwtService.verifyAndParseAuthToken("suggestion-token")).thenReturn(token)
+        `when`(suggestions.mine("ordinary", null, 1, 20)).thenReturn(ActivityCalendarSuggestionPage(emptyList(), 0, 1, 20))
+        mvc.perform(get("$path/mine").header("Authorization", "Bearer suggestion-token")).andExpect(status().isOk)
+        val day = LocalDate.parse("2026-10-03")
+        val event =
+            ActivityCalendarWriteRequest("如鸢", "活动", ActivityCalendarCategory.ACTIVITY, day, day, sourceUrl = "https://example.com/source")
+        val request = ActivityCalendarSuggestionSubmitRequest(event, null, "request-one")
+        val response = ActivityCalendarSuggestionResponse(
+            "sug_one", "ordinary", now,
+            ActivityCalendarSuggestionOriginal("如鸢", "活动", ActivityCalendarCategory.ACTIVITY, day, day, sourceUrl = event.sourceUrl!!),
+            null, ActivityCalendarSuggestionStatus.PENDING, 0, null, null, null, null, null, null,
+        )
+        `when`(suggestions.submit("ordinary", request)).thenReturn(response)
+        val body = """
+            {"game":"如鸢","title":"活动","category":"ACTIVITY",
+            "start_date":"2026-10-03","end_date":"2026-10-03","source_url":"https://example.com/source",
+            "client_request_id":"request-one"}
+        """.trimIndent()
+        mvc.perform(post(path).header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk)
+        verifyNoInteractions(authorization, betaService, stringRedisTemplate)
+        `when`(authorization.hasPermission("ordinary", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(false)
+        listOf(get(admin), post("$admin/sug_one/accept"), post("$admin/sug_one/reject")).forEach {
+            mvc.perform(it.header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden)
+        }
     }
 }

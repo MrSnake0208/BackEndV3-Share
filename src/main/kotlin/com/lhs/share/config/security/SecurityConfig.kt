@@ -65,6 +65,18 @@ class SecurityConfig(
                 .permitAll()
                 .requestMatchers(HttpMethod.POST, "/v1/works/compatibility")
                 .permitAll()
+                .requestMatchers(HttpMethod.POST, "/v1/activity-calendar/suggestions")
+                .authenticated()
+                .requestMatchers(HttpMethod.GET, "/v1/activity-calendar/suggestions/mine", "/v1/activity-calendar/suggestions/*")
+                .authenticated()
+                .requestMatchers(HttpMethod.GET, "/v1/admin/activity-calendar/suggestions")
+                .authenticated()
+                .requestMatchers(
+                    HttpMethod.POST,
+                    "/v1/admin/activity-calendar/suggestions/*/accept",
+                    "/v1/admin/activity-calendar/suggestions/*/reject",
+                )
+                .authenticated()
                 // Hub 库业务:查询公开,写操作需登录(未放行的方法默认 authenticated)
                 .requestMatchers(HttpMethod.GET, "/hub/post/**")
                 .permitAll()

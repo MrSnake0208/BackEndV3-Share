@@ -1,7 +1,9 @@
 package com.lhs.share.handler
 
 import com.lhs.share.hub.controller.calendar.ActivityCalendarController
+import com.lhs.share.hub.controller.calendar.ActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarController
+import com.lhs.share.hub.controller.calendar.AdminActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarError
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarErrorResponse
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
@@ -16,7 +18,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.server.ResponseStatusException
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = [ActivityCalendarController::class, AdminActivityCalendarController::class])
+@RestControllerAdvice(
+    assignableTypes = [
+        ActivityCalendarController::class, AdminActivityCalendarController::class,
+        ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
+    ],
+)
 class ActivityCalendarExceptionHandler {
     @ExceptionHandler(ActivityCalendarApiException::class)
     fun api(error: ActivityCalendarApiException) = response(error.status, error.code, error.message)
