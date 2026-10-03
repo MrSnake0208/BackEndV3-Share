@@ -39,6 +39,7 @@ class AdminAuthorizationServiceTest {
         assertTrue(service.hasPermission("platform", AdminPermission.RECRUITMENT_ACCESS_MANAGE))
         assertTrue(service.hasPermission("platform", AdminPermission.LEVEL_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
+        assertTrue(service.hasPermission("platform", AdminPermission.ACTIVITY_CALENDAR_WRITE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_ROLE_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE))
         assertFalse(service.hasPermission("platform", AdminPermission.CHANGELOG_WRITE))
@@ -57,6 +58,7 @@ class AdminAuthorizationServiceTest {
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.CHANGELOG_REVIEW))
         assertTrue(service.hasPermission("root", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
+        assertTrue(service.hasPermission("root", AdminPermission.ACTIVITY_CALENDAR_WRITE))
         assertEquals(FeedbackArea.all, service.manageableAreasFor("root"))
     }
 
@@ -156,6 +158,23 @@ class AdminAuthorizationServiceTest {
 
         assertFalse(service.hasPermission("disabled", AdminPermission.OPERATOR_CATALOG_WRITE))
         assertEquals(emptySet<String>(), service.manageableAreasFor("disabled"))
+    }
+
+    @Test
+    fun `活动日历编辑员仅拥有日历写权限且停用后失效`() {
+        activeUser("calendar")
+        every { roleRepository.findById("calendar") } returns Optional.of(binding("calendar", AdminRole.ACTIVITY_CALENDAR_EDITOR))
+        every { feedbackRepository.findById("calendar") } returns Optional.empty()
+
+        assertTrue(service.hasAnyAdminCapability("calendar"))
+        AdminPermission.entries.forEach { permission ->
+            assertEquals(permission == AdminPermission.ACTIVITY_CALENDAR_WRITE, service.hasPermission("calendar", permission))
+        }
+        assertEquals(setOf("activity_calendar:write"), service.permissionsFor("calendar"))
+        assertEquals(emptySet<String>(), service.manageableAreasFor("calendar"))
+        every { userService.get("calendar") } returns MaaUserInfo("calendar", "calendar", activated = false)
+        assertFalse(service.hasPermission("calendar", AdminPermission.ACTIVITY_CALENDAR_WRITE))
+        assertFalse(service.hasAnyAdminCapability("calendar"))
     }
 
     private fun activeUser(userId: String) {
