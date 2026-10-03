@@ -1,6 +1,6 @@
-# 活动日历 API（Batch 01 + 02）
+# 活动日历与用户建议 API
 
-仅实现手工目录与招募卡池聚合；没有活动日历页面、物理删除或导入接口。
+提供手工目录、招募卡池聚合，以及独立的用户建议和维护成员审核；不提供物理删除或导入接口。
 
 ## 公开查询
 
@@ -62,3 +62,71 @@ POST 示例需去掉 expected_version。必填 game/title/category/start_date/en
 校验：标题 trim 后 1..120；description/source_note <=1000；结束日期不早于开始日期；时间须成对为 HH:mm，同日结束时间不早于开始时间；合法 ZoneId；来源链接仅 http/https 且有主机，最长 2048。手工类别不接受 RECRUITMENT。未知字段、错误类型和无效字段返回 422 `schema_validation_failed`；找不到活动返回 404 `activity_calendar_not_found`；expected_version 过期及 Mongo 保存竞争均返回 409 `activity_calendar_version_conflict`。领域错误结构为 `{"error":{"code":"…","message":"…"}}`。
 
 `SUPER_ADMIN`、`PLATFORM_ADMIN` 均可维护；`ACTIVITY_CALENDAR_EDITOR` 单独绑定时只获本权限，不获得其它平台、反馈或招募管理权限。权限仍要求账号 activated。前端仅同步权限契约及角色标签。
+
+
+## 用户建议与审核
+
+建议独立保存在 `activity_calendar_suggestions`，不会参与公共日历查询。以下路径显式要求 JWT；普通用户提交与查询本人记录不要求 activated、内测资格、子账号或维护权限。
+
+| 方法与路径 | 授权 | 返回 |
+| --- | --- | --- |
+| `POST /v1/activity-calendar/suggestions` | 登录 | 建议详情 |
+| `GET /v1/activity-calendar/suggestions/mine` | 登录，只查询本人 | 分页列表 |
+| `GET /v1/activity-calendar/suggestions/{id}` | 本人或 `activity_calendar:write` | 建议详情 |
+| `GET /v1/admin/activity-calendar/suggestions` | `activity_calendar:write` | 分页审核队列 |
+| `POST /v1/admin/activity-calendar/suggestions/{id}/accept` | `activity_calendar:write` | 最终建议详情 |
+| `POST /v1/admin/activity-calendar/suggestions/{id}/reject` | `activity_calendar:write` | 最终建议详情 |
+
+提交示例：
+
+```json
+{
+  "game": "如鸢",
+  "title": "活动名称",
+  "category": "ACTIVITY",
+  "start_date": "2026-10-03",
+  "end_date": "2026-10-17",
+  "source_url": "https://example.com/announcement",
+  "submission_note": "给审核员的私人说明",
+  "client_request_id": "unique-client-request-id"
+}
+```
+
+活动资料使用现有校验，固定 `Asia/Shanghai` 日期；仅支持五种手工类别。source_url 必填，http/https，最多 2048 字符；可选 start_time/end_time（成对）、description（最多1000字符）、submission_note（trim 后最多1000字符）。client_request_id 为 1..128 位字母、数字、下划线或短横线。同用户同标识同规范化资料复用旧结果；不同资料返回409。同标识在不同用户间互不影响。用户边界拒绝 enabled、time_zone、source_note、身份、状态及审核字段；未知字段和非严格类型返回422。
+
+分页参数 `page` 默认1且至少1，`page_size` 默认20且范围1..100，越界返回422；列表为 `data.{items,total,page,page_size}`。本人列表可按 `status` 筛选（PENDING/ACCEPTED/REJECTED），按 created_at/id 降序。审核队列另外支持 game，按 created_at/id 升序；未传 status 时包含所有状态。唯一索引 `(submitterId,clientRequestId)` 防并发重复，分页索引覆盖本人、状态、游戏及时间/ID排序。
+
+详情为 `{id,submitter_id,created_at,original,submission_note,status,version,reviewed_by,reviewed_at,review_note,event_id,accepted_snapshot,current_event}`。original 仅包含用户提交的活动公开字段（不含 time_zone）；client_request_id 不返回。不存在与非本人越权均返回404 `activity_calendar_suggestion_not_found`，不暴露他人私人内容。accepted_snapshot 是采纳时的公开 `ActivityCalendarItem`；current_event 是 `{item: ActivityCalendarItem, enabled}`，不包含正式活动的 source_note 或管理审计。后续修改/停用不影响原始建议与采纳快照；活动停用仍可由提交人查看当前启用情况。
+
+采纳示例：
+
+```json
+{
+  "expected_version": 0,
+  "event": {
+    "game": "如鸢",
+    "title": "核对后的活动名称",
+    "category": "ACTIVITY",
+    "start_date": "2026-10-03",
+    "end_date": "2026-10-17",
+    "source_url": "https://example.com/announcement",
+    "source_note": "仅管理端可见的来源备注"
+  },
+  "review_note": "已根据公告核对"
+}
+```
+
+event 使用既有手工活动写入字段，采纳同样要求来源链接必填，不接受内层 expected_version；time_zone 必须为 Asia/Shanghai，enabled 服务端固定 true。采纳在 `hubTransactionTemplate` 内检查 PENDING+expected_version，复用正式活动校验和创建，再条件写 ACCEPTED、审核信息、关联和快照；失败整体回滚。部署 Mongo 必须支持事务（replica set/sharded），不得降级为非原子双写。已ACCEPTED重试返回旧结果，忽略新编辑内容；已REJECTED不可采纳。竞争事务返回既有采纳结果或409 `activity_calendar_suggestion_conflict`，不得盲目重试旧稿。
+
+不采纳 body 为 `{"expected_version":0,"review_note":"重复活动，请补充不同资料"}`，原因 trim 后须1..1000字符。单文档 PENDING+version 条件更新，终态不可再次审核。采纳的 review_note 可选且最多1000字符。私人 submission_note 不自动进入正式 description/source_note。原始资料与请求身份提交后不可改写。
+
+未登录401，缺少维护权限403，字段无效422 `schema_validation_failed`，状态/版本或提交标识资料冲突409 `activity_calendar_suggestion_conflict`。沿用日历领域错误结构。
+
+定向验证（用户/CI执行）：
+
+```bash
+./gradlew test --tests '*ActivityCalendarSuggestionServiceTest' --tests '*ActivityCalendarSuggestionControllerContractTest' --tests '*ActivityCalendarSecurityTest' --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --console=plain
+./gradlew integrationTest --tests '*ActivityCalendarSuggestionMongoTest' --tests '*ActivityCalendarMongoTest' --console=plain
+```
+
+integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验证唯一重试索引、所有权/分页、事务回滚及并发审核；不接受开发或生产数据库连接。

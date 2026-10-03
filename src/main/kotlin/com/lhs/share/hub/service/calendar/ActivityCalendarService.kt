@@ -97,6 +97,14 @@ class ActivityCalendarService(
         return adminItem(save(event(actor, id, request, current)))
     }
 
+    /** Shares normalization and validation with suggestions without writing a formal event. */
+    fun validate(request: ActivityCalendarWriteRequest): ActivityCalendarWriteRequest {
+        val validated = event("", "", request, null)
+        return request.copy(title = validated.title, sourceUrl = validated.sourceUrl)
+    }
+
+    fun findAdminItem(id: String): ActivityCalendarAdminItem? = repository.find(id)?.let(::adminItem)
+
     private fun event(
         actor: String,
         id: String,
@@ -149,7 +157,7 @@ class ActivityCalendarService(
         if (game !in SubAccountService.SUPPORTED_GAMES) throw calendarInvalid("游戏只支持代号鸢或如鸢")
     }
 
-    private fun adminItem(event: ActivityCalendarEvent) = ActivityCalendarAdminItem(
+    fun adminItem(event: ActivityCalendarEvent) = ActivityCalendarAdminItem(
         ActivityCalendarItem(
             event.id, ActivityCalendarSourceType.MANUAL, null, event.game, event.title, event.category,
             event.startDate, event.endDate, event.startTime, event.endTime, event.timeZone, event.description, event.sourceUrl,
