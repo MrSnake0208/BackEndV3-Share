@@ -22,6 +22,8 @@ import com.lhs.share.hub.service.operator.OperatorService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -139,6 +141,47 @@ class OperatorControllerContractTest {
     }
 
     @Test
+    fun `PATCH decimal is forwarded as a number and read responses retain integer tokens`() {
+        val decimal = entry().copy(
+            combatStats = entry().combatStats!!.copy(
+                oddities = mapOf(
+                    "attack" to OperatorOddityValue(10.0),
+                    "hp" to OperatorOddityValue(20.0),
+                    "special" to OperatorOddityValue(0.5),
+                ),
+            ),
+        )
+        every { service.patchCurrent("u1", "acc1", "代号鸢", "op1", any()) } returns decimal
+        val response = mockMvc.perform(
+            patch("/v1/operator/current/op1")
+                .param("account_id", "acc1").param("game", "代号鸢").contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"combat_stats":{"oddities":{"special":{"current":0.5}}},
+                     "expected_revision":7,"reason":"manual_correction"}
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.combat_stats.oddities.special.current").value(0.5))
+            .andReturn().response.contentAsString
+        val values = jacksonObjectMapper().readTree(response).path("data").path("combat_stats").path("oddities")
+        assertTrue(values.path("attack").path("current").isIntegralNumber)
+        assertTrue(values.path("hp").path("current").isIntegralNumber)
+        assertEquals(0.5, values.path("special").path("current").doubleValue())
+        verify {
+            service.patchCurrent(
+                "u1",
+                "acc1",
+                "代号鸢",
+                "op1",
+                match {
+                    it.path("combat_stats").path("oddities").path("special").path("current").doubleValue() == 0.5
+                },
+            )
+        }
+    }
+
+    @Test
     fun `PATCH revision conflict uses stable 409 error contract`() {
         every { service.patchCurrent(any(), any(), any(), any(), any()) } throws
             OperatorApiException(
@@ -176,7 +219,7 @@ class OperatorControllerContractTest {
             observedStatus = "valid",
             displayMode = OperatorCombatDisplayMode("auto", "manual"),
             combatInputSignature = "scan-input-v1",
-            oddities = mapOf("special" to OperatorOddityValue(15)),
+            oddities = mapOf("special" to OperatorOddityValue(15.0)),
         ),
         revision = 8,
         listedBaselineAt = null,

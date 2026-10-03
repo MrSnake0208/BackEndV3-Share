@@ -670,16 +670,7 @@ class OperatorV3ImportService(
         }
         val limits = oddityLimits(catalog.rarity)
         entry.path("combat_stats").path("oddities").takeIf(JsonNode::isObject)?.fields()?.forEach { (key, value) ->
-            val current = value.path("current")
-            if (!current.isIntegralNumber || current.intValue() !in 0..limits.getValue(key)) {
-                invalid(
-                    "invalid_combat_stats",
-                    "oddity current exceeds the catalog limit",
-                    recordId,
-                    catalog.operatorId,
-                    "combat_stats.oddities.$key.current",
-                )
-            }
+            OperatorOddityValidation.requireCurrent(key, value.get("current"), limits.getValue(key), catalog.operatorId, recordId)
         }
     }
 

@@ -9,9 +9,11 @@ import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryAgentFavorite
 import com.lhs.share.hub.repository.entity.OperatorAnnotation
+import com.lhs.share.hub.repository.entity.OperatorCombatStats
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.OperatorGrowthTarget
+import com.lhs.share.hub.repository.entity.OperatorOddityValue
 import com.lhs.share.hub.repository.entity.SubAccount
 import io.mockk.every
 import io.mockk.mockk
@@ -39,7 +41,21 @@ class OperatorV3ExportServiceTest {
                 userId = "u1",
                 accountId = "a1",
                 game = "如鸢",
-                entries = mapOf("op1" to OperatorEntry(elite = 17, starLevel = 31, level = 100, revision = 4)),
+                entries = mapOf(
+                    "op1" to OperatorEntry(
+                        elite = 17,
+                        starLevel = 31,
+                        level = 100,
+                        revision = 4,
+                        combatStats = OperatorCombatStats(
+                            oddities = mapOf(
+                                "attack" to OperatorOddityValue(10.0),
+                                "hp" to OperatorOddityValue(20.0),
+                                "special" to OperatorOddityValue(3.2),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         )
         every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "a1") } returns listOf(
@@ -59,6 +75,11 @@ class OperatorV3ExportServiceTest {
 
         assertEquals(3, exported.path("version").intValue())
         assertEquals(2, exported.path("records").size())
+        val snapshot = exported.path("records").first { it.path("record_type").asText() == "operator_snapshot" }
+        val values = snapshot.path("entries").single().path("combat_stats").path("oddities")
+        assertEquals(3.2, values.path("special").path("current").doubleValue())
+        assertTrue(values.path("attack").path("current").isIntegralNumber)
+        assertTrue(values.path("hp").path("current").isIntegralNumber)
         val subjective = exported.path("records").first { it.path("record_type").asText() == "operator_annotation_snapshot" }
         val entry = subjective.path("entries").single()
         assertEquals(state, entry.path("growth_state").asText())

@@ -1,5 +1,8 @@
 package com.lhs.share.hub.controller.operator.response
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
+import com.lhs.share.hub.repository.entity.OperatorOddityNumberSerializer
+import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
 data class OperatorShareResponse(
@@ -54,4 +57,8 @@ data class OperatorShareStarStone(
     val level: Int,
 )
 
-data class OperatorShareOddityValue(val current: Int)
+data class OperatorShareOddityValue(
+    @field:Schema(description = "attack/hp 为非负整数；special 最多一位有效小数；沿用原单位和图鉴上限")
+    @get:JsonSerialize(using = OperatorOddityNumberSerializer::class)
+    val current: Double,
+)

@@ -199,7 +199,7 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals("命盘二", result.discLoadouts[1].name)
         assertEquals(result.discs, result.discLoadouts[0].discs)
         assertNull(result.combatStats?.manualAttack)
-        assertEquals(500, result.combatStats?.oddities?.get("attack")?.current)
+        assertEquals(500.0, result.combatStats?.oddities?.get("attack")?.current)
         assertEquals("stale", result.combatStats?.observedStatus)
     }
 
@@ -235,7 +235,7 @@ class OperatorCurrentFoundationServiceTest {
                 """"combat_stats":{"oddities":{"attack":{"current":${values.first}},"hp":{"current":${values.second}},"special":{"current":${values.third}}}}""",
             )
             service.patchCurrent("u1", "acc1", "代号鸢", "op1", valid)
-            assertEquals(values.third, stored.entries.getValue("op1").combatStats?.oddities?.get("special")?.current)
+            assertEquals(values.third.toDouble(), stored.entries.getValue("op1").combatStats?.oddities?.get("special")?.current)
         }
         rarity = 4
         stored = stored.copy(entries = mapOf("op1" to baseEntry()))
@@ -254,6 +254,106 @@ class OperatorCurrentFoundationServiceTest {
                 service.patchCurrent("u1", "acc1", "代号鸢", "op1", unknown)
             }.code,
         )
+    }
+
+    @Test
+    fun `special accepts tenths and persists correction while omitted oddities remain unchanged`() {
+        every { currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "acc1") } answers { listOf(stored) }
+        for (value in listOf("0.1", "0.5", "3.2", "0", "15", "0.50")) {
+            setUp()
+            val result = service.patchCurrent(
+                "u1",
+                "acc1",
+                "代号鸢",
+                "op1",
+                patch(""""combat_stats":{"oddities":{"special":{"current":$value}}}"""),
+            )
+            assertEquals(value.toDouble(), result.combatStats?.oddities?.get("special")?.current)
+            assertEquals(value.toDouble(), lastCorrection?.combatStats?.oddities?.get("special")?.current)
+            assertEquals(100.0, stored.entries.getValue("op1").combatStats?.oddities?.get("attack")?.current)
+            assertEquals(8, result.revision)
+            assertEquals(
+                value.toDouble(),
+                service.current("u1", "acc1", "代号鸢").single().entries.getValue("op1")
+                    .combatStats?.oddities?.get("special")?.current,
+            )
+        }
+    }
+
+    @Test
+    fun `invalid oddity precision types and bounds never write or advance revision`() {
+        val cases = listOf(
+            "special" to "0.55", "special" to "-0.5", "special" to "15.1",
+            "special" to "\"0.5\"", "special" to "null", "special" to "true",
+            "attack" to "0.5", "hp" to "0.5", "attack" to "1.0",
+        )
+        cases.forEach { (key, value) ->
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.patchCurrent(
+                    "u1",
+                    "acc1",
+                    "代号鸢",
+                    "op1",
+                    patch(""""combat_stats":{"oddities":{"$key":{"current":$value}}}"""),
+                )
+            }
+            assertEquals("invalid_combat_stats", error.code)
+            assertEquals("combat_stats.oddities.$key.current", error.fieldPath)
+            assertEquals(7, stored.entries.getValue("op1").revision)
+            assertNull(lastCorrection)
+        }
+        verify(exactly = 0) { correctionRepository.save(any()) }
+        verify(exactly = 0) { currentRepository.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `decimal correction cannot overwrite a newer revision`() {
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.patchCurrent(
+                "u1",
+                "acc1",
+                "代号鸢",
+                "op1",
+                patch(""""combat_stats":{"oddities":{"special":{"current":0.5}}}""", revision = 6),
+            )
+        }
+        assertEquals("operator_revision_conflict", error.code)
+        assertEquals(7, stored.entries.getValue("op1").revision)
+        assertNull(lastCorrection)
+        verify(exactly = 0) { correctionRepository.save(any()) }
+        verify(exactly = 0) { currentRepository.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `equal special numeric inputs preserve signature while a tenth change marks scan stale`() {
+        fun observation(value: String) = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"observed_attack":1000,"source":"scan","oddities":{"special":{"current":$value}}}"""),
+        )
+            .after
+        assertEquals(observation("1").combatStats?.combatInputSignature, observation("1.0").combatStats?.combatInputSignature)
+        val before = observation("0.5")
+        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(combatStats = before.combatStats, revision = before.revision)))
+        specialOddityName = "自定义第三项"
+        val same = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"oddities":{"special":{"current":0.50}}}""", revision = before.revision),
+        ).after
+        assertEquals("valid", same.combatStats?.observedStatus)
+        val changed = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""combat_stats":{"oddities":{"special":{"current":0.6}}}""", revision = before.revision),
+        ).after
+        assertEquals("stale", changed.combatStats?.observedStatus)
     }
 
     @Test
@@ -481,6 +581,7 @@ class OperatorCurrentFoundationServiceTest {
         }
 
         val baseline = signature()
+        assertEquals("sha256:c039cce8bac6cebbea657857d9f84c27f5055529ab9daeb2137df2eb569743ec", baseline)
         assertEquals(baseline, signature(reverseStones = true, includeOddityMax = true))
         specialOddityName = "增伤值（新展示名）"
         assertEquals(baseline, signature())
@@ -626,7 +727,7 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals(emptyList<OperatorStarStone>(), result.starStones)
         assertEquals("auto", result.combatStats?.displayMode?.attack)
         assertEquals("manual", result.combatStats?.displayMode?.hp)
-        assertEquals(0, result.combatStats?.oddities?.get("special")?.current)
+        assertEquals(0.0, result.combatStats?.oddities?.get("special")?.current)
     }
 
     @Test
@@ -792,7 +893,7 @@ class OperatorCurrentFoundationServiceTest {
             fields = setOf("disc_loadouts", "star_stones", "combat_stats"),
             discLoadouts = baseEntry().discLoadouts,
             starStones = baseEntry().starStones,
-            combatStats = baseEntry().combatStats,
+            combatStats = baseEntry().combatStats!!.copy(oddities = mapOf("special" to OperatorOddityValue(0.5))),
             createdAt = Instant.parse("2026-08-21T00:02:00Z"),
         )
         var replayed: OperatorCurrent? = stored
@@ -815,6 +916,7 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals("命盘二", entry.discLoadouts[1].name)
         assertEquals("main1", entry.starStones.single().type)
         assertEquals(1000, entry.combatStats?.observedAttack)
+        assertEquals(0.5, entry.combatStats?.oddities?.get("special")?.current)
         assertEquals(1, entry.revision)
     }
 
@@ -874,7 +976,7 @@ class OperatorCurrentFoundationServiceTest {
             observedStatus = "valid",
             displayMode = OperatorCombatDisplayMode("auto", "manual"),
             combatInputSignature = "scan-input-v1",
-            oddities = mapOf("attack" to OperatorOddityValue(100)),
+            oddities = mapOf("attack" to OperatorOddityValue(100.0)),
         ),
         revision = 7,
     )

@@ -15,6 +15,27 @@ class OperatorV3SchemaValidator(objectMapper: ObjectMapper) {
     }
 
     fun validate(document: JsonNode) {
+        // Report numeric contract failures using the same field/code as PATCH,
+        // before multipleOf/type schema errors hide the actionable reason.
+        document.path("records").forEach { record ->
+            record.path("entries").forEach { entry ->
+                val oddities = entry.path("combat_stats").path("oddities")
+                if (oddities.isObject) {
+                    listOf("attack", "hp", "special").forEach { key ->
+                        val oddity = oddities.path(key)
+                        if (oddity.isObject && oddity.has("current")) {
+                            OperatorOddityValidation.requireCurrent(
+                                key,
+                                oddity.get("current"),
+                                1_000_000,
+                                entry.path("operator_id").asText(),
+                                record.path("record_id").asText(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
         val errors = schema.validate(document)
         if (errors.isNotEmpty()) {
             val first = errors.sortedBy { it.message }.first()

@@ -38,6 +38,7 @@ import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.normalized
+import com.lhs.share.hub.repository.entity.oddityNumberNode
 import com.lhs.share.hub.service.star.StarStateService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -975,21 +976,7 @@ class OperatorService(
                 operatorId,
                 "combat_stats.oddities.$key",
             )
-            val current = requiredInt(
-                oddity,
-                "current",
-                operatorId,
-                "combat_stats.oddities.$key.current",
-                "invalid_combat_stats",
-            )
-            if (current !in 0..limits.getValue(key)) {
-                invalid(
-                    "oddity current exceeds the catalog limit",
-                    operatorId,
-                    "combat_stats.oddities.$key.current",
-                    "invalid_combat_stats",
-                )
-            }
+            val current = OperatorOddityValidation.requireCurrent(key, oddity.get("current"), limits.getValue(key), operatorId)
             if (oddity.has("max")) {
                 val diagnosticMax = requiredInt(
                     oddity,
@@ -1265,7 +1252,7 @@ class OperatorService(
             set<JsonNode>(
                 key,
                 ObjectNode(JSON_NODE_FACTORY).apply {
-                    if (current == null) putNull("current") else put("current", current)
+                    if (current == null) putNull("current") else set<JsonNode>("current", oddityNumberNode(current))
                 },
             )
         }
