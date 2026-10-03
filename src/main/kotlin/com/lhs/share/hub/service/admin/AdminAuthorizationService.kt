@@ -16,6 +16,7 @@ enum class AdminPermission(val value: String) {
     RECRUITMENT_ACCESS_MANAGE("recruitment_access:manage"),
     LEVEL_CATALOG_WRITE("level_catalog:write"),
     DEVELOPMENT_GOAL_MANAGE("development_goal:manage"),
+    ACTIVITY_CALENDAR_WRITE("activity_calendar:write"),
     CHANGELOG_WRITE("changelog:write"),
     CHANGELOG_REVIEW("changelog:review"),
     ADMIN_ROLE_MANAGE("admin:role:manage"),
@@ -57,6 +58,7 @@ class AdminAuthorizationService(
             AdminPermission.LEVEL_CATALOG_WRITE,
             AdminPermission.DEVELOPMENT_GOAL_MANAGE,
             -> AdminRole.PLATFORM_ADMIN in roles
+            AdminPermission.ACTIVITY_CALENDAR_WRITE -> AdminRole.PLATFORM_ADMIN in roles || AdminRole.ACTIVITY_CALENDAR_EDITOR in roles
             AdminPermission.CHANGELOG_WRITE -> AdminRole.CHANGELOG_EDITOR in roles
             AdminPermission.CHANGELOG_REVIEW -> AdminRole.CHANGELOG_REVIEWER in roles
             else -> false
