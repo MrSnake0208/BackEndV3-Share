@@ -52,7 +52,7 @@ Content-Type: application/json
 }
 ```
 
-`growth_state` 与 `note` 字段级合并；缺失保留，`note:null` 清除。创建使用 `expected_revision:0`。相同最终内容重复提交直接返回已有结果，不增加 revision。枚举为 `active | graduated | skip`；前端映射为 `growing ↔ active`、`graduated ↔ graduated`、`inactive ↔ skip`。
+`growth_state` 与 `note` 字段级合并；缺失保留，`note:null` 清除。创建使用 `expected_revision:0`。相同最终内容重复提交直接返回已有结果，不增加 revision。枚举为 `active | graduated | skip | discarded`；前端映射为 `growing ↔ active`、`graduated ↔ graduated`、`inactive ↔ skip`、`discarded ↔ discarded`。
 
 ## 养成目标
 
@@ -227,9 +227,15 @@ Content-Type: application/json
 
 ## 前端接入要点
 
-- 工作台本地状态 `growing/graduated/inactive` 分别映射到 API 的 `active/graduated/skip`。
+- 工作台本地状态 `growing/graduated/inactive/discarded` 分别映射到 API 的 `active/graduated/skip/discarded`。
 - 用 GET annotations/targets 的结果覆盖本地缓存；响应中没有的密探采用默认值。`yuanhub:operator-targets:{accountId}` 只可作为一次性迁移来源，成功 PUT 后不再作为真相源。
 - favorite 仍只读写 `/v1/inventory/agent-favorites`；不要通过 annotation CRUD 修改 favorite。
 - 快捷按钮先 preview，展示 `requirements` 和 `blocking_reasons`；execute 必须原样携带两个 revision 与 token，并设置 UUID Idempotency-Key。
 - 执行成功可直接用响应里的 operator、consumed 和 inventory_revision 刷新当前行，再刷新账号库存；收到 `operator-upgrade` SSE 时按 `transaction_id` 去重/合并。
 - current 超过旧 target 不是错误；显示层可自行把建议目标上调。
+
+## 已弃置（2026-10-03）
+
+新增 discarded，语义为退出日常养成、保留练度，可恢复到 active/graduated/skip。复用 annotation 的用户/子账号键和 revision；仅修改状态时备注、目标、favorite、清单及客观数据保持不变，skip 历史值不迁移。CAS 冲突继续为 annotation_revision_conflict，非法非空值继续为 invalid_growth_state，缺失字段保留原值（未有标注才默认 active）。
+
+v3 两份 schema 同步接受第四值，listed/full 导入导出和分享/OpenAPI 透传。普通客观导入和 scan 不修改主观状态。旧客户端校验器会拒绝新值；先升级读取界面和 MaaYuan 再开放写入。已有数据后后端回滚须保留四值读写兼容，不重解释为其它值。

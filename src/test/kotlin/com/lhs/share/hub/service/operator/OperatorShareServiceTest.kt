@@ -24,6 +24,8 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import java.time.Instant
@@ -75,12 +77,13 @@ class OperatorShareServiceTest {
         assertEquals("account_not_found", error.code)
     }
 
-    @Test
-    fun `public view filters un recruited entries and omits private current fields`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["active", "graduated", "skip", "discarded"])
+    fun `public view filters un recruited entries and omits private current fields`(state: String) {
         every { accountRepository.findByShareToken("code") } returns account("code")
         every { catalogService.currentCatalogVersion() } returns "2026-09-03"
         every { annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "acc1") } returns listOf(
-            OperatorAnnotation(userId = "u1", accountId = "acc1", operatorId = "recruited", growthState = "graduated"),
+            OperatorAnnotation(userId = "u1", accountId = "acc1", operatorId = "recruited", growthState = state),
         )
         every { operatorService.current("u1", "acc1", "代号鸢") } returns listOf(
             OperatorCurrentResponse(
@@ -102,7 +105,7 @@ class OperatorShareServiceTest {
         assertEquals("2026-09-03", view.catalogVersion)
         assertEquals(setOf("recruited"), view.entries.keys)
         assertEquals(27, view.entries.getValue("recruited").starLevel)
-        assertEquals("graduated", view.entries.getValue("recruited").growthState)
+        assertEquals(state, view.entries.getValue("recruited").growthState)
         val json = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
