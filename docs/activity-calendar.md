@@ -2,9 +2,9 @@
 
 提供手工目录、招募卡池聚合，以及独立的用户建议和维护成员审核；不提供物理删除或导入接口。
 
-## 公开查询
+## 管理员测试阶段查询
 
-`GET /v1/activity-calendar` 无需登录。可选参数：
+`GET /v1/activity-calendar` 需要 JWT 登录及 `AdminAuthorizationService.hasAnyAdminCapability` 管理能力，包含内容维护角色与反馈管理成员。未登录返回 401；普通用户返回 403 `admin_testing_only`，不读取日历业务数据。前端日历读取携带认证并绑定当前身份。管理写入/审核仍独立要求 `activity_calendar:write`。可选参数：
 
 - `game`：`代号鸢` / `如鸢`，省略查询全部。
 - `from` / `to`：ISO 日期，闭区间 overlap（`end_date >= from && start_date <= to`）；可只提供一端，倒置范围返回 422。
@@ -70,9 +70,9 @@ POST 示例需去掉 expected_version。必填 game/title/category/start_date/en
 
 | 方法与路径 | 授权 | 返回 |
 | --- | --- | --- |
-| `POST /v1/activity-calendar/suggestions` | 登录 | 建议详情 |
-| `GET /v1/activity-calendar/suggestions/mine` | 登录，只查询本人 | 分页列表 |
-| `GET /v1/activity-calendar/suggestions/{id}` | 本人或 `activity_calendar:write` | 建议详情 |
+| `POST /v1/activity-calendar/suggestions` | 登录且具备管理能力 | 建议详情 |
+| `GET /v1/activity-calendar/suggestions/mine` | 登录且具备管理能力，只查询本人 | 分页列表 |
+| `GET /v1/activity-calendar/suggestions/{id}` | 具备管理能力，且为本人或具有 `activity_calendar:write` | 建议详情 |
 | `GET /v1/admin/activity-calendar/suggestions` | `activity_calendar:write` | 分页审核队列 |
 | `POST /v1/admin/activity-calendar/suggestions/{id}/accept` | `activity_calendar:write` | 最终建议详情 |
 | `POST /v1/admin/activity-calendar/suggestions/{id}/reject` | `activity_calendar:write` | 最终建议详情 |
@@ -130,3 +130,16 @@ event 使用既有手工活动写入字段，采纳同样要求来源链接必�
 ```
 
 integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验证唯一重试索引、所有权/分页、事务回滚及并发审核；不接受开发或生产数据库连接。
+
+
+## 管理员测试阶段验证（2026-10-04）
+
+风险 L3；日历读取及建议提交/本人列表/详情统一按现有管理能力限制。未改变日历查询范围、字段、持久化和审核写权限。安全链测试覆盖未登录 401、非管理员 403、管理员无日历写权限时可读取/提交本人建议、管理目录仍拒绝无写权限用户；契约测试继续覆盖原数据契约与资料校验。
+
+回归由用户/CI执行（cwd BackEndV3-Share；此组不使用容器）：
+
+```bash
+./gradlew test --tests '*ActivityCalendarSecurityTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSuggestionControllerContractTest' --console=plain
+```
+
+本轮已执行 `./gradlew compileKotlin compileTestKotlin --console=plain` 与 `git diff --check`，均通过。上面的回归测试尚未执行；未启动/重启后端服务。

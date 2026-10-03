@@ -80,14 +80,33 @@ class ActivityCalendarSecurityTest {
     @MockitoBean lateinit var stringRedisTemplate: StringRedisTemplate
 
     @Test
-    fun `real security chain allows anonymous public GET and rejects anonymous management or other methods`() {
-        `when`(service.publicItems(null, null, null, null)).thenReturn(ActivityCalendarResponse(emptyList()))
-        mvc.perform(get("/v1/activity-calendar")).andExpect(status().isOk)
+    fun `real security chain rejects anonymous calendar reads management and suggestions`() {
+        mvc.perform(get("/v1/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(get("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(post("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(put("/v1/admin/activity-calendar/evt_test")).andExpect(status().isUnauthorized)
         mvc.perform(post("/v1/activity-calendar")).andExpect(status().isUnauthorized)
-        verifyNoInteractions(authorization, stringRedisTemplate)
+        verifyNoInteractions(service, authorization, stringRedisTemplate)
+    }
+
+    @Test
+    fun `ordinary users cannot read calendar and administrators can read without calendar write permission`() {
+        val now = Instant.now()
+        val token = JwtAuthToken("tester", "testing-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
+        token.isAuthenticated = true
+        `when`(jwtService.verifyAndParseAuthToken("testing-token")).thenReturn(token)
+        `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(false)
+        mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
+            .andExpect(status().isForbidden)
+        verifyNoInteractions(service)
+        `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(true)
+        `when`(service.publicItems(null, null, null, null)).thenReturn(ActivityCalendarResponse(emptyList()))
+        mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
+            .andExpect(status().isOk)
+        `when`(authorization.hasPermission("tester", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(false)
+        mvc.perform(get("/v1/admin/activity-calendar").header("Authorization", "Bearer testing-token"))
+            .andExpect(status().isForbidden)
+        verifyNoInteractions(stringRedisTemplate)
     }
 
     @Test
@@ -114,7 +133,7 @@ class ActivityCalendarSecurityTest {
     }
 
     @Test
-    fun `suggestion methods explicitly require JWT and ordinary authenticated user may read mine without calendar permission`() {
+    fun `suggestion methods require JWT and admin capability while calendar write permission remains independent`() {
         val path = "/v1/activity-calendar/suggestions"
         val admin = "/v1/admin/activity-calendar/suggestions"
         listOf(
@@ -133,6 +152,12 @@ class ActivityCalendarSecurityTest {
         token.isAuthenticated = true
         `when`(jwtService.verifyAndParseAuthToken("suggestion-token")).thenReturn(token)
         `when`(suggestions.mine("ordinary", null, 1, 20)).thenReturn(ActivityCalendarSuggestionPage(emptyList(), 0, 1, 20))
+        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(false)
+        listOf(get("$path/mine"), get("$path/sug_one")).forEach {
+            mvc.perform(it.header("Authorization", "Bearer suggestion-token")).andExpect(status().isForbidden)
+        }
+        verifyNoInteractions(suggestions)
+        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(true)
         mvc.perform(get("$path/mine").header("Authorization", "Bearer suggestion-token")).andExpect(status().isOk)
         val day = LocalDate.parse("2026-10-03")
         val event =
@@ -149,9 +174,13 @@ class ActivityCalendarSecurityTest {
             "start_date":"2026-10-03","end_date":"2026-10-03","source_url":"https://example.com/source",
             "client_request_id":"request-one"}
         """.trimIndent()
+        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(false)
+        mvc.perform(post(path).header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isForbidden)
+        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(true)
         mvc.perform(post(path).header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk)
-        verifyNoInteractions(authorization, betaService, stringRedisTemplate)
+        verifyNoInteractions(betaService, stringRedisTemplate)
         `when`(authorization.hasPermission("ordinary", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(false)
         listOf(get(admin), post("$admin/sug_one/accept"), post("$admin/sug_one/reject")).forEach {
             mvc.perform(it.header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content("{}"))

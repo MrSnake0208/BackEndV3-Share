@@ -61,9 +61,11 @@ class ActivityCalendarControllerContractTest {
     @BeforeEach
     fun setup() {
         mvc = MockMvcBuilders.standaloneSetup(
-            ActivityCalendarController(service),
+            ActivityCalendarController(service, helper, authorization),
             AdminActivityCalendarController(service, helper, authorization, mapper),
         ).setControllerAdvice(ActivityCalendarExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
+        every { helper.requireUserId() } returns "editor"
+        every { authorization.hasAnyAdminCapability("editor") } returns true
         every { repository.list(any(), any(), any(), any(), any()) } returns listOf(event)
         every { recruitment.all() } returns listOf(RecruitmentCatalogPool("pool", "如鸢", "卡池", date, date.plusDays(1)))
     }
@@ -74,7 +76,7 @@ class ActivityCalendarControllerContractTest {
     }
 
     @Test
-    fun `public contract uses snake case ISO dates and explicit sources without identity or audit`() {
+    fun `admin testing calendar contract uses snake case ISO dates and explicit sources without identity or audit`() {
         mvc.perform(
             get("/v1/activity-calendar").param("game", "如鸢").param("from", "2026-10-03").param("to", "2026-10-10")
                 .param("category", "ACTIVITY,RECRUITMENT", "ACTIVITY"),
@@ -91,8 +93,8 @@ class ActivityCalendarControllerContractTest {
             .andExpect(jsonPath("$.data.items[1].source_type").value("RECRUITMENT_POOL"))
             .andExpect(jsonPath("$.data.items[1].source_ref").value("pool"))
         verify {
-            helper wasNot io.mockk.Called
-            authorization wasNot io.mockk.Called
+            helper.requireUserId()
+            authorization.hasAnyAdminCapability("editor")
         }
         verify {
             repository.list(
