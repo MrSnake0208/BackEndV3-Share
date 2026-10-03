@@ -86,11 +86,12 @@ class ActivityCalendarSuggestionControllerContractTest {
             AdminActivityCalendarSuggestionController(service, helper, authorization, mapper),
         ).setControllerAdvice(ActivityCalendarExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
         every { helper.requireUserId() } returns "owner"
+        every { authorization.hasAnyAdminCapability("owner") } returns true
         every { authorization.hasPermission("owner", AdminPermission.ACTIVITY_CALENDAR_WRITE) } returns false
     }
 
     @Test
-    fun `ordinary authenticated user submits server identity and queries owned pagination without write permission`() {
+    fun `administrator submits server identity and queries owned pagination without calendar write permission`() {
         every { repository.findRequest("owner", "request-one") } returns null
         every { repository.insert(any()) } answers { firstArg() }
         mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk)
@@ -105,7 +106,7 @@ class ActivityCalendarSuggestionControllerContractTest {
             .andExpect(jsonPath("$.data.page").value(1)).andExpect(jsonPath("$.data.page_size").value(20))
             .andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.items[0].submission_note").value("私人"))
         verify {
-            authorization wasNot io.mockk.Called
+            authorization.hasAnyAdminCapability("owner")
             events wasNot io.mockk.Called
             transactions wasNot io.mockk.Called
         }
