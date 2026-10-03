@@ -110,6 +110,9 @@ class OperatorShareServiceTest {
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             .writeValueAsString(view)
+        val values = jacksonObjectMapper().readTree(json).path("entries").path("recruited").path("combat_stats").path("oddities")
+        assertEquals(0.5, values.path("special").path("current").doubleValue())
+        assertTrue(values.path("attack").path("current").isIntegralNumber)
         listOf(
             "user_id",
             "account_id",
@@ -266,7 +269,7 @@ class OperatorShareServiceTest {
             observedStatus = "valid",
             combatInputSignature = "private-signature",
             displayMode = OperatorCombatDisplayMode("auto", "manual"),
-            oddities = mapOf("attack" to OperatorOddityValue(500)),
+            oddities = mapOf("attack" to OperatorOddityValue(500.0), "special" to OperatorOddityValue(0.5)),
         ),
         revision = 8,
         listedBaselineAt = Instant.EPOCH,

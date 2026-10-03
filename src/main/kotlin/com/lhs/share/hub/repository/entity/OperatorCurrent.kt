@@ -1,5 +1,7 @@
 package com.lhs.share.hub.repository.entity
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
+import io.swagger.v3.oas.annotations.media.Schema
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.Indexed
@@ -63,7 +65,11 @@ data class OperatorObservedInputs(
     val equippedStarStonesSignature: String? = null,
 )
 
-data class OperatorOddityValue(val current: Int)
+data class OperatorOddityValue(
+    @field:Schema(description = "attack/hp 为非负整数；special 为非负数，最多一位有效小数；上限由公共图鉴决定")
+    @get:JsonSerialize(using = OperatorOddityNumberSerializer::class)
+    val current: Double,
+)
 
 fun OperatorEntry.normalized(): OperatorEntry {
     val loadouts = if (discLoadouts.isNotEmpty()) {

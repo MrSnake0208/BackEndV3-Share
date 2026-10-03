@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.operator
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
@@ -10,6 +11,7 @@ import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.repository.entity.normalized
+import com.lhs.share.hub.repository.entity.oddityNumberNode
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -117,7 +119,10 @@ class OperatorV3ExportService(
                 if (stats.oddities.isNotEmpty()) {
                     val oddities = objectMapper.createObjectNode()
                     stats.oddities.forEach { (key, value) ->
-                        oddities.set<ObjectNode>(key, objectMapper.createObjectNode().put("current", value.current))
+                        oddities.set<ObjectNode>(
+                            key,
+                            objectMapper.createObjectNode().set<JsonNode>("current", oddityNumberNode(value.current)),
+                        )
                     }
                     combat.set<ObjectNode>("oddities", oddities)
                 }

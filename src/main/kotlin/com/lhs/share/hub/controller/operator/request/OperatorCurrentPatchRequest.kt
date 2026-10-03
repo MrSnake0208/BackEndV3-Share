@@ -73,7 +73,8 @@ data class OperatorObservedInputsPatchRequest(
 )
 
 data class OperatorOddityPatchRequest(
-    val current: Int,
+    @field:Schema(description = "按稳定键校验：attack/hp 必须为非负整数 JSON 数字；special 最多一位有效小数，0.50 等价于 0.5；沿用原单位和图鉴上限")
+    val current: Double,
     @field:Schema(description = "仅作来源诊断；服务端始终使用公共图鉴 rarity 对应的上限")
     val max: Int? = null,
 )

@@ -35,6 +35,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
@@ -90,6 +92,70 @@ class OperatorV3ImportServiceTest {
         verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
         verify(exactly = 0) { importRecordRepository.save(any()) }
         verify(exactly = 0) { scanReviewRepository.save(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["ready", "partial"])
+    fun `decimal oddities preview and commit preserve only reported keys`(status: String) {
+        val request = oddityDocument(status, "0.50")
+        val patch = slot<com.fasterxml.jackson.databind.node.ObjectNode>()
+        every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", capture(patch)) } returns
+            OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
+        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        val preview = service.previewBrowser("u1", request)
+        assertEquals(0, preview.rejected)
+        val values = patch.captured.path("combat_stats").path("oddities")
+        assertEquals(0.5, values.path("special").path("current").doubleValue())
+        assertEquals(status == "ready", values.has("attack"))
+        assertEquals(status == "ready", values.has("hp"))
+        val commit = service.commitBrowser("u1", request)
+        assertEquals(0, commit.rejected)
+        verify {
+            operatorService.patchCurrent(
+                "u1",
+                "acc1",
+                "如鸢",
+                "op1",
+                match {
+                    it.path("combat_stats").path("oddities").path("special").path("current").doubleValue() == 0.5
+                },
+            )
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["0.55", "-0.5", "\"0.5\"", "null", "true"])
+    fun `invalid decimal document uses combat field error and never writes`(value: String) {
+        val error = assertThrows(OperatorApiException::class.java) { service.commitBrowser("u1", oddityDocument("partial", value)) }
+        assertEquals("invalid_combat_stats", error.code)
+        assertEquals("combat_stats.oddities.special.current", error.fieldPath)
+        verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { importRecordRepository.save(any()) }
+    }
+
+    @Test
+    fun `attack hp decimals and ready missing keys are rejected`() {
+        for (key in listOf("attack", "hp")) {
+            val request = oddityDocument("ready", "0.5")
+            val values = request.path("document").path("records").get(0).path("entries").get(0)
+                .path("combat_stats").path("oddities") as com.fasterxml.jackson.databind.node.ObjectNode
+            values.set<com.fasterxml.jackson.databind.JsonNode>(key, mapper.readTree("""{"current":0.5}"""))
+            val error = assertThrows(OperatorApiException::class.java) { service.previewBrowser("u1", request) }
+            assertEquals("combat_stats.oddities.$key.current", error.fieldPath)
+        }
+        val request = oddityDocument("partial", "0.5")
+        val status = request.path("document").path("records").get(0).path("entries").get(0).path("section_status")
+            as com.fasterxml.jackson.databind.node.ObjectNode
+        status.put("oddities", "ready")
+        assertEquals("invalid_oddities", service.previewBrowser("u1", request).items.single().blockingErrors.single().code)
+    }
+
+    private fun oddityDocument(status: String, value: String) = wrappedDocument().also { request ->
+        val entry = request.path("document").path("records").get(0).path("entries").get(0) as com.fasterxml.jackson.databind.node.ObjectNode
+        val combat = entry.path("combat_stats") as com.fasterxml.jackson.databind.node.ObjectNode
+        val integers = if (status == "ready") "\"attack\":{\"current\":10},\"hp\":{\"current\":20}," else ""
+        combat.set<com.fasterxml.jackson.databind.JsonNode>("oddities", mapper.readTree("{$integers\"special\":{\"current\":$value}}"))
+        (entry.path("section_status") as com.fasterxml.jackson.databind.node.ObjectNode).put("oddities", status)
     }
 
     @Test
@@ -301,7 +367,7 @@ class OperatorV3ImportServiceTest {
                       "oddities":{
                         "attack":{"current":0},
                         "hp":{"current":0},
-                        "special":{"current":15}
+                        "special":{"current":0.5}
                       }
                     }
                     """.trimIndent(),
@@ -331,6 +397,46 @@ class OperatorV3ImportServiceTest {
         assertEquals(20245, saved.combatStats?.manualHp)
         assertEquals("manual", saved.combatStats?.displayMode?.attack)
         assertEquals("manual", saved.combatStats?.displayMode?.hp)
+        assertEquals(0.5, saved.combatStats?.oddities?.get("special")?.current)
+
+        val annotations = mockk<com.lhs.share.hub.repository.OperatorAnnotationRepository>()
+        val targets = mockk<com.lhs.share.hub.repository.OperatorGrowthTargetRepository>()
+        val favorites = mockk<com.lhs.share.hub.repository.InventoryAgentFavoriteRepository>()
+        every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "acc1") } returns emptyList()
+        every { targets.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "acc1") } returns emptyList()
+        every { favorites.findAllByUserIdAndAccountIdOrderByAgentIdAsc("u1", "acc1") } returns emptyList()
+        every { catalogService.currentCatalogVersion() } returns "v1"
+        val exporter =
+            OperatorV3ExportService(mapper, accountRepository, currentRepository, annotations, targets, favorites, catalogService)
+        val exported = exporter.export("u1", "acc1", null)
+        // Exercise the objective exchange path; annotations have their own independent suite.
+        (exported.path("records") as com.fasterxml.jackson.databind.node.ArrayNode).remove(1)
+        OperatorV3SchemaValidator(mapper).validate(exported)
+        val exportedValues = exported.path("records").get(0).path("entries").get(0).path("combat_stats").path("oddities")
+        assertEquals(0.5, exportedValues.path("special").path("current").doubleValue())
+        assertEquals(true, exportedValues.path("attack").path("current").isIntegralNumber)
+        assertEquals(true, exportedValues.path("hp").path("current").isIntegralNumber)
+        current = current.copy(
+            entries = mapOf(
+                "op1" to current.entries.getValue("op1").copy(
+                    combatStats = current.entries.getValue("op1").combatStats!!.copy(
+                        oddities = mapOf("special" to com.lhs.share.hub.repository.entity.OperatorOddityValue(0.0)),
+                    ),
+                ),
+            ),
+        )
+        every { importRecordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", any()) } returns null
+        assertEquals(0, realImportService.previewBrowser("u1", exported).rejected)
+        assertEquals(0, realImportService.commitBrowser("u1", exported).rejected)
+        assertEquals(0.5, current.entries.getValue("op1").combatStats?.oddities?.get("special")?.current)
+
+        val partial = oddityDocument("partial", "0.6")
+        (partial.path("document").path("records").get(0) as com.fasterxml.jackson.databind.node.ObjectNode).put("record_id", "scan:2")
+        assertEquals(0, realImportService.commitBrowser("u1", partial).rejected)
+        val merged = current.entries.getValue("op1").combatStats!!.oddities
+        assertEquals(0.6, merged.getValue("special").current)
+        assertEquals(0.0, merged.getValue("attack").current)
+        assertEquals(0.0, merged.getValue("hp").current)
     }
 
     @Test
@@ -376,6 +482,27 @@ class OperatorV3ImportServiceTest {
         val conflict = service.previewBrowser("u1", changed)
         assertEquals(1, conflict.rejected)
         assertEquals("idempotency_conflict", conflict.items.single().blockingErrors.single().code)
+    }
+
+    @Test
+    fun `decimal records retain existing idempotency semantics`() {
+        val request = oddityDocument("partial", "0.5")
+        val record = request.path("document").path("records").get(0)
+        every { importRecordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "scan:1") } returns
+            OperatorV3ImportRecord(
+                userId = "u1", accountId = "acc1", sourceAccountId = "local", recordId = "scan:1",
+                game = "如鸢", sourceKind = "scan", snapshotScope = "listed",
+                payload = mapper.writeValueAsString(record), revisions = mapOf("op1" to 4L),
+            )
+        assertEquals(1, service.previewBrowser("u1", request).unchanged)
+        val value = record.path("entries").get(0).path("combat_stats").path("oddities").path("special")
+            as com.fasterxml.jackson.databind.node.ObjectNode
+        value.put("current", 0.6)
+        val conflict = service.commitBrowser("u1", request)
+        assertEquals(1, conflict.rejected)
+        assertEquals("idempotency_conflict", conflict.items.single().blockingErrors.single().code)
+        verify(exactly = 0) { operatorService.patchCurrent(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { importRecordRepository.save(any()) }
     }
 
     @Test
