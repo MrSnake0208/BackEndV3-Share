@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.account
 
+import com.lhs.share.hub.repository.ActivityCalendarSubscriptionRepository
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
@@ -65,8 +66,11 @@ class SubAccountServiceTest {
     private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
     private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
     private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
+    private val calendarSubscriptions = mockk<ActivityCalendarSubscriptionRepository>()
     private val recruitmentRepository = mockk<RecruitmentRepository>()
     init {
+        every { calendarSubscriptions.exists(any(), any()) } returns false
+        every { calendarSubscriptions.deleteAccount(any(), any()) } just runs
         every { accountRepository.fenceRecruitmentWrite(any(), any(), any()) } returns true
         every { recruitmentRepository.hasSubstantiveData(any(), any()) } returns false
         every { recruitmentRepository.removeEmptyPreferences(any(), any()) } just runs
@@ -103,6 +107,7 @@ class SubAccountServiceTest {
         starStateRepository,
         starRecoveryRepository,
         recruitmentRepository,
+        calendarSubscriptions = calendarSubscriptions,
     )
 
     @Test
@@ -242,6 +247,7 @@ class SubAccountServiceTest {
         every { accountRepository.deleteById("mongo-id") } just runs
 
         service.delete("u1", "main")
+        verify(exactly = 1) { calendarSubscriptions.deleteAccount("u1", "main") }
 
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
@@ -330,5 +336,17 @@ class SubAccountServiceTest {
         every { accountRepository.fenceRecruitmentWrite("u1", "main", "代号鸢") } returns false
         assertEquals("account_changed", assertThrows(InventoryApiException::class.java) { service.delete("u1", "main") }.code)
         verify(exactly = 0) { recruitmentRepository.deleteAccount(any(), any()) }
+    }
+
+    @Test
+    fun `retained calendar subscription history locks game but allows renaming`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(userId = "u1", accountId = "main", name = "大号", game = "代号鸢")
+        every { calendarSubscriptions.exists("u1", "main") } returns true
+        every { accountRepository.updateDetails(any(), any(), any(), any(), any()) } just runs
+        val error = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "如鸢") }
+        assertEquals("activity_calendar_game_locked", error.code)
+        verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), any(), any()) }
+        assertEquals("新名", service.update("u1", "main", "新名", null).name)
     }
 }

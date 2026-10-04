@@ -143,3 +143,33 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 ```
 
 本轮已执行 `./gradlew compileKotlin compileTestKotlin --console=plain` 与 `git diff --check`，均通过。上面的回归测试尚未执行；未启动/重启后端服务。
+
+
+## 私人本期订阅（2026-10-05）
+
+所有 `/v1/activity-calendar/subscriptions` 接口要求JWT和任意管理能力（沿用管理员测试范围），通过认证用户校验本人子账号；共享Token、普通用户不能访问。活动必须与账号游戏一致；不存在或不属于本人的账号返回404。公共响应不包含私人进度。
+
+| 方法与路径（以下相对subscriptions） | 契约 |
+| --- | --- |
+| GET 根路径 | account_id必填；可选from/to/category；默认今天到90天后，范围差不超过100天。返回items、unavailable_items、subscribed_count |
+| GET /summary | account_id必填；完整集合中筛选已开始、未结束、未完成且7天内截止，再排序取3项；返回items、total_pending、subscribed_count |
+| GET /{eventId} | account_id必填；包括已取消历史；无记录404 subscription_not_found |
+| PUT /{eventId} | account_id、expected_version、subscribed；首次创建expected_version=null，后续使用读取的版本 |
+| PUT /{eventId}/progress | account_id、expected_version、completed、checklist；整体替换私人进度 |
+
+请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。非空清单要求completed=false，响应整体完成由所有项目计算；空清单使用请求completed（包括客户端删除最后一项时提交的草稿整体完成状态）。新项目默认未完成是UI默认值，接口允许用户主动勾选的新项目。
+
+存储集合 `activity_calendar_subscriptions`，唯一键(userId,accountId,eventId)，使用@Version和expected_version防覆盖；重复创建、旧版本和事务写冲突返回409。取消只切换subscribed，保留进度；列表只包含活跃订阅，详情可读取已取消记录用于恢复。来源只保存稳定eventId，手工活动与 `recruitment:<poolId>` 通过既有公开投影批量解析，读请求不写库，无活动资料复制或管理备注泄露。
+
+有效来源截止后可编辑已订阅进度及取消，不可新增/恢复；停用/消失/变更游戏后item=null，进入unavailable_items，不提醒、不修改清单，但可取消。公开投影增加可空的start_at/end_at，精确截止采用instant排他边界；日期模式按Asia/Shanghai日历日截止，保留原公开日期统计。
+
+订阅及进度写入复用Hub事务和子账号fence。账号删除在同一事务中清理全部订阅（包括取消记录），并发写入不能留下孤儿。存在订阅历史时更换游戏返回409 activity_calendar_game_locked，重命名不受影响。无历史账号保持原行为。
+
+风险L3。已新增Service/Contract/Mongo测试并更新Security、SubAccountService测试；仅完成源码及测试编译、15个受影响文件严格ktlint，尚未执行业务回归。最小后端回归（cwd BackEndV3-Share，JDK21，由用户/CI执行）：
+
+```bash
+./gradlew test --tests '*ActivityCalendarSubscriptionServiceTest' --tests '*ActivityCalendarSubscriptionControllerContractTest' --tests '*ActivityCalendarSecurityTest' --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*SubAccountServiceTest' --console=plain
+./gradlew integrationTest --tests '*ActivityCalendarSubscriptionMongoTest' --tests '*AccountIndexMongoTest' --console=plain
+```
+
+Mongo测试必须使用项目TestMongo管理的自有临时容器，不连接已有开发/生产实例。integrationTest验证唯一约束、CAS、故障回滚、取消历史清理及账号删除竞争；普通test通过不能替代它。先发布兼容后端再发布前端；本次未部署、未改变开放范围。
