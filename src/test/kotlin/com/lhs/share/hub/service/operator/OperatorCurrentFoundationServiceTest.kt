@@ -357,8 +357,85 @@ class OperatorCurrentFoundationServiceTest {
     }
 
     @Test
+    fun `editing a movie syncs base and siblings without copying ownership or observations`() {
+        spOf = "base"
+        every { catalogService.getOperator("base") } returns catalog("base", 4, null)
+        every { catalogService.getOperator("sibling") } returns catalog("sibling", 5, "base")
+        every { catalogService.spFormsOf("base") } returns listOf("op1", "sibling")
+        val before = baseEntry()
+        stored = stored.copy(entries = stored.entries + ("base" to before.copy(starLevel = 31)))
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level\":100"))
+        assertEquals(100, stored.entries.getValue("base").level)
+        assertEquals(31, stored.entries.getValue("base").starLevel)
+        assertEquals(before.revision + 1, stored.entries.getValue("base").revision)
+        assertEquals("stale", stored.entries.getValue("base").combatStats?.observedStatus)
+        assertEquals(100, stored.entries.getValue("sibling").level)
+        assertEquals(0, stored.entries.getValue("sibling").starLevel)
+        assertEquals(3, stored.entries.getValue("op1").starLevel)
+    }
+
+    @Test
+    fun `creating a movie through star-only patch inherits base growth and full import retains zero-star relations`() {
+        spOf = "base"
+        every { catalogService.getOperator("base") } returns catalog("base", 4, null)
+        every { catalogService.spFormsOf("base") } returns listOf("op1")
+        stored = stored.copy(entries = mapOf("base" to baseEntry().copy(level = 100, elite = 17)))
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"star_level\":2", revision = 0))
+        assertEquals(100, stored.entries.getValue("op1").level)
+        assertEquals(17, stored.entries.getValue("op1").elite)
+        assertEquals(2, stored.entries.getValue("op1").starLevel)
+        service.completeFullImport("u1", "acc1", "代号鸢", setOf("op1"), java.time.Instant.now())
+        assertEquals(0, stored.entries.getValue("base").starLevel)
+        assertEquals(100, stored.entries.getValue("base").level)
+    }
+
+    @Test
+    fun `new movie preserves owned generic base while materializing shared growth`() {
+        spOf = "base"
+        every { catalogService.getOperator("base") } returns catalog("base", 4, null)
+        every { catalogService.spFormsOf("base") } returns listOf("op1")
+        val genericBase = baseEntry().copy(level = 90, starLevel = 31)
+        val generic = stored.copy(game = "universal", entries = mapOf("base" to genericBase))
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "universal") } returns generic
+        stored = stored.copy(entries = emptyMap())
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"star_level\":2", revision = 0))
+        assertEquals(90, stored.entries.getValue("op1").level)
+        assertEquals(31, stored.entries.getValue("base").starLevel)
+        assertEquals(genericBase.discLoadouts, stored.entries.getValue("base").discLoadouts)
+        assertEquals(1, stored.entries.getValue("base").revision)
+        assertEquals(7, generic.entries.getValue("base").revision)
+    }
+
+    @Test
+    fun `deleting last v2 record replays purchased growth and zero-star relations`() {
+        val target = history("remove", "2026-08-21T00:00:00Z", "2026-08-21T00:00:01Z")
+        every { catalogService.spFormsOf("op1") } returns listOf("movie")
+        var replayed: OperatorCurrent? = stored
+        every { recordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "remove") } returns target
+        every { recordRepository.delete(target) } just runs
+        every { currentRepository.deleteByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } answers { replayed = null }
+        every { currentRepository.findByUserIdAndAccountIdAndGame("u1", "acc1", "代号鸢") } answers { replayed }
+        every { currentRepository.save(any()) } answers { firstArg<OperatorCurrent>().also { replayed = it } }
+        every { recordRepository.findByUserIdAndAccountIdAndGameOrderByEffectiveAtAsc("u1", "acc1", "代号鸢") } returns emptyList()
+        every { correctionRepository.findByUserIdAndAccountIdAndGameOrderByCreatedAtAsc("u1", "acc1", "代号鸢") } returns listOf(
+            OperatorCorrectionRecord(
+                userId = "u1", accountId = "acc1", game = "代号鸢", operatorId = "op1",
+                reason = "quick_upgrade", fields = setOf("level", "elite", "star_level"),
+                level = 91, elite = 16, starLevel = 3, createdAt = Instant.parse("2026-08-22T00:00:00Z"),
+            ),
+        )
+        service.deleteRecord("u1", "acc1", "remove")
+        assertEquals(91, replayed!!.entries.getValue("op1").level)
+        assertEquals(3, replayed!!.entries.getValue("op1").starLevel)
+        assertEquals(91, replayed!!.entries.getValue("movie").level)
+        assertEquals(0, replayed!!.entries.getValue("movie").starLevel)
+    }
+
+    @Test
     fun `SP star level is direct 0 through 5 and independent`() {
         spOf = "base"
+        every { catalogService.getOperator("base") } returns catalog("base", 4, null)
+        every { catalogService.spFormsOf("base") } returns listOf("op1")
         val invalid = patch(""""star_level":6""")
 
         val error = assertThrows(OperatorApiException::class.java) {

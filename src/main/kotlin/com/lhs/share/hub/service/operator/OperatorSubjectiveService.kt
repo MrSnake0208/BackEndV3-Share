@@ -103,7 +103,19 @@ class OperatorSubjectiveService(
         val current = targetRepository.findByUserIdAndAccountIdAndOperatorId(userId, accountId, operatorId)
         val level = value(request, "level", 0, 100, current?.targetLevel)
         val elite = value(request, "elite", 0, 17, current?.targetElite)
-        val star = value(request, "star_level", 0, 31, current?.targetStarLevel)
+        val star = value(
+            request,
+            "star_level",
+            0,
+            if (catalogService.getOperator(operatorId)?.spOf ==
+                null
+            ) {
+                31
+            } else {
+                5
+            },
+            current?.targetStarLevel,
+        )
         val heart = value(request, "heart_paper", 0, 1_000_000, current?.targetHeartPaper)
         if (current != null && listOf(level, elite, star, heart) ==
             listOf(current.targetLevel, current.targetElite, current.targetStarLevel, current.targetHeartPaper)
@@ -256,7 +268,7 @@ class OperatorSubjectiveService(
         val target = node as ObjectNode
         val level = value(target, "level", 0, 100, old?.targetLevel)
         val elite = value(target, "elite", 0, 17, old?.targetElite)
-        val star = value(target, "star_level", 0, 31, old?.targetStarLevel)
+        val star = value(target, "star_level", 0, if (catalogService.getOperator(operatorId)?.spOf == null) 31 else 5, old?.targetStarLevel)
         val heart = value(target, "heart_paper", 0, 1_000_000, old?.targetHeartPaper)
         if (old != null && listOf(level, elite, star, heart) ==
             listOf(old.targetLevel, old.targetElite, old.targetStarLevel, old.targetHeartPaper)

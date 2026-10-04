@@ -188,6 +188,16 @@ class OperatorService(
         val effective = parseTime(record.effectiveAt, "effective_at")
         val entryIds = mutableSetOf<String>()
         record.entries.forEach { entry -> validateV2Entry(record, entry, entryIds, warnings) }
+        record.entries.groupBy { OperatorSharedGrowth.baseId(it.id, catalogService) }.values.forEach { group ->
+            if (group.map { it.level to it.elite }.distinct().size > 1) {
+                throw apiError(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "shared_growth_conflict",
+                    "Related forms must have identical level and elite",
+                    record.recordId,
+                )
+            }
+        }
         return Validated(record, effective)
     }
 
@@ -342,40 +352,9 @@ class OperatorService(
     }
 
     private fun normalizeSpRelations(next: MutableMap<String, OperatorEntry>, writtenIds: Set<String>, now: Instant) {
-        next.keys.toList().forEach { id ->
-            val baseId = catalogService.getOperator(id)?.spOf
-            if (baseId == null) {
-                catalogService.spFormsOf(id).forEach { spId ->
-                    if (spId !in next) {
-                        val base = next.getValue(id)
-                        next[spId] = OperatorEntry(base.elite, 0, base.level, updatedAt = now)
-                    }
-                }
-            } else if (baseId !in next) {
-                val sp = next.getValue(id)
-                next[baseId] = OperatorEntry(sp.elite, 0, sp.level, updatedAt = now)
-            }
+        writtenIds.filter { it in next }.distinctBy { OperatorSharedGrowth.baseId(it, catalogService) }.forEach { id ->
+            OperatorSharedGrowth.synchronize(next, id, catalogService, now)
         }
-        next.keys.toList().forEach { id ->
-            val baseId = catalogService.getOperator(id)?.spOf ?: return@forEach
-            if (baseId !in next) return@forEach
-            val base = next.getValue(baseId)
-            val sp = next.getValue(id)
-            when {
-                id in writtenIds && baseId !in writtenIds -> next[baseId] = syncLevelElite(base, sp.level, sp.elite, now)
-                baseId in writtenIds && id !in writtenIds -> next[id] = syncLevelElite(sp, base.level, base.elite, now)
-            }
-        }
-    }
-
-    private fun syncLevelElite(entry: OperatorEntry, level: Int, elite: Int, now: Instant): OperatorEntry {
-        if (entry.level == level && entry.elite == elite) return entry
-        return entry.copy(
-            level = level,
-            elite = elite,
-            revision = entry.revision + 1,
-            updatedAt = now,
-        ).markObservationStale()
     }
 
     fun current(userId: String, accountId: String, game: String?): List<OperatorCurrentResponse> {
@@ -442,9 +421,9 @@ class OperatorService(
     }
 
     fun patchCurrent(userId: String, accountId: String, game: String, operatorId: String, request: ObjectNode): OperatorCurrentEntryDto {
-        val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
         var saved: OperatorCurrent? = null
         transactionTemplate.executeWithoutResult {
+            val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
             if (prepared.materializingEntry) {
                 currentRepository.save(
                     prepared.sourceCurrent.copy(
@@ -485,9 +464,11 @@ class OperatorService(
 
     fun completeFullImport(userId: String, accountId: String, game: String, operatorIds: Set<String>, effectiveAt: Instant) {
         val current = currentRepository.findByUserIdAndAccountIdAndGame(userId, accountId, game) ?: return
+        val retained = current.entries.filterKeys { it in operatorIds }.toMutableMap()
+        normalizeSpRelations(retained, operatorIds, Instant.now())
         currentRepository.save(
             current.copy(
-                entries = current.entries.filterKeys { it in operatorIds },
+                entries = retained,
                 fullBaselineAt = effectiveAt,
                 updatedAt = Instant.now(),
             ),
@@ -567,10 +548,13 @@ class OperatorService(
             }
         }
         // A generic entry is only a read fallback. The first edit materializes it in the requested game document.
+        val shared = OperatorSharedGrowth.members(operatorId, catalogService).firstNotNullOfOrNull { id ->
+            specificCurrent?.entries?.get(id) ?: genericCurrent?.entries?.get(id)
+        }
         val existing = specificEntry ?: genericEntry ?: OperatorEntry(
-            elite = 0,
+            elite = shared?.elite ?: 0,
             starLevel = 0,
-            level = 0,
+            level = shared?.level ?: 0,
         )
         if (existing.revision != expectedRevision) revisionConflict(operatorId)
 
@@ -625,16 +609,15 @@ class OperatorService(
         }
         merged = merged.copy(revision = expectedRevision + 1, updatedAt = now).normalized()
 
-        val updates = mutableMapOf(operatorId to merged)
-        if ("level" in fields || "elite" in fields) {
-            val relatedIds = if (catalog.spOf != null) listOf(catalog.spOf) else catalogService.spFormsOf(operatorId)
-            relatedIds.filterNotNull().forEach { relatedId ->
-                sourceCurrent.entries[relatedId]?.normalized()?.let { related ->
-                    val synced = syncLevelElite(related, merged.level, merged.elite, now)
-                    if (synced != related) updates[relatedId] = synced
-                }
-            }
+        val next = sourceCurrent.entries.toMutableMap().also { it[operatorId] = merged }
+        val inheritedIds = OperatorSharedGrowth.members(operatorId, catalogService).filter {
+            it !in next &&
+                genericCurrent?.entries?.containsKey(it) == true
         }
+        inheritedIds.forEach { id -> next[id] = genericCurrent!!.entries.getValue(id).normalized().copy(revision = 0) }
+        OperatorSharedGrowth.synchronize(next, operatorId, catalogService, now)
+        inheritedIds.forEach { id -> next[id] = next.getValue(id).copy(revision = 1, updatedAt = now) }
+        val updates = next.filter { (id, value) -> id == operatorId || value != sourceCurrent.entries[id] }
 
         return PreparedCurrentPatch(
             sourceCurrent = sourceCurrent,
@@ -1126,12 +1109,20 @@ class OperatorService(
             correction.userId,
             correction.accountId,
             correction.game,
-        ) ?: return
+        ) ?: OperatorCurrent(
+            id = key(correction.userId, correction.accountId, correction.game),
+            userId = correction.userId,
+            accountId = correction.accountId,
+            game = correction.game,
+        )
         if (correction.reason == "catalog_removed") {
             currentRepository.save(current.copy(entries = current.entries - correction.operatorId, updatedAt = correction.createdAt))
             return
         }
-        val existing = current.entries[correction.operatorId]?.normalized() ?: return
+        if (catalogService.getOperator(correction.operatorId) == null) return
+        val shared = OperatorSharedGrowth.members(correction.operatorId, catalogService).firstNotNullOfOrNull { current.entries[it] }
+        val existing = current.entries[correction.operatorId]?.normalized()
+            ?: OperatorEntry(shared?.elite ?: 0, 0, shared?.level ?: 0)
         var merged = existing
         if ("level" in correction.fields) merged = merged.copy(level = checkNotNull(correction.level))
         if ("elite" in correction.fields) merged = merged.copy(elite = checkNotNull(correction.elite))

@@ -48,6 +48,11 @@ class RecruitmentCatalogTest {
         every { operators.count() } returns 0L
     }
 
+    @Test
+    fun `movie seed is not an eligible ordinary top-rarity recruit`() {
+        assertThrows(RecruitmentApiException::class.java) { catalog.operator("如鸢", "char_084_chendengsp") }
+    }
+
     @Test fun `catalog reads persisted pools only scopes by game and keeps pool owned identities`() {
         saved["yuan-pool"] = RecruitmentCatalogPool(
             "yuan-pool",

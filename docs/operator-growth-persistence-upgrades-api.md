@@ -1,6 +1,6 @@
 # 当前养成主观数据与快捷提升 API
 
-实现版本：2026-08-23。所有接口均使用浏览器 JWT，`userId` 只从 JWT 获取；请求中的 `account_id` 必须属于当前用户。JSON 由全局 Jackson `SNAKE_CASE` 策略序列化。
+实现版本：2026-10-05（SP 一致性修复）。所有接口均使用浏览器 JWT，`userId` 只从 JWT 获取；请求中的 `account_id` 必须属于当前用户。JSON 由全局 Jackson `SNAKE_CASE` 策略序列化。
 
 ## 数据集合与索引
 
@@ -73,7 +73,7 @@ Content-Type: application/json
 }
 ```
 
-缺失目标字段保留旧值。范围为 `level 0..100`、`elite 0..17`、`star_level 0..31`、`heart_paper 0..1000000`。目标只表示计划，不改变 current，也不要求 favorite。
+缺失目标字段保留旧值。范围为 `level 0..100`、`elite 0..17`、`star_level 普通 0..31 / SP 0..5`、`heart_paper 0..1000000`。目标只表示计划，不改变 current，也不要求 favorite。
 
 以下两种调用都明确删除整组目标：
 
@@ -155,7 +155,7 @@ Content-Type: application/json
 
 - `level`：经验、突破材料和按从属选择的 70/80 级材料；服务端从六韬兵书/兵书全卷/兵书残卷中选择最小溢出且稳定的组合；
 - `elite`：按密探属性分为风火、水地、阴阳/其他三组；
-- `huaji`：扣该密探自己的 agent 心纸，普通密探觉醒同时扣装金玻璃；SP 按公共目录限制目标为 `0..5` 并复用前端规则的对应阶段消耗；
+- `huaji`：扣该密探自己的 agent 心纸，普通密探觉醒同时扣装金玻璃；SP 专属消耗尚未接入，preview/execute 均返回 422 `sp_huaji_upgrade_not_supported`，不得使用普通心纸表；
 - `money_required` 仅展示五铢钱估算，绝不进入 requirements、库存校验或扣减。
 
 ## 原子执行
@@ -201,7 +201,7 @@ Content-Type: application/json
 }
 ```
 
-服务端在一个 Hub Mongo transaction 内重新计算材料，校验两类 revision，扣 item/agent，CAS 更新 operator current，写 consumption records、升级审计和 inventory revision。相同 key+相同请求返回首次结果；相同 key+不同请求返回冲突。`PATCH /v1/operator/current/{operatorId}` 的 `reason=manual_correction` 没有接入此服务，继续不扣库存。
+服务端在一个 Hub Mongo transaction 内重新计算材料，校验两类 revision，扣 item/agent，CAS 更新整组 operator current，写 consumption records、升级审计、可重放成长校正和 inventory revision。相同 key+相同请求返回首次结果；相同 key+不同请求返回冲突。`PATCH /v1/operator/current/{operatorId}` 的 `reason=manual_correction` 没有接入此服务，继续不扣库存。
 
 成功提交后只发布一个 `operator-upgrade` 子账号事件，字段为 `account_id/transaction_id/operator_id/dimension/from/to/consumed/operator_revision/inventory_revision/occurred_at`。item 与 agent 两条内部流水共享 `transaction_id`，前端应合并成一次提示。
 
@@ -220,6 +220,8 @@ Content-Type: application/json
 | 409 | `consumption_record_delete_forbidden` | 禁止单独删除升级消耗流水 |
 | 422 | `invalid_growth_state` | growth_state 枚举非法 |
 | 422 | `invalid_growth_target` | 目标值或目标形状非法 |
+| 422 | `sp_huaji_upgrade_not_supported` | SP 化极专属材料规则尚未接入，拒绝扣库 |
+| 422 | `shared_growth_conflict` | 关联形态等级/修为不一致，需手动校正后再提升 |
 | 422 | `invalid_upgrade_target` | 维度、目标、game 或阶段约束非法 |
 | 422 | `invalid_star_level` | 化极目标超过该密探类型范围 |
 | 422 | `preview_expired` | token 过期或与 execute 请求不匹配 |
@@ -231,7 +233,7 @@ Content-Type: application/json
 - 用 GET annotations/targets 的结果覆盖本地缓存；响应中没有的密探采用默认值。`yuanhub:operator-targets:{accountId}` 只可作为一次性迁移来源，成功 PUT 后不再作为真相源。
 - favorite 仍只读写 `/v1/inventory/agent-favorites`；不要通过 annotation CRUD 修改 favorite。
 - 快捷按钮先 preview，展示 `requirements` 和 `blocking_reasons`；execute 必须原样携带两个 revision 与 token，并设置 UUID Idempotency-Key。
-- 执行成功可直接用响应里的 operator、consumed 和 inventory_revision 刷新当前行，再刷新账号库存；收到 `operator-upgrade` SSE 时按 `transaction_id` 去重/合并。
+- 执行成功可先用响应刷新当前行，再重新获取当前养成整组与账号库存，以更新关联形态；收到 `operator-upgrade` SSE 时按 `transaction_id` 去重/合并。
 - current 超过旧 target 不是错误；显示层可自行把建议目标上调。
 
 ## 已弃置（2026-10-03）
@@ -239,3 +241,13 @@ Content-Type: application/json
 新增 discarded，语义为退出日常养成、保留练度，可恢复到 active/graduated/skip。复用 annotation 的用户/子账号键和 revision；仅修改状态时备注、目标、favorite、清单及客观数据保持不变，skip 历史值不迁移。CAS 冲突继续为 annotation_revision_conflict，非法非空值继续为 invalid_growth_state，缺失字段保留原值（未有标注才默认 active）。
 
 v3 两份 schema 同步接受第四值，listed/full 导入导出和分享/OpenAPI 透传。普通客观导入和 scan 不修改主观状态。旧客户端校验器会拒绝新值；先升级读取界面和 MaaYuan 再开放写入。已有数据后后端回滚须保留四值读写兼容，不重解释为其它值。
+
+## SP 共享成长（2026-10-05）
+
+`spOf` 指向普通本体。整个关联组镜像同步 `level/elite`，星级、命盘、奇闻与观测面板仍属于各形态；是否拥有只由各自 `star_level > 0` 决定。缺失关联形态建立零星占位，不自动解锁。关联成长变化增加该条目 revision，并将已有有效观测标记 stale。
+
+手动 PATCH 与快捷提升都在事务中同步本体及其全部 SP；CAS 校验被修改关联项的旧 revision。首次从旧通用游戏档案物化时保留关联形态的独立字段。SP 等级/修为按**本体养成路径**计算材料，与培养计划口径一致；这不推断 SP 自身专属材料表。已有组内成长冲突会阻止快捷扣库，用户确认正确值后可手动 PATCH 统一。
+
+每次成功快捷提升写入 `reason=quick_upgrade` 的成长校正快照，重放时恢复成长并同步关联组，不再次扣库存；删除最后一条 v2 导入记录也不会丢失此后已扣库提升。SP 化极 execute 会重新检查目录，旧 preview token 不能绕过限制。成功幂等重试仍返回原交易结果，不再次执行。
+
+本次不迁移数据库，不自动修正历史冲突导入或回填旧升级事务。已有冲突须先核对来源和正确练度，再另行修复；新写入约束不能替代存量审计。

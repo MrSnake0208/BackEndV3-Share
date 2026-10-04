@@ -113,3 +113,7 @@ PLANNER_TEST_MONGO_URI='mongodb://127.0.0.1:27017/?replicaSet=rs0&serverSelectio
 ```
 
 集成测试仅创建并删除自己的随机 `planner_test_*` 数据库，不读取或修改应用数据库。
+
+### SP 星级目标（2026-10-05）
+
+规划 workspace 的星级目标按目录识别：普通密探使用 0..31 节点编码，SP 使用 0..5 直接星级；超出对应范围拒绝保存。默认养成目标及 v3 annotation targets 使用相同约束。各形态保留独立目标，客户端在单个清单中按本体关联组合并等级/修为的最大目标，材料只计一次。

@@ -58,6 +58,7 @@ class OperatorUpgradeServiceTest {
             override fun rollback(status: TransactionStatus) = Unit
         },
     )
+    private val corrections = mockk<com.lhs.share.hub.repository.OperatorCorrectionRecordRepository>(relaxed = true)
     private val service = OperatorUpgradeService(
         accounts,
         catalog,
@@ -68,10 +69,12 @@ class OperatorUpgradeServiceTest {
         upgrades,
         events,
         transactionTemplate,
+        corrections,
     )
 
     @BeforeEach
     fun setUp() {
+        every { catalog.spFormsOf(any()) } returns emptyList()
         operatorCurrent = current(starLevel = 21)
         inventoryCurrent.clear()
         inventoryCurrent["item"] = stock("item", mapOf("zhuangjinboli" to 1))
@@ -122,6 +125,50 @@ class OperatorUpgradeServiceTest {
             firstArg<OperatorUpgradeTransaction>().also { storedUpgrades[it.idempotencyKey] = it }
         }
         every { events.publish(any(), any(), any(), any(), any()) } just runs
+    }
+
+    @Test
+    fun `SP huaji preview and stale-token execute reject without inventory or growth writes`() {
+        operatorCurrent = current(starLevel = 1)
+        val preview = service.preview("u1", request(target = 5))
+        val original = catalog.getOperator("op1")!!
+        every { catalog.getOperator("op1") } returns original.copy(spOf = "base")
+        val error = assertThrows(OperatorApiException::class.java) { service.preview("u1", request(target = 5)) }
+        assertEquals("sp_huaji_upgrade_not_supported", error.code)
+        val executeError = assertThrows(OperatorApiException::class.java) {
+            service.execute("u1", "sp-denied", executeRequest(preview.previewToken, 5))
+        }
+        assertEquals("sp_huaji_upgrade_not_supported", executeError.code)
+        assertEquals(1, operatorCurrent.entries.getValue("op1").starLevel)
+        assertEquals(42, inventoryRevision)
+        assertTrue(storedRecords.isEmpty())
+        assertTrue(storedUpgrades.isEmpty())
+        verify(exactly = 0) { inventories.save(any()) }
+        verify(exactly = 0) { operators.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { corrections.save(any()) }
+        verify(exactly = 0) { events.publish(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `level upgrade synchronizes a missing movie without granting ownership and records replay growth`() {
+        operatorCurrent = operatorCurrent.copy(entries = mapOf("op1" to operatorCurrent.entries.getValue("op1").copy(level = 90)))
+        val before = operatorCurrent.entries.getValue("op1")
+        val movie = catalog.getOperator("op1")!!.copy(operatorId = "movie", spOf = "op1")
+        every { catalog.getOperator("movie") } returns movie
+        every { catalog.spFormsOf("op1") } returns listOf("movie")
+        inventoryCurrent["item"] = stock("item", mapOf("liutaobingshu" to 10000))
+        val target = before.level + 1
+        val request = request(target).copy(dimension = "level", skipBreakthroughMaterials = true)
+        val preview = service.preview("u1", request)
+        service.execute(
+            "u1",
+            "shared-level",
+            executeRequest(preview.previewToken, target).copy(dimension = "level", skipBreakthroughMaterials = true),
+        )
+        assertEquals(target, operatorCurrent.entries.getValue("movie").level)
+        assertEquals(0, operatorCurrent.entries.getValue("movie").starLevel)
+        assertEquals(target, operatorCurrent.entries.getValue("op1").level)
+        verify(exactly = 1) { corrections.save(match { it.reason == "quick_upgrade" && it.level == target }) }
     }
 
     @Test

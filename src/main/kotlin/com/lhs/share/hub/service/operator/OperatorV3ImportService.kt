@@ -80,14 +80,14 @@ class OperatorV3ImportService(
             val targetAccountId = command.mapping.getValue(text(record, "account_id"))
             val target = requireOwnedAccount(userId, targetAccountId)
             val game = targetGame(record, target)
-            val priorAudit = importRecordRepository.findByUserIdAndAccountIdAndRecordId(
-                userId,
-                targetAccountId,
-                text(record, "record_id"),
-            )
-            val prepared = prepareRecord(userId, command, record)
             val written = mutableListOf<OperatorV3ImportItem>()
             inTransaction {
+                val priorAudit = importRecordRepository.findByUserIdAndAccountIdAndRecordId(
+                    userId,
+                    targetAccountId,
+                    text(record, "record_id"),
+                )
+                val prepared = prepareRecord(userId, command, record)
                 if (text(record, "record_type") == ANNOTATION_RECORD) {
                     if (prepared.none { it.response.status == REJECTED } && priorAudit == null) {
                         if (text(record, "snapshot_scope") == "full") requireNotNull(subjectiveService).resetFull(userId, targetAccountId)
@@ -120,6 +120,11 @@ class OperatorV3ImportService(
                         val result = if (item.patch == null || item.response.status == REJECTED || item.response.status == UNCHANGED) {
                             item.response
                         } else {
+                            // Prepare and refresh inside this transaction: earlier forms may have synced this revision.
+                            item.patch.put(
+                                "expected_revision",
+                                currentRevision(userId, item.targetAccountId, item.targetGame, item.operatorId),
+                            )
                             val current = operatorService.patchCurrent(
                                 userId,
                                 item.targetAccountId,
@@ -146,6 +151,22 @@ class OperatorV3ImportService(
                             entries(record).map { text(it, "operator_id") }.toSet(),
                             OffsetDateTime.parse(text(record, "effective_at")).toInstant(),
                         )
+                    }
+                }
+                if (text(record, "record_type") != ANNOTATION_RECORD && priorAudit == null) {
+                    val finalEntries = operatorService.current(userId, targetAccountId, game).singleOrNull()?.entries.orEmpty()
+                    written.replaceAll { item ->
+                        if (item.status == REJECTED) {
+                            item
+                        } else {
+                            val finalEntry = finalEntries[item.operatorId]
+                            val revision = finalEntry?.revision ?: 0L
+                            item.copy(
+                                revision = revision,
+                                targetRevision = revision,
+                                observedStatus = finalEntry?.combatStats?.observedStatus,
+                            )
+                        }
                     }
                 }
                 val shouldAudit = priorAudit == null &&
@@ -309,7 +330,37 @@ class OperatorV3ImportService(
                     .map { operatorId -> prepareAnnotationReset(userId, record, target, targetGame, operatorId) }
             }
         } else {
-            entries(record).map { entry -> prepareEntry(userId, command, record, entry, target, targetGame) }
+            val prepared = entries(record).map { entry -> prepareEntry(userId, command, record, entry, target, targetGame) }
+            val source = entries(record).associateBy { text(it, "operator_id") }
+            val invalidGroups = prepared.groupBy { OperatorSharedGrowth.baseId(it.operatorId, catalogService) }
+                .filterValues { group ->
+                    val patches = group.map { item ->
+                        val entry = source.getValue(item.operatorId)
+                        buildPatch(entry, record, command).also { patch ->
+                            val matchReview = entry.path("match").path("status").asText("ready") != "ready"
+                            if ((hasReview(entry) || matchReview) && !command.confirmReview) removeReviewSections(patch, entry, matchReview)
+                        }
+                    }
+                    group.any { it.response.status == REJECTED } ||
+                        listOf("level", "elite").any { field -> patches.mapNotNull { it.get(field) }.distinct().size > 1 }
+                }.keys
+            prepared.map { item ->
+                if (OperatorSharedGrowth.baseId(item.operatorId, catalogService) !in invalidGroups ||
+                    item.response.status == REJECTED
+                ) {
+                    item
+                } else {
+                    item.copy(
+                        patch = null,
+                        response = item.response.copy(
+                            status = REJECTED,
+                            blockingErrors =
+                            item.response.blockingErrors +
+                                issue("shared_growth_conflict", "Related forms have conflicting or invalid shared growth"),
+                        ),
+                    )
+                }
+            }
         }
     }
 
