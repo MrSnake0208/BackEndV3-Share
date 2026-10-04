@@ -143,7 +143,8 @@ class RecruitmentCatalog(
             )
         }
         if (value == null) throw recruitmentInvalid("图鉴中没有该密探，请刷新图鉴或联系管理员配置占位UP")
-        if (value.rarity != 5 || game !in games) throw recruitmentInvalid("请选择当前游戏可用的绝密密探")
+        val movie = persisted?.spOf != null || seed?.get("spOf")?.isTextual == true
+        if (movie || value.rarity != 5 || game !in games) throw recruitmentInvalid("请选择当前游戏可用的绝密密探")
         return value
     }
 

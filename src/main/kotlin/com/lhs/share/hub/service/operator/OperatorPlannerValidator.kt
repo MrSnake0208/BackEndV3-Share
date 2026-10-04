@@ -56,7 +56,7 @@ class OperatorPlannerValidator(
                 fields(target, setOf("level", "elite", "star_level"))
                 val level = integer(target.path("level"), "level", 0, 100)
                 val elite = integer(target.path("elite"), "elite", 0, 17)
-                integer(target.path("star_level"), "star_level", 0, 31)
+                integer(target.path("star_level"), "star_level", 0, if (catalog.getOperator(operatorId)?.spOf == null) 31 else 5)
                 val maxElite = OperatorGrowthRules.maxEliteForLevel(level.toInt())
                 if (elite > maxElite) invalid("Elite target exceeds the level limit $maxElite", "plans.targets.elite")
             }

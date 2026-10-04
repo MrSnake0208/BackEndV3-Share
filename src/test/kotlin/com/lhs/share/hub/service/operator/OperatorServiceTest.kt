@@ -214,6 +214,19 @@ class OperatorServiceTest {
     }
 
     @Test
+    fun `full and listed snapshots reject conflicting shared growth without writes`() {
+        setUpSpRelation(baseId = "op2", spId = "op1")
+        for (scope in listOf("full", "listed")) {
+            val request =
+                importRequestWithRecords(listOf(record(listOf(entry("op2", 100, 17), entry("op1", 90, 15))).copy(snapshotScope = scope)))
+            val error = assertThrows(OperatorApiException::class.java) { service.import("u1", request) }
+            assertEquals("shared_growth_conflict", error.code)
+        }
+        io.mockk.verify(exactly = 0) { currentRepository.save(any()) }
+        io.mockk.verify(exactly = 0) { recordRepository.save(any()) }
+    }
+
+    @Test
     fun `SP submitted alone materializes its base with synced level and elite`() {
         setUpSpRelation(baseId = "op2", spId = "op1")
         var saved: OperatorCurrent? = null

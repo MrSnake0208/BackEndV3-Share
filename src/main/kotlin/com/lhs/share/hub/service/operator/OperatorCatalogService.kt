@@ -148,6 +148,9 @@ class OperatorCatalogService(
         ensureSeeded()
         val existing = repository.findByOperatorId(operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found")
+        if (spFormsOf(operatorId).isNotEmpty()) {
+            throw OperatorApiException(HttpStatus.CONFLICT, "operator_has_forms", "Remove movie-form relations before deleting their base")
+        }
         repository.delete(existing)
         // 级联清理头像文件：失败仅遗留孤儿文件，不阻断目录删除。
         avatarStorage.delete(operatorId)
@@ -180,12 +183,32 @@ class OperatorCatalogService(
         if (stoneTypes.toSet().size != stoneTypes.size) {
             throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_star_stone", "star stone type must be unique")
         }
+        if (spFormsOf(request.id).any { id -> getOperator(id)?.games?.any { it !in request.games } == true }) {
+            throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "invalid_sp_relation", "Base games must cover its movie forms")
+        }
         request.spOf?.let { base ->
             if (base == request.id) {
                 throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "spOf cannot reference itself")
             }
-            if (getOperator(base) == null) {
-                throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "unknown_operator_id", "spOf base operator not found: " + base)
+            val target = getOperator(base)
+                ?: throw OperatorApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "unknown_operator_id",
+                    "spOf base operator not found: " + base,
+                )
+            if (target.spOf != null || spFormsOf(request.id).isNotEmpty()) {
+                throw OperatorApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_sp_relation",
+                    "spOf must point directly to a base operator",
+                )
+            }
+            if (!target.games.containsAll(request.games)) {
+                throw OperatorApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_sp_relation",
+                    "Movie-form games must be available on the base",
+                )
             }
         }
     }

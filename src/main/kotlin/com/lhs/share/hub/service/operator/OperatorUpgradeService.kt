@@ -10,11 +10,13 @@ import com.lhs.share.hub.controller.operator.response.OperatorUpgradeRequirement
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryRecordRepository
 import com.lhs.share.hub.repository.InventoryRevisionRepository
+import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.InventoryRecord
 import com.lhs.share.hub.repository.entity.InventoryRevision
+import com.lhs.share.hub.repository.entity.OperatorCorrectionRecord
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.OperatorUpgradeTransaction
 import com.lhs.share.hub.repository.entity.ProducerInfo
@@ -44,6 +46,7 @@ class OperatorUpgradeService(
     private val transactionRepository: OperatorUpgradeTransactionRepository,
     private val accountEventService: AccountEventService,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
+    private val correctionRepository: OperatorCorrectionRecordRepository,
 ) {
     private val previews = ConcurrentHashMap<String, PreviewBinding>()
 
@@ -87,16 +90,36 @@ class OperatorUpgradeService(
                 val now = Instant.now()
                 val consumed = consume(userId, request.accountId, calculation.requirements)
                 val nextEntry = upgradedEntry(calculation.entry, request.dimension, request.target, now)
+                val current =
+                    checkNotNull(operatorCurrentRepository.findByUserIdAndAccountIdAndGame(userId, request.accountId, request.game))
+                val next = current.entries.toMutableMap().also { it[request.operatorId] = nextEntry }
+                OperatorSharedGrowth.synchronize(next, request.operatorId, catalogService, now)
+                val updates = next.filter { (id, value) -> id == request.operatorId || value != current.entries[id] }
                 val savedCurrent = operatorCurrentRepository.compareAndSetEntries(
                     userId,
                     request.accountId,
                     request.game,
                     request.operatorId,
                     request.expectedOperatorRevision,
-                    mapOf(request.operatorId to nextEntry),
+                    updates,
                     now,
                 ) ?: staleOperator()
                 val savedEntry = savedCurrent.entries.getValue(request.operatorId)
+                correctionRepository.save(
+                    OperatorCorrectionRecord(
+                        id = transactionId,
+                        userId = userId,
+                        accountId = request.accountId,
+                        game = request.game,
+                        operatorId = request.operatorId,
+                        reason = "quick_upgrade",
+                        fields = setOf("level", "elite", "star_level"),
+                        level = savedEntry.level,
+                        elite = savedEntry.elite,
+                        starLevel = savedEntry.starLevel,
+                        createdAt = now,
+                    ),
+                )
                 writeConsumptionRecords(userId, request.accountId, transactionId, consumed, now)
                 val nextInventoryRevision = request.expectedInventoryRevision + 1
                 inventoryRevisionRepository.save(
@@ -166,6 +189,14 @@ class OperatorUpgradeService(
         if (request.game != account.game) invalid("invalid_upgrade_target", "game must match the subaccount game")
         val catalog = catalogService.getOperator(request.operatorId)
             ?: throw OperatorApiException(HttpStatus.NOT_FOUND, "operator_not_found", "Operator not found", operatorId = request.operatorId)
+        if (catalog.spOf != null && request.dimension == HUAJI) {
+            invalid("sp_huaji_upgrade_not_supported", "SP huaji materials are not supported")
+        }
+        val growthCatalog = if (catalog.spOf == null) {
+            catalog
+        } else {
+            catalogService.getOperator(catalog.spOf) ?: invalid("invalid_sp_relation", "Base operator is missing")
+        }
         if (request.game !in catalog.games) invalid("invalid_upgrade_target", "Operator is not available in this game")
         val current = operatorCurrentRepository.findByUserIdAndAccountIdAndGame(userId, request.accountId, request.game)
         val entry = current?.entries?.get(request.operatorId)?.normalized()
@@ -176,6 +207,11 @@ class OperatorUpgradeService(
                 operatorId = request.operatorId,
             )
         if (enforceExpectedOperatorRevision && entry.revision != request.expectedOperatorRevision) staleOperator()
+        if (OperatorSharedGrowth.members(request.operatorId, catalogService).mapNotNull { current.entries[it] }
+                .any { it.level != entry.level || it.elite != entry.elite }
+        ) {
+            invalid("shared_growth_conflict", "Correct inconsistent shared growth before consuming inventory")
+        }
         val from = when (request.dimension) {
             LEVEL -> entry.level
             ELITE -> entry.elite
@@ -196,8 +232,8 @@ class OperatorUpgradeService(
             if (request.target > allowed) invalid("invalid_upgrade_target", "elite target exceeds the current level limit")
         }
         val baseCost = when (request.dimension) {
-            LEVEL -> OperatorRequirementRules.level(from, request.target, catalog, request.skipBreakthroughMaterials)
-            ELITE -> OperatorRequirementRules.elite(from, request.target, catalog)
+            LEVEL -> OperatorRequirementRules.level(from, request.target, growthCatalog, request.skipBreakthroughMaterials)
+            ELITE -> OperatorRequirementRules.elite(from, request.target, growthCatalog)
             else -> OperatorRequirementRules.huaji(from, request.target)
         }
         val itemCurrent = inventoryCurrentRepository.findByUserIdAndAccountIdAndEntityType(userId, request.accountId, ITEM)

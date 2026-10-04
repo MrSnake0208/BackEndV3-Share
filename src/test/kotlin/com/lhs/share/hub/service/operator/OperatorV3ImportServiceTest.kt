@@ -3,6 +3,7 @@ package com.lhs.share.hub.service.operator
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
+import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorScanImportEvent
 import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
@@ -101,7 +102,7 @@ class OperatorV3ImportServiceTest {
         val patch = slot<com.fasterxml.jackson.databind.node.ObjectNode>()
         every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", capture(patch)) } returns
             OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
-        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        stubCommittedEntry()
         val preview = service.previewBrowser("u1", request)
         assertEquals(0, preview.rejected)
         val values = patch.captured.path("combat_stats").path("oddities")
@@ -204,7 +205,7 @@ class OperatorV3ImportServiceTest {
         }
         every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
             OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
-        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        stubCommittedEntry()
 
         val result = service.commitScan("u1", "acc1", request)
 
@@ -229,7 +230,7 @@ class OperatorV3ImportServiceTest {
     fun `commit creates revision one and writes an idempotency audit`() {
         every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
             OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
-        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        stubCommittedEntry()
         val result = service.commitBrowser("u1", wrappedDocument())
 
         assertEquals(1, result.accepted)
@@ -245,7 +246,7 @@ class OperatorV3ImportServiceTest {
     fun `OpenAPI commit publishes one account scoped event after each entry`() {
         every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
             OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
-        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        stubCommittedEntry()
 
         service.commitScan("u1", "acc1", document())
 
@@ -545,7 +546,7 @@ class OperatorV3ImportServiceTest {
     fun `full commit completes baseline while listed commit never removes outside entries`() {
         every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) } returns
             OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), stale = false)
-        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } returns entry(level = 90, revision = 1)
+        stubCommittedEntry()
 
         service.commitBrowser("u1", wrappedDocument())
         verify(exactly = 0) { operatorService.completeFullImport(any(), any(), any(), any(), any()) }
@@ -678,6 +679,22 @@ class OperatorV3ImportServiceTest {
         starStones = emptyList(),
         catalogVersion = "v1",
     )
+
+    private fun stubCommittedEntry() {
+        every { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", any()) } answers {
+            val state = OperatorCurrent(
+                "state",
+                "u1",
+                "acc1",
+                "如鸢",
+                entries = mapOf(
+                    "op1" to OperatorEntry(elite = 0, starLevel = 0, level = 90, revision = 1),
+                ),
+            )
+            every { operatorService.current("u1", "acc1", "如鸢") } returns listOf(OperatorCurrentResponse.of(state))
+            entry(level = 90, revision = 1)
+        }
+    }
 
     private fun entry(level: Int, revision: Long): OperatorCurrentEntryDto = OperatorCurrentEntryDto.of(
         OperatorEntry(elite = 0, starLevel = 0, level = level, revision = revision),

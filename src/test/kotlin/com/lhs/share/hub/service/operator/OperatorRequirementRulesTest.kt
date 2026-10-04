@@ -32,7 +32,7 @@ class OperatorRequirementRulesTest {
     }
 
     @Test
-    fun `SP direct star range uses the same frontend stage costs`() {
+    fun `ordinary early huaji nodes consume their stage costs`() {
         val result = OperatorRequirementRules.huaji(1, 5)
 
         assertEquals(15, result.heart)

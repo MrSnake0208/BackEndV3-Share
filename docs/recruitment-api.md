@@ -11,7 +11,7 @@
 
 `pools` 条目：`{pool_id,snapshot,progress,mapped_snapshot}`。snapshot=`{name,game,catalog_pool_id,start_date,end_date,up_agents,up_agent_ids,up_status,up_agent_names,unmapped_up_agent_names,catalog_revision}`；up_status目录枚举为verified/partial/selection/unknown，仅verified且名单非空时可辅助UP判断。`mapped_snapshot` 仅为旧用户临时池的存量兼容字段，不能再新建或映射临时池。progress=null表示未知。目录展示不等于用户已开始抽取；只有实际保存的未知进度计入账号 unknown_progress_count。显式使用兼容 pool_create 时必须提供初始进度：未知填null，确认没有尾抽填0，已知则填非负整数；不得将未确认的进度默认为0。已保存卡池的未知进度计入summary的unknown_progress_count，当前录入前需先校准。
 
-`up_agents` 条目：`{id,name,operator_id,active}`。管理员配置的 N 个有效项仅代表 UP 名单，非 UP 仍可从本游戏绝密图鉴选择。`id` 是固定的池内身份，格式为 `<catalog_pool_id>:up:<标识>`；`operator_id=null` 表示占位，管理员绑定图鉴密探后仍保留同一 `id`。选 UP 项录入时 `agent_id` 使用槽 `id`、`temporary=false`；选图鉴非 UP 时使用官方图鉴 ID。新增或编辑换选时直接提交当前 UP 的官方 ID，服务端也规范为同池槽 ID；用户明确填写的 `up_status` 不被覆盖。普通用户不能创建槽或绑定图鉴。
+`up_agents` 条目：`{id,name,operator_id,active}`。管理员配置的 N 个有效项仅代表 UP 名单，非 UP 仍可从本游戏普通绝密图鉴（rarity=5 且 spOf 为空）选择。`id` 是固定的池内身份，格式为 `<catalog_pool_id>:up:<标识>`；`operator_id=null` 表示占位，管理员绑定图鉴密探后仍保留同一 `id`。选 UP 项录入时 `agent_id` 使用槽 `id`、`temporary=false`；选图鉴非 UP 时使用官方图鉴 ID。新增或编辑换选时直接提交当前 UP 的官方 ID，服务端也规范为同池槽 ID；用户明确填写的 `up_status` 不被覆盖。普通用户不能创建槽或绑定图鉴。
 
 `temporary_agents` 条目 `{agent_id,name,mapped_agent_id,mapped_name}` 仅保留旧数据。事件原始agent_snapshot=`{agent_id,name,temporary,catalog_revision,rarity:5}`。GET archive/events 根据当前管理员目录投影最新池名、UP 名和图鉴绑定；只改变读响应，不修改个人 revision、事件 ID、抽数、进度、顺序、日期、备注和批次。export 保留原始快照与固定引用，同时更新池快照的 `up_agents` 解释信息，让离线备份保存当前占位绑定；恢复后目录优先，备份不能修改公共定义。pool snapshot 另保留 pool_type；目录无法解析时原快照仍可解释旧记录。
 
@@ -29,7 +29,7 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 - `POST /v1/admin/recruitment-catalog` → 新池，`expected_revision=0`。
 - `PUT /v1/admin/recruitment-catalog/{poolId}` → 更新，路径 ID 须匹配 body，`expected_revision` 必须等于当前 `revision`，并发修改409。
 
-写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=5 图鉴密探，有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
+写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=5 且 spOf 为空的普通图鉴密探（不含电影/SP），有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
 
 ## 写接口
 
@@ -75,7 +75,7 @@ entry=`{agent_id,pull_span,event_id?,up_status?,acquired_date?,note?}`，每次1
 
 `GET /export?account_id=...` → `{schema:"yuanhub.recruitment.v1",exported_at,source_account:{account_id},game,archive_revision,baseline,current_pool_id,pools,temporary_agents,events,batches}`。data可直接保存为JSON文件。读取同一Hub事务快照中的完整档案，包含所有有效/已删除事件和批次，不使用分页，不输出截断备份；存量游戏不一致允许导出。所有时间UTC RFC3339，纯日期YYYY-MM-DD，未知保持null。source原值、pool_type、rarity、个人原始/映射快照保留；池快照的up_agents补入当前管理员解释信息（含退役槽和operator_id），不改写数据库或事件快照。目录缺失时使用原有槽快照。数据库ID、user_id及认证信息不进入文件。
 
-机器协议：[recruitment-exchange-v1.schema.json](schema/recruitment-exchange-v1.schema.json)。紧凑UTF-8 JSON文档最大5MiB；事件和批次各最多20000（包含删除标记），导出、预览、合并结果超限整包422。服务端额外验证唯一稳定ID/顺序、同游戏、所有引用、删除时间/版本配对和批次有效span总和≤total。不接受未知字段、小数抽数或错误类型；池进度必须显式提供（未知为null），历史密探快照rarity必须显式5。真实管理员池即使停用、UP槽退役仍能恢复历史；新增池引用必须存在于管理员目录，新增结果须引用该池固定UP槽或本游戏绝密图鉴。伪造catalog_pool_id、跨池占位、新增用户自定义池/临时密探均拒绝422，备份不能写公共目录。已存在的旧临时项可导出、判重及冲突保留，不能借导入新增旧临时池的结果或批次。
+机器协议：[recruitment-exchange-v1.schema.json](schema/recruitment-exchange-v1.schema.json)。紧凑UTF-8 JSON文档最大5MiB；事件和批次各最多20000（包含删除标记），导出、预览、合并结果超限整包422。服务端额外验证唯一稳定ID/顺序、同游戏、所有引用、删除时间/版本配对和批次有效span总和≤total。不接受未知字段、小数抽数或错误类型；池进度必须显式提供（未知为null），历史密探快照rarity必须显式5。真实管理员池即使停用、UP槽退役仍能恢复历史；新增池引用必须存在于管理员目录，新增结果须引用该池固定UP槽或本游戏普通绝密图鉴（rarity=5 且 spOf 为空）。伪造catalog_pool_id、跨池占位、新增用户自定义池/临时密探均拒绝422，备份不能写公共目录。已存在的旧临时项可导出、判重及冲突保留，不能借导入新增旧临时池的结果或批次。
 
 `POST /import/preview`：
 

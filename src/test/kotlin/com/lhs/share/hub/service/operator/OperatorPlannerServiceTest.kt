@@ -128,6 +128,19 @@ class OperatorPlannerServiceTest {
     }
 
     @Test
+    fun `movie workspace targets cannot use ordinary encoded stars`() {
+        val base = catalog.getOperator(OPERATOR)!!
+        every { catalog.getOperator(OPERATOR) } returns base.copy(spOf = "base")
+        val request = workspace().put("active_plan_id", PLAN)
+        request.withArray("plans").removeAll().add(
+            mapper.readTree(
+                """{"id":"$PLAN","name":"电影","source":"custom","operator_ids":["$OPERATOR"],"excluded_operator_ids":[],"targets":{"$OPERATOR":{"level":100,"elite":17,"star_level":7}}}""",
+            ),
+        )
+        assertThrows(OperatorApiException::class.java) { service.putWorkspace("u1", "a1", request) }
+    }
+
+    @Test
     fun `empty reads do not create data and foreign accounts cannot read or write`() {
         assertEquals(0, service.workspace("u1", "a1").path("revision").asInt())
         assertEquals(0, service.schedule("u1", "a1", "favorites").path("revision").asInt())

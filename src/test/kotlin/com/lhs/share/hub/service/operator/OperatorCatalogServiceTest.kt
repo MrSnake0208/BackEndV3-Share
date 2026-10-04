@@ -229,6 +229,22 @@ class OperatorCatalogServiceTest {
     }
 
     @Test
+    fun `movie relations cannot point to another movie or delete a referenced base`() {
+        seed()
+        val base = existing("base")
+        val movie = existing("movie").copy(spOf = "base")
+        every { repository.findByOperatorId("char_090_new") } returns null
+        every { repository.findByOperatorId("base") } returns base
+        every { repository.findByOperatorId("movie") } returns movie
+        every { repository.findAllByOrderByOperatorIdAsc() } returns listOf(base, movie)
+        val error = assertThrows(OperatorApiException::class.java) { service.create(writeRequest().copy(spOf = "movie")) }
+        assertEquals("invalid_sp_relation", error.code)
+        val deletion = assertThrows(OperatorApiException::class.java) { service.delete("base") }
+        assertEquals("operator_has_forms", deletion.code)
+        io.mockk.verify(exactly = 0) { repository.delete(any()) }
+    }
+
+    @Test
     fun `validate rejects spOf referencing itself`() {
         seed()
         every { repository.findByOperatorId("char_090_new") } returns null

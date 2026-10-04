@@ -142,6 +142,27 @@ class OperatorSubjectiveServiceTest {
     }
 
     @Test
+    fun `movie growth targets reject ordinary encoded star levels`() {
+        val base = catalog.getOperator("op1")!!
+        every { catalog.getOperator("op1") } returns base.copy(spOf = "base")
+        assertThrows(OperatorApiException::class.java) {
+            service.putTarget(
+                "u1",
+                "a1",
+                "op1",
+                mapper.readTree("""{"star_level":7,"expected_revision":0}""") as com.fasterxml.jackson.databind.node.ObjectNode,
+            )
+        }
+        service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree("""{"star_level":5,"expected_revision":0}""") as com.fasterxml.jackson.databind.node.ObjectNode,
+        )
+        assertEquals(5, service.subjectiveState("u1", "a1", "op1")["targets"].let { (it as Map<*, *>)["star_level"] })
+    }
+
+    @Test
     fun `annotations are isolated and missing annotation defaults to active`() {
         service.putAnnotation(
             "u1",
