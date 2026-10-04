@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
+import com.lhs.share.hub.repository.ActivityCalendarSubscriptionRepository
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
@@ -66,6 +67,7 @@ class SubAccountService(
     private val starRecoveryPointRepository: StarRecoveryPointRepository? = null,
     private val recruitmentRepository: RecruitmentRepository? = null,
     private val accountEvents: AccountEventService? = null,
+    private val calendarSubscriptions: ActivityCalendarSubscriptionRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -113,6 +115,13 @@ class SubAccountService(
                     val nextGame = game?.let(::normalizeGame) ?: account.game
                     fenceAccount(account)
                     if (nextGame != account.game) {
+                        if (calendarSubscriptions?.exists(userId, accountId) == true) {
+                            throw InventoryApiException(
+                                HttpStatus.CONFLICT,
+                                "activity_calendar_game_locked",
+                                "已有活动订阅历史，不能修改所属游戏；请使用另一个游戏账号",
+                            )
+                        }
                         if (recruitmentRepository?.hasSubstantiveData(userId, accountId) == true) {
                             throw InventoryApiException(HttpStatus.CONFLICT, "recruitment_game_locked", "已有招募档案，不能修改所属游戏；请使用另一个游戏账号")
                         }
@@ -168,6 +177,7 @@ class SubAccountService(
                 starStateCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starRecoveryPointRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 recruitmentRepository?.deleteAccount(userId, accountId)
+                calendarSubscriptions?.deleteAccount(userId, accountId)
                 tokenService.revokeByAccount(userId, accountId)
                 accountRepository.deleteById(checkNotNull(account.id))
                 accountEvents?.publishChange(userId, accountId, "account_deleted")

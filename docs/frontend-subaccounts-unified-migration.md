@@ -135,3 +135,8 @@ POST /user/open-api/token
 - [ ] 删除子账号前有"会同时清空库存+密探+特别关注+Token"的确认提示。
 - [ ] 通过 `GET /user/open-api/tokens` 拿到的 `scopes` 能正确驱动前端"库存Token/密探Token/双域Token"标签。
 - [ ] 线上联调冒烟：`scripts/inventory-smoke.sh` 的路径（`/open-api/inventory/account` 等）仍可直接跑通。
+
+
+## 7. 活动订阅的账号生命周期（2026-10-05）
+
+存在任意本期订阅历史（包括已取消且保留进度的记录）时，修改账号game返回409 `activity_calendar_game_locked`，需要使用另一游戏账号；同游戏改名不受影响。删除账号在既有事务中同时清理活跃/已取消订阅及个人关卡进度，失败整体回滚。前端账号删除确认同步说明订阅和进度也会清除；订阅页沿用当前账号，不向URL写入account_id。接口及验证见[活动日历说明](activity-calendar.md)。

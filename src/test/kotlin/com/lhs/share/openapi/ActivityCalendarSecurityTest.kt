@@ -7,6 +7,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.config.security.JwtAuthenticationTokenFilter
 import com.lhs.share.config.security.SecurityConfig
 import com.lhs.share.hub.controller.calendar.ActivityCalendarController
+import com.lhs.share.hub.controller.calendar.ActivityCalendarSubscriptionController
 import com.lhs.share.hub.controller.calendar.ActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarSuggestionController
@@ -16,6 +17,7 @@ import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminRespo
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarResponse
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarSuggestionPage
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarSuggestionResponse
+import com.lhs.share.hub.controller.calendar.response.CalendarSubscriptionSummaryResponse
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionOriginal
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionStatus
@@ -23,6 +25,7 @@ import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
+import com.lhs.share.hub.service.calendar.ActivityCalendarSubscriptionService
 import com.lhs.share.hub.service.calendar.ActivityCalendarSuggestionService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtAuthToken
@@ -49,6 +52,7 @@ import java.time.LocalDate
 @ActiveProfiles("test")
 @WebMvcTest(
     controllers = [
+        ActivityCalendarSubscriptionController::class,
         ActivityCalendarController::class, AdminActivityCalendarController::class,
         ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
     ],
@@ -64,6 +68,8 @@ import java.time.LocalDate
 )
 class ActivityCalendarSecurityTest {
     @Autowired lateinit var mvc: MockMvc
+
+    @MockitoBean lateinit var subscriptions: ActivityCalendarSubscriptionService
 
     @MockitoBean lateinit var service: ActivityCalendarService
 
@@ -186,5 +192,35 @@ class ActivityCalendarSecurityTest {
             mvc.perform(it.header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isForbidden)
         }
+    }
+
+    @Test
+    fun `subscription paths require real JWT and admin capability without beta or calendar write permission`() {
+        val path = "/v1/activity-calendar/subscriptions"
+        listOf(
+            get(path).param("account_id", "a"),
+            get("$path/summary").param("account_id", "a"),
+            get("$path/event").param("account_id", "a"),
+            put("$path/event"),
+            put("$path/event/progress"),
+        ).forEach {
+            mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized)
+        }
+        verifyNoInteractions(subscriptions)
+        val now = Instant.now()
+        val token = JwtAuthToken("owner", "subscription-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
+        token.isAuthenticated = true
+        `when`(jwtService.verifyAndParseAuthToken("subscription-token")).thenReturn(token)
+        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(false)
+        mvc.perform(
+            get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
+        ).andExpect(status().isForbidden)
+        verifyNoInteractions(subscriptions)
+        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(true)
+        `when`(subscriptions.summary("owner", "a")).thenReturn(CalendarSubscriptionSummaryResponse(emptyList(), 0, 0))
+        mvc.perform(
+            get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
+        ).andExpect(status().isOk)
+        verifyNoInteractions(betaService, stringRedisTemplate)
     }
 }
