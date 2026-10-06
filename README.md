@@ -4,6 +4,17 @@
 
 逐模块审阅顺序、进度清单与报告模板见 [后端 Review 计划](docs/backend-review-plan.md)。
 
+## 一键发布
+
+独立 clone 本仓库即可发布，不需要前端仓库或 YuanHub-All。先提交业务改动并切换到干净的 `main`，安装 Git / GitHub CLI 并执行 `gh auth login`（账号需具备仓库推送与 Actions 访问权限）：
+
+```bash
+./release-backend.sh --dry-run <新版本号>
+./release-backend.sh <新版本号>
+```
+
+例如版本号 `0.1.13`（须尚未发布）；后端不支持 `auto`。脚本等待 CI 成功后推送 tag 并等待部署完成，生产凭据沿用 GitHub 配置。配置、审批与失败恢复见 [部署说明](docs/deployment.md#7-日常发布)。
+
 ## 技术栈
 
 - Kotlin 2.2 (JDK 21)

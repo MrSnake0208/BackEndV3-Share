@@ -277,7 +277,24 @@ Nginx → Green
 
 CI 与 prepare 都成功后，tag Release 复用同版本/SHA 的 JAR，继续 readiness、切流、自动回滚及 drain；产物缺失或 metadata 不匹配则按原路径构建。脚本拒绝覆盖任一蓝绿槽位引用的产物，包括停止槽位保留的回滚 JAR。直接推 tag 保持原构建发布路径。
 
-独立 clone 本仓库时人工发布：
+独立 clone 本仓库时，使用仓库根目录的一键入口，无需前端仓库或 YuanHub-All：
+
+```bash
+./release-backend.sh --dry-run 0.1.13
+./release-backend.sh 0.1.13
+# 自动化场景可跳过交互确认，仍保留全部门禁
+./release-backend.sh --yes 0.1.13
+```
+
+版本号只是示例，必须指定尚未发布的新版本；支持 `v` 前缀，不支持 `auto`，不修改 `build.gradle.kts`。
+本机需要 Bash、Git 与 GitHub CLI（`gh`），先用 `gh auth login` 登录具有该仓库 main/tag 推送和 Actions 访问权限的账号；若 main 有分支保护，应先按仓库要求合并业务改动。生产审批仍遵循 `production` Environment 配置。
+服务器与 GitHub Secrets / Variables 沿用本文已有配置，发布者无需在本机配置服务器 SSH 私钥。
+
+脚本要求干净的 main，确认后 fetch main/tags，仅允许 fast-forward；推 main 后等待同 SHA 的 main push CI，通过后才创建并推送 tag，再等待完整 Release。脚本从自身位置定位仓库，可在其他目录调用其路径；不自动提交业务代码、不自动预构建，也不依赖外部工作区脚本。
+`--dry-run` 只检查本地状态，不登录或访问远端；正式执行会重新核对远端，预览不保证版本仍可发布。
+CI 或查询失败时不创建 tag；Release 失败时到 Actions 重跑原 Release，禁止删除、移动或重打 tag。tag 推送失败时先核对远端，再按需推送本地原 tag。
+
+仍可人工发布：
 
 ```bash
 # 先提交业务改动，再推 main
