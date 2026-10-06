@@ -7,8 +7,10 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.config.security.BetaAccessPolicy
 import com.lhs.share.handler.RecruitmentExceptionHandler
 import com.lhs.share.hub.controller.recruitment.RecruitmentController
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentArchiveResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentEventPage
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentSummary
 import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.hub.service.recruitment.RecruitmentApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
@@ -90,6 +92,21 @@ class RecruitmentControllerContractTest {
         mvc.perform(
             post("/v1/recruitment/commands").contentType(MediaType.APPLICATION_JSON).content("{}"),
         ).andExpect(status().isUnprocessableEntity)
+    }
+
+    @Test fun `archive exposes complete stable slot counts including zero in snake case without records`() {
+        every { helper.requireUserId() } returns "u"
+        val summary = RecruitmentSummary(0, 0, 0, 0, 0, 0, 0, 0, false)
+        every { service.archive("u", "a") } returns RecruitmentArchiveResponse(
+            "a", "如鸢", 0, 0, null, emptyList(), emptyList(), summary, false,
+            mapOf("p" to summary.copy(upAgentCounts = mapOf("catalog_p:up:A" to 2L, "catalog_p:up:B" to 0L))),
+        )
+        mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:A']").value(2))
+            .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:B']").value(0))
+            .andExpect(jsonPath("$.data.records").doesNotExist())
+        verify(exactly = 1) { service.archive("u", "a") }
     }
 
     @Test fun `event sort direction is forwarded and defaults to newest first`() {

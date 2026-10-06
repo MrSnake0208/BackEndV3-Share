@@ -19,7 +19,9 @@
 
 acquired_date和snapshot的start_date/end_date在API与Mongo内均为YYYY-MM-DD日历日期字符串，不用时间点表达；UTC RFC3339时间仅用于created_at/updated_at等时间戳。日期和时间字段仅接受对应格式的字符串或可选null，拒绝数字、数组及非法日期422；跨服务器时区读取不应改变日期或日期筛选结果。
 
-summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_count,exact_event_count,unknown_event_count,unknown_progress_count,has_unknown}`。总数=baseline+有效独立事件span+有效批次total+已知进度。批次内span不重复贡献累计；unknown标记不能解释为0抽事实。
+summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_count,exact_event_count,unknown_event_count,unknown_progress_count,has_unknown,up_agent_counts}`。总数=baseline+有效独立事件span+有效批次total+已知进度。批次内span不重复贡献累计；unknown标记不能解释为0抽事实。
+
+`pool_summaries[pool_id].up_agent_counts` 为 `{UP槽id: 获得次数}`，例如 `{"catalog_p:up:A":2,"catalog_p:up:B":0}`。键使用 `up_agents[].id`，不是 `operator_id`：占位绑定图鉴后仍统计原有记录。服务端在当前用户/账号范围一次聚合所有未删除事件，按池和原始 agent_id 分组，再按当前投影快照的有效 UP 槽筛选；兼容同一密探旧图鉴 ID，重复出货累加，批次每条事件算一次，不依赖 pull_span/up_status。退役或非 UP 结果不输出。历史池、未保存公共池同口径，当前有效槽无结果也明确返回0；目录缺失回退已保存快照。全局 summary 此字段为null。GET不写个人状态、不返回完整events、不逐池查询。字段或某槽键缺失表示摘要未知，客户端必须显示“—”等未知状态，不能自行补0；并行目录更新新增了尚未包含在archive中的槽时也遵循此规则。此字段仅为读摘要，不改备份协议或Mongo持久化结构。
 
 ## 管理员目录
 
