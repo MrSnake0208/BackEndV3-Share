@@ -10,6 +10,7 @@ import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.SubAccountRepositoryImpl
+import com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
@@ -121,6 +122,66 @@ class RecruitmentMongoTest {
         mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), tx, recruitmentRepository = store, accountEvents = publisher,
     )
+
+    @Test fun `UP summaries aggregate live results across pools with owner isolation and stable slot binding`() {
+        val managed = template.findById("catalog_p", RecruitmentCatalogPool::class.java)!!
+        template.save(
+            managed.copy(
+                upAgents = listOf(
+                    RecruitmentUpAgent("catalog_p:up:A", "A", operatorId = "formal-a"),
+                    RecruitmentUpAgent("catalog_p:up:B", "占位B"),
+                    RecruitmentUpAgent("catalog_p:up:C", "C"),
+                    RecruitmentUpAgent("catalog_p:up:retired", "退役", active = false),
+                ),
+            ),
+        )
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"repeat","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+        )
+        command(
+            "batch_create",
+            """{"pool_id":"p","mode":"historical","batch_id":"batch","total_pull_count":20,"entries":[{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":10}]}""",
+        )
+        val seed = store.event("u", "a", "A")!!
+        fun insert(id: String, agent: String, owner: String = "u", account: String = "a", pool: String = "p") {
+            store.insertEvent(
+                seed.copy(
+                    id = "$owner:$account:$id",
+                    userId = owner,
+                    accountId = account,
+                    eventId = id,
+                    poolId = pool,
+                    agentSnapshot = RecruitmentAgentSnapshot(agent, agent),
+                ),
+            )
+        }
+        insert("legacy", "formal-a")
+        insert("off", "non-up")
+        insert("retired", "catalog_p:up:retired")
+        insert("other-account", "catalog_p:up:A", account = "b")
+        insert("other-owner", "catalog_p:up:A", owner = "other")
+        insert("other-pool", "catalog_p:up:A", pool = "other-pool")
+        val before = store.archive("u", "a")!!
+        fun counts() = service.archive("u", "a").poolSummaries.getValue("p").upAgentCounts
+        assertEquals(mapOf("catalog_p:up:A" to 3L, "catalog_p:up:B" to 1L, "catalog_p:up:C" to 0L), counts())
+        assertEquals(1L, store.poolAgentCounts("u", "b").getValue("p").getValue("catalog_p:up:A"))
+        assertEquals(before, store.archive("u", "a"))
+        command("event_delete", """{"event_id":"A"}""")
+        assertEquals(2L, counts()?.get("catalog_p:up:A"))
+        command("event_restore", """{"event_id":"A"}""")
+        assertEquals(3L, counts()?.get("catalog_p:up:A"))
+        command("batch_delete", """{"batch_id":"batch","confirm_total_pull_count":20}""")
+        assertEquals(0L, counts()?.get("catalog_p:up:B"))
+        command("batch_restore", """{"batch_id":"batch"}""")
+        assertEquals(1L, counts()?.get("catalog_p:up:B"))
+        val emptyPool = service.archive("u", "b").pools.single().poolId
+        assertEquals(
+            mapOf("catalog_p:up:A" to 0L, "catalog_p:up:B" to 0L, "catalog_p:up:C" to 0L),
+            service.archive("u", "b").poolSummaries.getValue(emptyPool).upAgentCounts,
+        )
+    }
 
     @Test fun `dialog saves repeated agents counts and progress atomically and retries without duplication`() {
         initialize()

@@ -167,6 +167,20 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
         return (events.keys + batches.keys).associateWith { mergeTotals(events[it], batches[it]) }
     }
 
+    /** One account-scoped query for all pools; only grouped counts leave Mongo. */
+    fun poolAgentCounts(userId: String, accountId: String): Map<String, Map<String, Long>> = aggregate(
+        userId,
+        accountId,
+        "recruitment_events",
+        Document("_id", Document("poolId", "\$poolId").append("agentId", "\$agentSnapshot.agentId"))
+            .append("count", Document("\$sum", 1)),
+    ).groupBy { it.get("_id", Document::class.java).getString("poolId") }
+        .mapValues { (_, rows) ->
+            rows.associate { row ->
+                row.get("_id", Document::class.java).getString("agentId") to (row["count"] as Number).toLong()
+            }
+        }
+
     private fun eventGroup(id: String?): Document {
         fun sum(expression: Any) = Document("\$sum", expression)
         val exact = Document("\$ne", listOf(Document("\$ifNull", listOf("\$pullSpan", null)), null))

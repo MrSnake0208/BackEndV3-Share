@@ -517,6 +517,7 @@ class RecruitmentServiceTest {
         every { readStore.archive("u", "a") } returns null
         every { readStore.totals("u", "a") } returns RecruitmentTotals(0, 0, 0, 0, 0)
         every { readStore.poolTotals("u", "a") } returns emptyMap()
+        every { readStore.poolAgentCounts("u", "a") } returns emptyMap()
         val service = RecruitmentService(readStore, accountService, accounts, mutation, publisher, mapper, tx)
         repeat(3) {
             val visible = service.archive("u", "a")
@@ -524,12 +525,39 @@ class RecruitmentServiceTest {
             assertEquals("catalog_p", visible.pools.single().snapshot.catalogPoolId)
             assertNull(visible.pools.single().progress)
             assertEquals(0, visible.summary.unknownProgressCount)
+            assertEquals(managed.upAgents.associate { it.id to 0L }, visible.poolSummaries.values.single().upAgentCounts)
+            assertNull(visible.summary.upAgentCounts)
             assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
         }
-        verify(exactly = 6) { accountService.requireAccount("u", "a") }
-        verify(exactly = 6) { readStore.archive("u", "a") }
-        verify(exactly = 6) { readStore.totals("u", "a") }
-        verify(exactly = 6) { readStore.poolTotals("u", "a") }
+        every { readStore.archive("u", "a") } returns state
+        every { catalogStore.all() } returns listOf(
+            managed.copy(
+                upAgents = listOf(
+                    managed.upAgents[0].copy(operatorId = "formal"),
+                    managed.upAgents[1],
+                    managed.upAgents[2].copy(active = false),
+                ),
+            ),
+        )
+        every { readStore.poolAgentCounts("u", "a") } returns mapOf(
+            "p" to mapOf("catalog_p:up:A" to 2L, "formal" to 1L, "catalog_p:up:C" to 8L, "off" to 9L),
+            "other-pool" to mapOf("catalog_p:up:A" to 20L),
+        )
+        assertEquals(
+            mapOf("catalog_p:up:A" to 3L, "catalog_p:up:B" to 0L),
+            service.archive("u", "a").poolSummaries.getValue("p").upAgentCounts,
+        )
+        // A missing directory keeps the stored snapshot authoritative, including placeholders.
+        every { catalogStore.all() } returns emptyList()
+        every { readStore.archive("u", "a") } returns state.copy(
+            pools = listOf(state.pools.single().copy(snapshot = state.pools.single().snapshot.copy(upAgents = managed.upAgents))),
+        )
+        assertEquals(2L, service.archive("u", "a").poolSummaries.getValue("p").upAgentCounts?.get("catalog_p:up:A"))
+        verify(exactly = 8) { accountService.requireAccount("u", "a") }
+        verify(exactly = 8) { readStore.archive("u", "a") }
+        verify(exactly = 8) { readStore.totals("u", "a") }
+        verify(exactly = 8) { readStore.poolTotals("u", "a") }
+        verify(exactly = 8) { readStore.poolAgentCounts("u", "a") }
         confirmVerified(readStore, accountService)
         verify {
             publisher wasNot io.mockk.Called

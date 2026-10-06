@@ -42,6 +42,7 @@ class RecruitmentService(
             val pools = mutation.projectPools(current.pools, account.game.takeIf { it == current.gameSnapshot })
             val totals = store.totals(userId, accountId)
             val byPool = store.poolTotals(userId, accountId)
+            val agentCounts = store.poolAgentCounts(userId, accountId)
             val progress = current.pools.sumOf { it.progress ?: 0 }
             val unknownProgress = current.pools.count { it.progress == null }
             RecruitmentArchiveResponse(
@@ -68,6 +69,11 @@ class RecruitmentService(
                             0
                         },
                         (count?.unknownCount ?: 0) > 0 || pool.progress == null,
+                        (pool.mappedSnapshot ?: pool.snapshot).upAgents.filter { it.active }.associate { slot ->
+                            slot.id to listOfNotNull(slot.id, slot.operatorId).distinct().sumOf { agentId ->
+                                agentCounts[pool.poolId]?.get(agentId) ?: 0L
+                            }
+                        },
                     )
                 },
             )
