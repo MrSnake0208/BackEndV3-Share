@@ -10,6 +10,7 @@ import com.lhs.share.controller.request.openapi.OpenApiTokenGenerateRequest
 import com.lhs.share.controller.request.openapi.OpenApiTokenScopesUpdateRequest
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.service.inventory.InventoryService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.time.Instant
 
 /**
  * 第三方 API Token 管理接口
@@ -36,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController
 class OpenApiTokenController(
     private val tokenService: OpenApiTokenService,
     private val helper: AuthenticationHelper,
+    private val inventoryService: InventoryService,
 ) {
     /**
      * 生成第三方 API Token(需登录)
@@ -71,6 +74,18 @@ class OpenApiTokenController(
             success(OpenApiTokenSecretResponse(tokenService.secret(helper.requireUserId(), tokenId))),
         )
 
+    @Operation(summary = "验证本人连接的首次库存同步", description = "仅返回已生效的真实库存记录；历史无连接来源的记录不追认")
+    @RequireJwt
+    @GetMapping("/tokens/{tokenId}/first-sync")
+    fun firstSync(@PathVariable tokenId: String): ResponseEntity<ApiResult<ConnectionFirstSyncResponse>> {
+        val userId = helper.requireUserId()
+        val accountId = tokenService.accountIdForToken(userId, tokenId)
+        val record = inventoryService.firstConnectionSync(userId, accountId, tokenId)
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
+            success(ConnectionFirstSyncResponse(tokenId, accountId, record != null, record?.recordId, record?.receivedAt)),
+        )
+    }
+
     /**
      * 完整替换第三方 API Token 权限(需登录),不改变 Token 明文。
      */
@@ -97,3 +112,12 @@ class OpenApiTokenController(
 }
 
 data class OpenApiTokenSecretResponse(val token: String)
+
+data class ConnectionFirstSyncResponse(
+    val connectionId: String,
+    val accountId: String,
+    val synced: Boolean,
+    val recordId: String? = null,
+    val receivedAt: Instant? = null,
+    val dataType: String = "inventory",
+)

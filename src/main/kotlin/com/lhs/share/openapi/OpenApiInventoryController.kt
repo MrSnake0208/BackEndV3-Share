@@ -81,7 +81,8 @@ class OpenApiInventoryController(
         @Valid @RequestBody request: InventoryImportRequest,
     ): ApiResult<InventoryImportResult> {
         val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.INVENTORY_WRITE)
-        val result = inventoryService.import(principal.userId, principal.accountId, request)
+        val connectionId = tokenService.connectionIdForAuthorization(authorization, principal)
+        val result = inventoryService.importFromConnection(principal.userId, principal.accountId, connectionId, request)
         val event = InventoryImportEvent.of(principal.accountId, request, result)
         eventService.publish(
             principal.userId,

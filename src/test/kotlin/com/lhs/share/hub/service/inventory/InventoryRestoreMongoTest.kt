@@ -65,9 +65,44 @@ class InventoryRestoreMongoTest {
     }
 
     @Test
+    fun `first connection receipt survives fresh reads and isolates owner account source and effect`() {
+        prepare()
+        every { catalog.exists(any(), any()) } returns true
+        val request = InventoryImportRequest(
+            format = "myshare-inventory-exchange",
+            version = 2,
+            exportedAt = "2026-10-08T00:00:00Z",
+            producer = ProducerDto("maayuan"),
+            records = listOf(
+                InventoryRecordRequest(
+                    recordId = "connection:inventory",
+                    accountId = "main",
+                    recordType = "reward_delta",
+                    entityType = "item",
+                    effectiveAt = "2026-10-08T00:00:00Z",
+                    entries = listOf(InventoryEntryRequest("baijinbi", count = 5)),
+                ),
+            ),
+        )
+        service.importFromConnection("owner", "main", "connection", request)
+        val receipt = checkNotNull(service.firstConnectionSync("owner", "main", "connection"))
+        assertEquals("connection:inventory", receipt.recordId)
+        assertNotNull(receipt.receivedAt)
+        assertNull(service.firstConnectionSync("other", "main", "connection"))
+        assertNull(service.firstConnectionSync("owner", "other", "connection"))
+        assertNull(service.firstConnectionSync("owner", "main", "other"))
+        assertEquals(1, service.importFromConnection("owner", "main", "other", request).duplicates)
+        assertNull(service.firstConnectionSync("owner", "main", "other"))
+        records.save(receipt.copy(stockEffect = "history_only"))
+        assertNull(service.firstConnectionSync("owner", "main", "connection"))
+        records.save(receipt.copy(stockEffect = "superseded"))
+        assertNull(service.firstConnectionSync("owner", "main", "connection"))
+    }
+
+    @Test
     fun `delete and restore persist original record and rebuilt current atomically`() {
         prepare()
-        records.save(reward("reward", 5))
+        records.save(reward("reward", 5).copy(sourceConnectionId = "connection"))
         val original = checkNotNull(records.findByUserIdAndAccountIdAndRecordId("owner", "main", "reward"))
         current.save(
             InventoryCurrent(

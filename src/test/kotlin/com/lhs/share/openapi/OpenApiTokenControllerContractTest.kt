@@ -7,6 +7,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.handler.OpenApiTokenExceptionHandler
+import com.lhs.share.hub.repository.entity.InventoryRecord
+import com.lhs.share.hub.repository.entity.ProducerInfo
+import com.lhs.share.hub.repository.entity.RecordEntry
+import com.lhs.share.hub.service.inventory.InventoryService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -30,6 +34,7 @@ import java.time.Instant
 
 class OpenApiTokenControllerContractTest {
     private val tokenService = mockk<OpenApiTokenService>()
+    private val inventoryService = mockk<InventoryService>()
     private val helper = mockk<AuthenticationHelper>()
     private lateinit var mockMvc: MockMvc
 
@@ -42,11 +47,55 @@ class OpenApiTokenControllerContractTest {
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         val validator = LocalValidatorFactoryBean().apply { afterPropertiesSet() }
         mockMvc = MockMvcBuilders
-            .standaloneSetup(OpenApiTokenController(tokenService, helper))
+            .standaloneSetup(OpenApiTokenController(tokenService, helper, inventoryService))
             .setControllerAdvice(OpenApiTokenExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
             .build()
+    }
+
+    @Test
+    fun `first sync reads owned connection and returns real receipt without a secret`() {
+        every { tokenService.accountIdForToken("u1", "connection") } returns "main"
+        every { inventoryService.firstConnectionSync("u1", "main", "connection") } returns InventoryRecord(
+            recordId = "record:1",
+            userId = "u1",
+            accountId = "main",
+            recordType = "stock_snapshot",
+            entityType = "item",
+            effectiveAt = Instant.parse("2026-10-08T00:00:00Z"),
+            receivedAt = Instant.parse("2026-10-08T00:01:00Z"),
+            producer = ProducerInfo("maayuan"),
+            entries = listOf(RecordEntry("baijinbi", count = 12)),
+            sourceConnectionId = "connection",
+        )
+        mockMvc.perform(get("/user/open-api/tokens/connection/first-sync"))
+            .andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.synced").value(true))
+            .andExpect(jsonPath("$.data.connection_id").value("connection"))
+            .andExpect(jsonPath("$.data.account_id").value("main"))
+            .andExpect(jsonPath("$.data.record_id").value("record:1"))
+            .andExpect(jsonPath("$.data.received_at").value("2026-10-08T00:01:00Z"))
+            .andExpect(jsonPath("$.data.data_type").value("inventory"))
+            .andExpect(jsonPath("$.data.token").doesNotExist())
+    }
+
+    @Test
+    fun `no record is waiting and foreign or revoked connection cannot query inventory`() {
+        every { tokenService.accountIdForToken("u1", "connection") } returns "main"
+        every { inventoryService.firstConnectionSync("u1", "main", "connection") } returns null
+        mockMvc.perform(get("/user/open-api/tokens/connection/first-sync"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.synced").value(false))
+        every { tokenService.accountIdForToken("u1", "foreign") } throws ApiResultException(404, "token 不存在")
+        mockMvc.perform(get("/user/open-api/tokens/foreign/first-sync").param("account_id", "foreign-account"))
+            .andExpect(status().isNotFound)
+        verify(exactly = 0) { inventoryService.firstConnectionSync(any(), any(), "foreign") }
+        every { helper.requireUserId() } throws ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        mockMvc.perform(get("/user/open-api/tokens/connection/first-sync"))
+            .andExpect(status().isUnauthorized)
+        verify(exactly = 1) { tokenService.accountIdForToken("u1", "connection") }
     }
 
     @Test
