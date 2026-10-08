@@ -360,7 +360,7 @@ class RecruitmentMutation(
         refreshCatalog: Boolean = false,
     ): RecruitmentAgentSnapshot {
         val latest = if (refreshCatalog && poolSnapshot.catalogPoolId != null) {
-            catalog.snapshot(current.gameSnapshot, poolSnapshot.catalogPoolId)
+            catalog.snapshot(current.gameSnapshot, poolSnapshot.catalogPoolId, requireEnabled = false)
         } else {
             poolSnapshot
         }
@@ -373,6 +373,7 @@ class RecruitmentMutation(
 
     internal fun projectPools(pools: List<RecruitmentPool>, game: String? = null): List<RecruitmentPool> = catalog.projectPools(pools, game)
     internal fun projectEvents(events: List<RecruitmentEvent>): List<RecruitmentEvent> = catalog.projectEvents(events)
+    internal fun poolStates(pools: List<RecruitmentPool>): Map<String, String> = catalog.poolStates(pools)
 
     private fun pool(current: RecruitmentArchive, id: String) =
         current.pools.firstOrNull { it.poolId == id } ?: throw recruitmentNotFound("pool")

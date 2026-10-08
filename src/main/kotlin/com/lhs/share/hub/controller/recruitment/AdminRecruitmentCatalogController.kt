@@ -39,7 +39,7 @@ class AdminRecruitmentCatalogController(
 ) {
     private val decoder = RecruitmentRequestDecoder(mapper)
 
-    @Operation(summary = "查看招募卡池目录（含停用卡池及退役UP槽）")
+    @Operation(summary = "查看招募卡池目录（含隐藏、停用卡池及退役UP槽）")
     @GetMapping
     fun list(): ApiResult<RecruitmentCatalogAdminResponse> {
         requireAdmin()

@@ -118,13 +118,19 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         val existingPools = current.pools.associateBy { it.poolId }
         val existingAgents = current.temporaryAgents.map { it.agentId }.toSet()
         val existingEvents = events.associateBy { it.eventId }
-        val existingBatches = batches.map { it.batchId }.toSet()
+        val existingBatches = batches.associateBy { it.batchId }
         val pools = document.pools.associateBy { it.poolId }
-        val definitions = document.pools.mapNotNull { it.snapshot.catalogPoolId }.distinct()
+        val definitions = document.pools.flatMap { listOfNotNull(it.snapshot.catalogPoolId, it.mappedSnapshot?.catalogPoolId) }.distinct()
             .associateWith { catalog.findPool(document.game, it) }
         val checkedOperators = mutableSetOf<String>()
         document.pools.forEach { pool ->
             val old = existingPools[pool.poolId]
+            val reference = pool.mappedSnapshot ?: pool.snapshot
+            if (definitions[reference.catalogPoolId]?.hidden == true &&
+                (old == null || (old.mappedSnapshot ?: old.snapshot).catalogPoolId != reference.catalogPoolId)
+            ) {
+                fail("隐藏卡池只能恢复当前账号已保存的个人池，不能通过备份新增关联")
+            }
             val catalogId = pool.snapshot.catalogPoolId
             if (catalogId == null) {
                 if (old == null || old.snapshot.catalogPoolId != null) fail("不能通过备份新增用户自定义卡池")
@@ -138,6 +144,12 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         }
         if (document.temporaryAgents.any { it.agentId !in existingAgents }) fail("不能通过备份新增用户临时密探")
         document.batches.forEach { batch ->
+            val pool = pools.getValue(batch.poolId)
+            if (definitions[(pool.mappedSnapshot ?: pool.snapshot).catalogPoolId]?.hidden == true &&
+                existingBatches[batch.batchId]?.poolId != batch.poolId
+            ) {
+                fail("隐藏卡池只能读取或恢复已有批次，不能通过备份新增批次")
+            }
             if (batch.batchId !in existingBatches) {
                 val catalogId = pools.getValue(batch.poolId).snapshot.catalogPoolId
                     ?: fail("旧自定义卡池不能通过备份新增计数批次")
@@ -156,6 +168,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
             val catalogId = pool.snapshot.catalogPoolId ?: fail("旧自定义卡池不能通过备份新增结果")
             if (event.poolSnapshot.catalogPoolId != catalogId) fail("记录快照与所属管理员卡池不一致")
             val definition = definitions[catalogId] ?: fail("备份引用的管理员卡池不存在")
+            if (definition.hidden) fail("隐藏卡池只能读取或恢复已有出货，不能通过备份新增结果")
             if (event.agentSnapshot.temporary) fail("不能通过备份新增用户临时密探结果")
             if (definition.upAgents.none { it.id == event.agentSnapshot.agentId } && checkedOperators.add(event.agentSnapshot.agentId)) {
                 catalog.operator(document.game, event.agentSnapshot.agentId)

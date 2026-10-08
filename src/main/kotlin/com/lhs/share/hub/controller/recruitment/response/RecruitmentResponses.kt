@@ -30,6 +30,7 @@ data class RecruitmentArchiveResponse(
     val summary: RecruitmentSummary,
     val gameMismatch: Boolean,
     val poolSummaries: Map<String, RecruitmentSummary> = emptyMap(),
+    val poolStates: Map<String, String> = emptyMap(),
 )
 
 data class RecruitmentEventPage(val items: List<RecruitmentEvent>, val nextCursor: String?, val archiveRevision: Long)

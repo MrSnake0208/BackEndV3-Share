@@ -14,4 +14,5 @@ data class RecruitmentCatalogWriteRequest(
     val poolType: String? = null,
     val enabled: Boolean = true,
     val upAgents: List<RecruitmentUpAgent> = emptyList(),
+    val hidden: Boolean? = null,
 )

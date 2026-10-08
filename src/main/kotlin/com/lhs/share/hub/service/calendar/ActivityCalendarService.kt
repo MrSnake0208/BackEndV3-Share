@@ -60,7 +60,7 @@ class ActivityCalendarService(
             recruitment.all().mapNotNull { pool ->
                 val start = pool.startDate ?: return@mapNotNull null
                 val end = pool.endDate ?: return@mapNotNull null
-                if (!pool.enabled || start > end || enabled == false || (game != null && pool.game != game) ||
+                if (pool.hidden || !pool.enabled || start > end || enabled == false || (game != null && pool.game != game) ||
                     (from != null && end < from) || (to != null && start > to)
                 ) {
                     return@mapNotNull null

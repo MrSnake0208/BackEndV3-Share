@@ -41,6 +41,7 @@ class ActivityCalendarServiceTest {
             pool("later", date.plusDays(1), date.plusDays(3)),
             pool("earlier", date.minusDays(2), date),
             pool("disabled", date, date).copy(enabled = false),
+            pool("hidden", date, date).copy(hidden = true),
             pool("missing-start", null, date),
             pool("missing-end", date, null),
             pool("no-dates", null, null),

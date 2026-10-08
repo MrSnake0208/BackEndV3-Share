@@ -81,6 +81,9 @@ class RecruitmentRequestDecoder(mapper: ObjectMapper) {
 
     fun <T> read(node: JsonNode, type: Class<T>): T {
         if (!node.isObject) throw recruitmentInvalid("请求必须是JSON对象")
+        if (type == RecruitmentCatalogWriteRequest::class.java && node.has("hidden") && !node.get("hidden").isBoolean) {
+            throw recruitmentInvalid("hidden必须是布尔值；省略时保留已有状态")
+        }
         validateTemporalTokens(node)
         return try {
             strictMapper.treeToValue(node, type) ?: throw recruitmentInvalid("请求不能为空")

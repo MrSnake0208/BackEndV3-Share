@@ -27,11 +27,11 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 
 以下接口须 JWT 与 `recruitment_catalog:write`，复用现有平台管理员/超级管理员权限；普通登录用户返回403。GET 不写入 Hub 数据库；经核对的静态目录是只读初值，管理员覆盖保存在 `recruitment_catalog`。
 
-- `GET /v1/admin/recruitment-catalog` → `{pools}`，含两游戏、停用池及退役槽。
+- `GET /v1/admin/recruitment-catalog` → `{pools}`，含两游戏、隐藏池、停用池及退役槽。
 - `POST /v1/admin/recruitment-catalog` → 新池，`expected_revision=0`。
 - `PUT /v1/admin/recruitment-catalog/{poolId}` → 更新，路径 ID 须匹配 body，`expected_revision` 必须等于当前 `revision`，并发修改409。
 
-写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=5 且 spOf 为空的普通图鉴密探（不含电影/SP），有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
+写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,hidden?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=5 且 spOf 为空的普通图鉴密探（不含电影/SP），有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
 
 ## 写接口
 
@@ -117,3 +117,26 @@ remaining_pulls按40抽口径替换当前进度0–39；span和尾抽各计一�
 ```
 
 界面打开弹窗后分页读取本池events，并使用该页archive_revision提交。读取失败不可当空池覆盖；网络重试保留新event_id和request_id，409重读并核对草稿。再次保存相同已有event_id不会新增出货计数。
+
+
+## 目录隐藏与安全修正（2026-10-08）
+
+`recruitment_catalog.hidden` 是独立布尔值，旧 Mongo 文档缺失时读为 false。hidden 比 enabled 优先；隐藏时原 enabled 保留，恢复必须明确选择正常显示或停用但显示。PUT 省略 hidden 保留已有值，POST 省略默认 false；显式 null、字符串或数字均为 422。批量导入仍只新增，不覆盖已有 ID；新池可带布尔 hidden。
+
+| 状态 | 公共 catalog / 无个人池账号 | 已保存个人池 | 新出货 / 批次 | 已有事件与真实进度 |
+| --- | --- | --- | --- | --- |
+| hidden=false, enabled=true | 展示并自动投影 | 保留 | 按原规则允许 | 允许维护 |
+| hidden=false, enabled=false | 仍展示并自动投影 | 保留 | 拒绝 | 允许维护 |
+| hidden=true | 不展示、不自动追加、不允许首次关联 | 原 pool_id / progress / 摘要保留 | 拒绝 | 允许维护、编辑、删除及原规则撤销 |
+
+public catalog 的 catalog_revision 来自本游戏完整目录，隐藏/恢复和隐藏池编辑仍改变版本，但响应不泄露隐藏池条目。archive 额外返回 `pool_states: {个人池ID: "enabled"|"disabled"|"hidden"}`，仅描述返回的池；该状态不写入个人 snapshot，不进入 JSON 备份 schema。GET 不创建或删除个人档案。events/batches/摘要/UP 次数及累计不因隐藏而删除；历史入口无需公共 catalog 中存在该项。
+
+pool_create 和 newEvents（event_create / batch_create / pool_records_save 新事件）均由服务端拒绝隐藏池；set_current_pool / progress_set / pool_records_save 自动关联只能从非隐藏投影选择。已经保存的隐藏池允许选择、真实进度校正、原事件换选/抽数/日期/备注维护及删除。pool_records_save 在任何写入前区分旧 ID 与新 ID，混合新增+编辑/删除整包失败，保留原事务、CAS、request_id 幂等和账号 fence。
+
+preview 与 commit 均重新检查隐藏状态。隐藏池备份只允许目标账号已有相同个人池和固定目录身份，事件/批次须有服务端相同存量身份；有效与 tombstone 都能判重/冲突保留，不能借 JSON 创建新结果。export 和离线读取保持原 schema 和历史事实。**安全边界：**v1 备份无可信来源证明，无法区分已丢失的真实离线结果与伪造新结果。隐藏期间不能向空账号首次恢复隐藏池，也不能恢复服务端从未保存的事件/批次；先由管理员明确恢复显示再按原恢复校验执行。没有放宽校验或清理旧数据。
+
+安全编辑保持 pool_id/game 不可修改；录错身份请先隐藏错误卡池，再新建正确卡池。名称、类型、日期、状态修改不会重写抽数事实。未变更的历史 UP 绑定保留，不因图鉴暂不可用阻止 metadata 保存；已经正式绑定的固定槽不再换绑，错配退役旧槽并新增正确槽，省略旧槽仍退役保留。已保存占位名称保留，首次图鉴映射继续沿用固定槽身份。此策略保守保护离线备份和潜在历史引用，未提供永久删除或槽 ID 复用。
+
+已修复两个编辑缺陷：更新 revision=0/缺失的旧目录文档曾误走 insert 造成重复 ID 409；未变更的旧绑定曾被重新按最新图鉴校验，导致名称/日期等无关修正被 422 拦住。现在 create 使用唯一 _id，update 按原 revision CAS（缺失等价0），并同时更新 hidden、updatedBy/updatedAt；真正并发冲突仍 409，不自动覆盖。
+
+公共活动日历的招募派生项也排除隐藏池，避免错误卡池从另一个公共入口出现；招募管理员目录仍完整保留。
