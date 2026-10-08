@@ -773,4 +773,88 @@ class RecruitmentMongoTest {
         accountService.update("u", "a", "changed", null)
         verify(exactly = 1) { publisher.publish("u", "a", "account_updated", any(), any()) }
     }
+
+    @Test fun `legacy Mongo hidden omission defaults false and catalog CAS persists visibility without restoring on old PUT`() {
+        template.getCollection("recruitment_catalog").updateOne(
+            org.bson.Document("_id", "catalog_p"),
+            org.bson.Document("\$unset", org.bson.Document("hidden", "")),
+        )
+        val old = catalogStore.find("catalog_p")!!
+        assertFalse(old.hidden)
+        assertEquals(1, catalog.catalog("如鸢").path("pools").size())
+        val request = com.lhs.share.hub.controller.recruitment.request.RecruitmentCatalogWriteRequest(
+            "catalog_p",
+            "如鸢",
+            "修正池",
+            1,
+            upAgents = old.upAgents,
+            hidden = true,
+        )
+        val next = catalog.update("admin", "catalog_p", request)
+        assertTrue(catalogStore.find("catalog_p")!!.hidden)
+        assertEquals(2L, next.revision)
+        assertEquals("admin", catalogStore.find("catalog_p")!!.updatedBy)
+        assertThrows(RecruitmentApiException::class.java) { catalog.update("other", "catalog_p", request.copy(hidden = false)) }
+        catalog.update("admin", "catalog_p", request.copy(expectedRevision = 2, hidden = null, name = "继续修正"))
+        assertTrue(catalogStore.find("catalog_p")!!.hidden)
+        assertEquals(3L, catalogStore.find("catalog_p")!!.revision)
+        assertTrue(service.archive("u", "b").pools.isEmpty())
+        assertNull(store.archive("u", "b"))
+    }
+
+    @Test fun `hidden mixed request rolls back events progress revision request id and preserves owner history summaries`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"old","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+        )
+        command("progress_set", """{"pool_id":"p","progress":7}""")
+        val before = store.archive("u", "a")!!
+        val event = store.event("u", "a", "old")!!
+        template.save(catalogStore.find("catalog_p")!!.copy(hidden = true))
+        val view = service.archive("u", "a")
+        assertEquals(before.pools.single().poolId, view.pools.single().poolId)
+        assertEquals(24L, view.summary.knownTotalPulls)
+        assertEquals(1L, view.poolSummaries.getValue("p").upAgentCounts!!.getValue("catalog_p:up:A"))
+        assertEquals("hidden", view.poolStates.getValue("p"))
+        assertTrue(service.archive("u", "b").pools.isEmpty())
+        val mixed = request(
+            before.archiveRevision,
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"old","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":10}]}""",
+            "mixed-hidden",
+        )
+        assertThrows(RecruitmentApiException::class.java) { service.command("u", mixed) }
+        assertEquals(before, store.archive("u", "a"))
+        assertEquals(event, store.event("u", "a", "old"))
+        assertNull(store.event("u", "a", "new"))
+        assertNull(store.request("u", "a", "mixed-hidden"))
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"old","agent_id":"catalog_p:up:A","pull_span":20}]}""",
+        )
+        assertEquals(41L, service.archive("u", "a").summary.knownTotalPulls)
+    }
+
+    @Test fun `missing legacy revision can be edited once and stale zero revision cannot overwrite it`() {
+        template.getCollection("recruitment_catalog").updateOne(
+            org.bson.Document("_id", "catalog_p"),
+            org.bson.Document("\$unset", org.bson.Document("revision", "").append("hidden", "")),
+        )
+        val old = catalogStore.find("catalog_p")!!
+        assertEquals(0L, old.revision)
+        val request = com.lhs.share.hub.controller.recruitment.request.RecruitmentCatalogWriteRequest(
+            "catalog_p",
+            "如鸢",
+            "修正旧池",
+            0,
+            upAgents = old.upAgents,
+            hidden = true,
+        )
+        catalog.update("admin", "catalog_p", request)
+        assertEquals(1L, catalogStore.find("catalog_p")!!.revision)
+        assertTrue(catalogStore.find("catalog_p")!!.hidden)
+        assertThrows(RecruitmentApiException::class.java) { catalog.update("other", "catalog_p", request.copy(hidden = false)) }
+        assertTrue(catalogStore.find("catalog_p")!!.hidden)
+    }
 }

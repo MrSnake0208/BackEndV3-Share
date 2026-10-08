@@ -121,4 +121,26 @@ class AdminRecruitmentCatalogControllerContractTest {
         mvc.perform(put("/v1/admin/recruitment-catalog/pool").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isConflict).andExpect(jsonPath("$.error.code").value("recruitment_revision_conflict"))
     }
+
+    @Test fun `hidden boolean has a strict optional contract and admin list includes it`() {
+        admin()
+        listOf("\"false\"", "0", "null", "[]", "{}").forEach { token ->
+            mvc.perform(
+                put("/v1/admin/recruitment-catalog/pool").contentType(MediaType.APPLICATION_JSON)
+                    .content(body.dropLast(1) + ",\"hidden\":$token}"),
+            )
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify { catalog wasNot io.mockk.Called }
+        every { catalog.update("admin", "pool", any()) } returns pool.copy(hidden = true)
+        every { catalog.listForAdmin() } returns RecruitmentCatalogAdminResponse(listOf(pool.copy(hidden = true)))
+        mvc.perform(
+            put("/v1/admin/recruitment-catalog/pool").contentType(MediaType.APPLICATION_JSON)
+                .content(body.dropLast(1) + ",\"hidden\":true}"),
+        )
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.hidden").value(true))
+        mvc.perform(get("/v1/admin/recruitment-catalog")).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.pools[0].hidden").value(true))
+        verify { catalog.update("admin", "pool", match { it.hidden == true }) }
+    }
 }

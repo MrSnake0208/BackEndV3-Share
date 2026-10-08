@@ -511,6 +511,70 @@ class RecruitmentExchangeServiceTest {
         }
     }
 
+    @Test fun `hidden history exports and dedupes but new pools events and batches cannot be imported`() {
+        val fixture = fixture()
+        val hidden = com.lhs.share.hub.repository.entity.RecruitmentCatalogPool(
+            "catalog",
+            "如鸢",
+            "隐藏池",
+            upAgents = listOf(slot),
+            hidden = true,
+        )
+        every { fixture.catalog.findPool("如鸢", "catalog") } returns hidden
+        every { fixture.store.exchangeEvents("u", "a", 20_001) } returns listOf(record())
+        val backup = fixture.service.export("u", "a")
+        assertEquals(1, backup.events.size)
+        assertFalse(mapper.valueToTree<JsonNode>(backup).path("pools").first().has("hidden"))
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(backup)))
+        assertTrue(preview.items.any { it.status == "duplicate" })
+        val batch = RecruitmentBatch("u:a:new-batch", "u", "a", "new-batch", "p", 40, now)
+        listOf(
+            document(record("new", order = 2)),
+            backup.copy(
+                pools = listOf(backup.pools.single().copy(poolId = "new-pool")),
+                currentPoolId = "new-pool",
+                events = listOf(backup.events.single().copy(poolId = "new-pool")),
+            ),
+            exchangeDocument(state, listOf(record().copy(batchId = "new-batch")), listOf(batch), now),
+        ).forEach { forged ->
+            assertThrows(RecruitmentApiException::class.java) {
+                fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(forged)))
+            }
+        }
+        every { fixture.store.archive("u", "a") } returns state.copy(pools = emptyList(), currentPoolId = null)
+        assertThrows(RecruitmentApiException::class.java) {
+            fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(backup)))
+        }
+        verify(exactly = 0) {
+            fixture.store.insertEvent(any())
+            fixture.store.insertBatch(any())
+            fixture.store.saveArchive(any(), any())
+        }
+    }
+
+    @Test fun `commit rechecks hiding after public preview and refuses new backup facts before writes`() {
+        val fixture = fixture()
+        val node = mapper.valueToTree<JsonNode>(document(record()))
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", node))
+        every { fixture.catalog.findPool("如鸢", "catalog") } returns
+            com.lhs.share.hub.repository.entity.RecruitmentCatalogPool("catalog", "如鸢", "隐藏池", upAgents = listOf(slot), hidden = true)
+        val input = RecruitmentImportCommitRequest(
+            "a",
+            node,
+            previewToken = preview.previewToken,
+            documentHash = preview.documentHash,
+            expectedRevision = 10,
+            requestId = "hidden-commit",
+        )
+        assertThrows(RecruitmentApiException::class.java) { fixture.service.commit("u", input) }
+        verify(exactly = 0) {
+            fixture.store.insertEvent(any())
+            fixture.store.insertBatch(any())
+            fixture.store.saveArchive(any(), any())
+            fixture.fence.fenceRecruitmentWrite(any(), any(), any())
+        }
+    }
+
     private fun fixture(): Fixture {
         val store = mockk<RecruitmentRepository>()
         val accounts = mockk<SubAccountService>()

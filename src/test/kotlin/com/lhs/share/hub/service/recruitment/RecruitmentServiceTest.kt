@@ -592,4 +592,45 @@ class RecruitmentServiceTest {
             accounts wasNot io.mockk.Called
         }
     }
+
+    @Test fun `hidden pool retains history edits agent correction progress and rejects mixed or direct additions without writes`() {
+        historical()
+        val hidden = managed.copy(hidden = true)
+        every { catalogStore.find("catalog_p") } returns hidden
+        every { catalogStore.all() } returns listOf(hidden)
+        val before = events.toMap()
+        val archiveBefore = state
+        listOf(
+            "event_create" to
+                """{"pool_id":"p","mode":"historical","entries":[{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            "batch_create" to
+                """{"pool_id":"p","mode":"historical","total_pull_count":40,"entries":[{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+            "pool_create" to """{"pool_id":"new-pool","catalog_pool_id":"catalog_p","progress":0}""",
+            "pool_records_save" to
+                """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:B","pull_span":20},{"event_id":"new","agent_id":"catalog_p:up:A","pull_span":17}],"deleted_event_ids":["B"]}""",
+        ).forEach { (operation, json) -> assertThrows(RecruitmentApiException::class.java) { command(operation, json) } }
+        assertEquals(before, events)
+        assertEquals(archiveBefore, state)
+        assertTrue(batches.isEmpty())
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:B","pull_span":20}],"deleted_event_ids":["B"]}""",
+        )
+        assertEquals("catalog_p:up:B", events.getValue("A").agentSnapshot.agentId)
+        assertEquals(20L, events.getValue("A").pullSpan)
+        assertEquals(21L, state.pools.single().progress)
+        command("progress_set", """{"pool_id":"p","progress":7}""")
+        command("event_update", """{"event_id":"C","entry":{"agent_id":"catalog_p:up:A","pull_span":18}}""")
+        command("event_delete", """{"event_id":"C"}""")
+        command("event_restore", """{"event_id":"C"}""")
+        assertEquals(45L, count())
+        state = state.copy(pools = emptyList(), currentPoolId = null)
+        listOf(
+            "set_current_pool" to """{"pool_id":"catalog:catalog_p"}""",
+            "progress_set" to """{"pool_id":"catalog:catalog_p","progress":7}""",
+            "pool_records_save" to """{"pool_id":"catalog:catalog_p","entries":[],"remaining_pulls":19}""",
+            "event_create" to """{"pool_id":"catalog:catalog_p","mode":"historical","entries":[]}""",
+        ).forEach { (operation, json) -> assertThrows(RecruitmentApiException::class.java) { command(operation, json) } }
+        assertTrue(state.pools.isEmpty())
+    }
 }

@@ -409,4 +409,26 @@ class RecruitmentExchangeMongoTest {
             executor.shutdownNow()
         }
     }
+
+    @Test fun `hidden histories roundtrip in source account while empty target and post-preview additions are refused`() {
+        initialize()
+        historical()
+        command("a", "progress_set", """{"pool_id":"p","progress":7}""")
+        val node = backup()
+        val preparedBeforeHide = prepared(node)
+        val old = directory.find("test_pool")!!
+        assertTrue(directory.save(old.copy(revision = old.revision + 1, hidden = true)))
+        val exported = service.export("u", "a")
+        assertEquals(1, exported.events.size)
+        assertEquals(7L, exported.pools.single().progress)
+        val archiveBefore = store.archive("u", "a")!!
+        service.commit("u", prepared(mapper.valueToTree(exported), "a"))
+        assertEquals(1, service.export("u", "a").events.size)
+        assertEquals(7L, store.archive("u", "a")!!.pools.single().progress)
+        assertEquals(archiveBefore.baseline, store.archive("u", "a")!!.baseline)
+        assertThrows(RecruitmentApiException::class.java) { service.preview("u", RecruitmentImportPreviewRequest("b", node)) }
+        assertThrows(RecruitmentApiException::class.java) { service.commit("u", preparedBeforeHide) }
+        assertNull(store.archive("u", "b"))
+        assertTrue(store.exchangeEvents("u", "b", 20_001).isEmpty())
+    }
 }

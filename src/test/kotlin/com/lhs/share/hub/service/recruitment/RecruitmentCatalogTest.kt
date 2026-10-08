@@ -34,7 +34,7 @@ class RecruitmentCatalogTest {
     init {
         every { repository.all() } answers { saved.values.toList() }
         every { repository.find(any()) } answers { saved[firstArg()] }
-        every { repository.save(any()) } answers {
+        every { repository.save(any(), any()) } answers {
             val next = firstArg<RecruitmentCatalogPool>()
             if ((saved[next.poolId]?.revision ?: 0) != next.revision - 1) {
                 false
@@ -72,7 +72,7 @@ class RecruitmentCatalogTest {
         assertEquals("yuan-pool:up:1", pools.first().path("up_agents").first().path("id").asText())
         assertEquals("yuan-pool", catalog.snapshot("代号鸢", "yuan-pool").catalogPoolId)
         assertEquals(1, catalog.catalog("如鸢").path("pools").size())
-        verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { repository.save(any(), any()) }
         verify(exactly = 0) { operators.save(any()) }
         assertThrows(RecruitmentApiException::class.java) { catalog.catalog("other") }
         assertThrows(RecruitmentApiException::class.java) { catalog.snapshot("如鸢", "yuan-pool") }
@@ -132,7 +132,7 @@ class RecruitmentCatalogTest {
         assertEquals(view, catalog.projectPools(existing, "如鸢"))
         assertEquals(listOf("old-id"), catalog.projectPools(existing).map { it.poolId })
         assertEquals(listOf("old-id"), existing.map { it.poolId })
-        verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { repository.save(any(), any()) }
     }
 
     @Test fun `automatic identities cannot collide with a retained legacy pool`() {
@@ -210,7 +210,7 @@ class RecruitmentCatalogTest {
             valid.copy(upAgents = listOf(valid.upAgents.first().copy(operatorId = "missing"))),
             valid.copy(startDate = LocalDate.parse("2026-10-02"), endDate = LocalDate.parse("2026-10-01")),
         ).forEach { input -> assertThrows(RecruitmentApiException::class.java) { catalog.create("admin", input) } }
-        verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { repository.save(any(), any()) }
         catalog.create("admin", valid)
         assertThrows(RecruitmentApiException::class.java) {
             catalog.update("admin", "pool", valid.copy(expectedRevision = 1, game = "代号鸢"))
@@ -218,5 +218,77 @@ class RecruitmentCatalogTest {
         every { operators.count() } returns 1L
         assertThrows(RecruitmentApiException::class.java) { catalog.operator("如鸢", "char_001_yangxiu") }
         verify(exactly = 0) { operators.save(any()) }
+    }
+
+    @Test fun `hidden state filters public reads preserves personal pools and survives old client updates`() {
+        val request = RecruitmentCatalogWriteRequest("hidden-pool", "如鸢", "旧池", 0)
+        val publicPool = catalog.create("admin", request)
+        assertFalse(publicPool.hidden)
+        val before = catalog.catalog("如鸢").path("catalog_revision").asText()
+        val hidden = catalog.update("admin", request.poolId, request.copy(expectedRevision = 1, hidden = true))
+        assertTrue(hidden.hidden)
+        assertEquals(0, catalog.catalog("如鸢").path("pools").size())
+        assertTrue(before != catalog.catalog("如鸢").path("catalog_revision").asText())
+        assertTrue(catalog.listForAdmin().pools.single().hidden)
+        assertTrue(catalog.projectPools(emptyList(), "如鸢").isEmpty())
+        val personal = RecruitmentPool("stable-personal", catalog.snapshot("如鸢", request.poolId, false), 7)
+        val projected = catalog.projectPools(listOf(personal), "如鸢").single()
+        assertEquals("stable-personal", projected.poolId)
+        assertEquals(7L, projected.progress)
+        assertEquals(mapOf("stable-personal" to "hidden"), catalog.poolStates(listOf(personal)))
+        assertThrows(RecruitmentApiException::class.java) { catalog.snapshot("如鸢", request.poolId) }
+        val edited = catalog.update("admin", request.poolId, request.copy(expectedRevision = 2, name = "修正名称"))
+        assertTrue(edited.hidden)
+        val disabled = catalog.update("admin", request.poolId, request.copy(expectedRevision = 3, hidden = false, enabled = false))
+        assertFalse(disabled.hidden)
+        assertEquals(1, catalog.catalog("如鸢").path("pools").size())
+        assertFalse(catalog.catalog("如鸢").path("pools").first().path("enabled").asBoolean())
+        assertThrows(RecruitmentApiException::class.java) {
+            catalog.update("admin", request.poolId, request.copy(expectedRevision = 3, hidden = false))
+        }
+        assertFalse(saved.getValue(request.poolId).enabled)
+        assertTrue(catalog.update("admin", request.poolId, request.copy(expectedRevision = 4, hidden = false)).enabled)
+    }
+
+    @Test fun `unavailable unchanged UP bindings do not prevent metadata or status corrections and identities cannot be reused`() {
+        val old = RecruitmentUpAgent("pool:up:old", "旧图鉴身份", "unavailable")
+        saved["pool"] = RecruitmentCatalogPool("pool", "如鸢", "旧名称", revision = 2, upAgents = listOf(old))
+        every { operators.count() } returns 1L
+        val input = RecruitmentCatalogWriteRequest(
+            "pool", "如鸢", "修正名称", 2,
+            startDate = LocalDate.parse("2026-10-01"), endDate = LocalDate.parse("2026-10-02"),
+            poolType = "限时", upAgents = listOf(old), hidden = true,
+        )
+        val updated = catalog.update("admin", "pool", input)
+        assertEquals(old, updated.upAgents.single())
+        assertTrue(updated.hidden)
+        assertEquals(input.startDate, updated.startDate)
+        assertThrows(RecruitmentApiException::class.java) {
+            catalog.update("admin", "pool", input.copy(expectedRevision = 3, upAgents = listOf(old.copy(operatorId = null))))
+        }
+        val newSlot = RecruitmentUpAgent("pool:up:new", "新占位")
+        val corrected = catalog.update("admin", "pool", input.copy(expectedRevision = 3, upAgents = listOf(newSlot)))
+        assertTrue(corrected.hidden)
+        assertEquals(old.copy(active = false), corrected.upAgents.first { it.id == old.id })
+        assertEquals(newSlot, corrected.upAgents.first { it.id == newSlot.id })
+    }
+
+    @Test fun `import may hide new pools without overwriting existing hidden records`() {
+        val json = mapper.readTree("""{"pools":[{"pool_id":"pool","game":"如鸢","name":"池","hidden":true}]}""")
+        assertEquals(1, catalog.importCatalog("admin", json).createdCount)
+        assertTrue(saved.getValue("pool").hidden)
+        assertEquals(1, catalog.importCatalog("admin", json).skippedCount)
+        listOf("\"false\"", "0", "null", "[]").forEach { token ->
+            val invalid = mapper.readTree("""{"pools":[{"pool_id":"other","game":"如鸢","name":"池","hidden":$token}]}""")
+            assertThrows(RecruitmentApiException::class.java) { catalog.importCatalog("admin", invalid) }
+        }
+    }
+
+    @Test fun `editing persisted revision zero uses update instead of duplicate insertion`() {
+        saved["legacy"] = RecruitmentCatalogPool("legacy", "如鸢", "旧池")
+        val edited = catalog.update("admin", "legacy", RecruitmentCatalogWriteRequest("legacy", "如鸢", "修正", 0, hidden = true))
+        assertEquals(1L, edited.revision)
+        assertTrue(edited.hidden)
+        verify { repository.save(match { it.poolId == "legacy" && it.revision == 1L }, true) }
     }
 }

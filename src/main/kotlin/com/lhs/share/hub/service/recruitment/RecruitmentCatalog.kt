@@ -35,7 +35,8 @@ class RecruitmentCatalog(
 
     fun catalog(game: String): JsonNode {
         requireGame(game)
-        return response(all().filter { it.game == game })
+        val pools = all().filter { it.game == game }
+        return response(pools.filter { !it.hidden }, pools)
     }
 
     fun listForAdmin(): RecruitmentCatalogAdminResponse {
@@ -51,7 +52,7 @@ class RecruitmentCatalog(
     private fun all(): List<RecruitmentCatalogPool> = repository.all()
         .sortedWith(compareByDescending<RecruitmentCatalogPool> { it.startDate }.thenBy { it.poolId })
 
-    private fun response(pools: List<RecruitmentCatalogPool>): JsonNode {
+    private fun response(pools: List<RecruitmentCatalogPool>, versionPools: List<RecruitmentCatalogPool>): JsonNode {
         val names = operatorNames()
         val items = mapper.createArrayNode()
         pools.forEach { pool ->
@@ -64,10 +65,10 @@ class RecruitmentCatalog(
             item.put("up_status", snapshot.upStatus)
             items.add(item)
         }
-        val latest = pools.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH
+        val latest = versionPools.maxOfOrNull { it.updatedAt } ?: Instant.EPOCH
         return mapper.createObjectNode().put(
             "catalog_revision",
-            "db:${pools.size}:${pools.sumOf { it.revision }}:$latest",
+            "db:${versionPools.size}:${versionPools.sumOf { it.revision }}:$latest",
         ).set("pools", items)
     }
 
@@ -79,6 +80,7 @@ class RecruitmentCatalog(
             "recruitment_catalog_pool_not_found",
             "当前游戏没有该管理员卡池，请联系管理员",
         )
+        if (requireEnabled && pool.hidden) throw recruitmentInvalid("该卡池已隐藏，仅可维护已有历史，不能新增记录")
         if (requireEnabled && !pool.enabled) throw recruitmentInvalid("该卡池已停用，不能新增记录")
         return snapshotOf(pool)
     }
@@ -115,7 +117,7 @@ class RecruitmentCatalog(
     fun slot(game: String, poolId: String, id: String, requireActive: Boolean = true): RecruitmentUpAgent? =
         findPool(game, poolId)?.let { pool ->
             val slot = snapshotOf(pool, operatorNames()).upAgents.firstOrNull { it.id == id } ?: return@let null
-            if (requireActive && (!pool.enabled || !slot.active)) throw recruitmentInvalid("该卡池或UP密探已停用，不能新增记录")
+            if (requireActive && (pool.hidden || !pool.enabled || !slot.active)) throw recruitmentInvalid("该卡池已隐藏、停用或UP已退役，不能新增记录")
             slot
         }
 
@@ -156,7 +158,7 @@ class RecruitmentCatalog(
         if (game != null) {
             val linked = pools.mapNotNull { (it.mappedSnapshot ?: it.snapshot).catalogPoolId }.toSet()
             val ids = pools.map { it.poolId }.toMutableSet()
-            latest.values.filter { it.game == game && it.poolId !in linked }.forEach { pool ->
+            latest.values.filter { it.game == game && !it.hidden && it.poolId !in linked }.forEach { pool ->
                 val base = "catalog:${pool.poolId}"
                 var id = base
                 var suffix = 0
@@ -183,6 +185,19 @@ class RecruitmentCatalog(
             val name = slot?.name ?: names[event.agentSnapshot.agentId] ?: event.agentSnapshot.name
             event.copy(poolSnapshot = snapshot, agentSnapshot = event.agentSnapshot.copy(name = name))
         }
+    }
+
+    fun poolStates(pools: List<RecruitmentPool>): Map<String, String> {
+        val latest = all().associateBy { it.poolId }
+        return pools.mapNotNull { pool ->
+            val reference = pool.mappedSnapshot ?: pool.snapshot
+            val definition = latest[reference.catalogPoolId]?.takeIf { it.game == reference.game } ?: return@mapNotNull null
+            pool.poolId to when {
+                definition.hidden -> "hidden"
+                definition.enabled -> "enabled"
+                else -> "disabled"
+            }
+        }.toMap()
     }
 
     fun create(actorUserId: String, input: RecruitmentCatalogWriteRequest): RecruitmentCatalogPool {
@@ -237,6 +252,7 @@ class RecruitmentCatalog(
         knownNames: Map<String, String>,
     ): RecruitmentCatalogPool {
         if (!node.isObject) throw recruitmentInvalid("第${position}个卡池必须是JSON对象")
+        if (node.has("hidden") && !node.get("hidden").isBoolean) throw recruitmentInvalid("第${position}个卡池hidden必须是布尔值")
         val poolId = requiredText(node, "pool_id", position)
         val game = requiredText(node, "game", position)
         requireGame(game)
@@ -279,6 +295,7 @@ class RecruitmentCatalog(
             sourceRevision = sourceRevision,
             sourcePages = sourcePages,
             sourceNote = sourceNote,
+            hidden = optionalBoolean(node, "hidden", position, false),
         )
     }
 
@@ -409,6 +426,16 @@ class RecruitmentCatalog(
         }
         val slots = input.upAgents.map { slot ->
             if (!SLOT_ID.matches(slot.id) || !slot.id.startsWith("${input.poolId}:up:")) throw recruitmentInvalid("UP槽ID必须属于当前卡池且不超过128字")
+            val old = current?.upAgents?.firstOrNull { it.id == slot.id }
+            if (old?.operatorId != null && old.operatorId != slot.operatorId) {
+                throw recruitmentInvalid("已绑定UP名额不能更换历史身份，请退役旧名额并添加正确的新名额")
+            }
+            if (old != null && old.operatorId == slot.operatorId) {
+                if (old.operatorId == null && old.name != slot.name.trim()) {
+                    throw recruitmentInvalid("已保存占位名额不能更换历史名称，请退役旧名额并添加新名额")
+                }
+                return@map old.copy(active = slot.active)
+            }
             val operator = slot.operatorId?.let { operator(input.game, it) }
             slot.copy(name = operator?.name ?: validName(slot.name))
         } + current?.upAgents.orEmpty().filter { old -> input.upAgents.none { it.id == old.id } }.map { it.copy(active = false) }
@@ -432,9 +459,10 @@ class RecruitmentCatalog(
             sourceRevision = current?.sourceRevision,
             sourcePages = current?.sourcePages.orEmpty(),
             sourceNote = current?.sourceNote,
+            hidden = input.hidden ?: current?.hidden ?: false,
         )
         try {
-            if (!repository.save(next)) throw recruitmentConflict("卡池已变化，请刷新后重试")
+            if (!repository.save(next, current != null)) throw recruitmentConflict("卡池已变化，请刷新后重试")
         } catch (_: DuplicateKeyException) {
             throw recruitmentConflict("卡池已变化，请刷新后重试")
         }
