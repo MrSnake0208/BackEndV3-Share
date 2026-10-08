@@ -44,6 +44,27 @@ class OpenApiTokenServiceTest {
     )
 
     @Test
+    fun `connection provenance comes from owned persistent token and never from cached principal alone`() {
+        val secret = java.util.UUID.randomUUID().toString()
+        every { tokenRepository.findByToken(secret) } returns entity(token = secret)
+        assertEquals("token-id", service.connectionIdForAuthorization("Bearer $secret", OpenApiPrincipal("u1", "main")))
+        assertThrows(InventoryApiException::class.java) {
+            service.connectionIdForAuthorization("Bearer $secret", OpenApiPrincipal("u2", "main"))
+        }
+        assertThrows(InventoryApiException::class.java) {
+            service.connectionIdForAuthorization("Bearer $secret", OpenApiPrincipal("u1", "alt"))
+        }
+        every { tokenRepository.findByToken(secret) } returns null
+        assertThrows(InventoryApiException::class.java) {
+            service.connectionIdForAuthorization("Bearer $secret", OpenApiPrincipal("u1", "main"))
+        }
+        every { tokenRepository.findByIdAndUserId("token-id", "u1") } returns entity()
+        every { tokenRepository.findByIdAndUserId("token-id", "u2") } returns null
+        assertEquals("main", service.accountIdForToken("u1", "token-id"))
+        assertEquals(404, assertThrows(ApiResultException::class.java) { service.accountIdForToken("u2", "token-id") }.statusCode)
+    }
+
+    @Test
     fun `generation maps public scopes and returns the full token once`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
             SubAccount(id = "a1", userId = "u1", accountId = "main", name = "大号")

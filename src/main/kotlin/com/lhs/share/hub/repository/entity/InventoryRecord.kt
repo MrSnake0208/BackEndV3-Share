@@ -92,6 +92,8 @@ data class InventoryRecord(
     val stockEffect: String = "applied",
     /** Groups item and agent consumption records created by one atomic upgrade. */
     val transactionId: String? = null,
+    /** Authenticated Open API connection; never taken from the exchange body. */
+    val sourceConnectionId: String? = null,
 ) : Serializable
 
 /**

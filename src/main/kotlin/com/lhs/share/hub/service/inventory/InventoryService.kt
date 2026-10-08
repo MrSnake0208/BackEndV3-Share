@@ -79,7 +79,27 @@ class InventoryService(
     fun import(userId: String, accountId: String, request: InventoryImportRequest): InventoryImportResult =
         import(userId, request, accountId)
 
-    private fun import(userId: String, request: InventoryImportRequest, restrictedAccountId: String?): InventoryImportResult {
+    fun importFromConnection(
+        userId: String,
+        accountId: String,
+        connectionId: String,
+        request: InventoryImportRequest,
+    ): InventoryImportResult = import(userId, request, accountId, connectionId)
+
+    fun firstConnectionSync(userId: String, accountId: String, connectionId: String): InventoryRecord? =
+        recordRepository.findFirstByUserIdAndAccountIdAndSourceConnectionIdAndStockEffectOrderByReceivedAtAsc(
+            userId,
+            accountId,
+            connectionId,
+            "applied",
+        )
+
+    private fun import(
+        userId: String,
+        request: InventoryImportRequest,
+        restrictedAccountId: String?,
+        sourceConnectionId: String? = null,
+    ): InventoryImportResult {
         if (request.format != FORMAT) {
             throw schemaError("format must be $FORMAT")
         }
@@ -113,7 +133,7 @@ class InventoryService(
                             if (item.duplicate) {
                                 duplicates++
                             } else {
-                                when (applyRecord(userId, request.producer, item.validated)) {
+                                when (applyRecord(userId, request.producer, item.validated, sourceConnectionId)) {
                                     Effect.HISTORY_ONLY -> {
                                         historyOnly++
                                         accepted++
@@ -326,7 +346,7 @@ class InventoryService(
      * 应用单条记录:先幂等检查,再按类型分派。
      * 返回该记录产生的效果(供 accepted/duplicates/history_only/superseded 统计)。
      */
-    private fun applyRecord(userId: String, producer: ProducerDto, validated: ValidatedRecord): Effect {
+    private fun applyRecord(userId: String, producer: ProducerDto, validated: ValidatedRecord, sourceConnectionId: String?): Effect {
         val record = validated.record
 
         val entity = InventoryRecord(
@@ -342,6 +362,7 @@ class InventoryService(
             producer = ProducerInfo(platform = producer.platform, version = producer.version),
             entries = record.entries.map { RecordEntry(id = it.id, name = it.name, count = it.count) },
             stockEffect = "applied",
+            sourceConnectionId = sourceConnectionId,
         )
 
         return when (record.recordType) {

@@ -45,5 +45,12 @@ interface InventoryRecordRepository : MongoRepository<InventoryRecord, String> {
         pageable: Pageable,
     ): Page<InventoryRecord>
 
+    fun findFirstByUserIdAndAccountIdAndSourceConnectionIdAndStockEffectOrderByReceivedAtAsc(
+        userId: String,
+        accountId: String,
+        sourceConnectionId: String,
+        stockEffect: String,
+    ): InventoryRecord?
+
     fun deleteAllByUserIdAndAccountId(userId: String, accountId: String)
 }

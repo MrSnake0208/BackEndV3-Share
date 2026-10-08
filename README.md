@@ -157,6 +157,14 @@ PATCH 是真正的局部修改，可只传 `{"name":"新名称"}` 或 `{"game":"
 `422 account_game_mismatch`。部署前先 dry-run，再按说明 APPLY
 [`scripts/migrations/20260821-sub-account-game.js`](scripts/migrations/20260821-sub-account-game.js)。
 
+### MaaYuan 首次库存同步验证
+
+`GET /user/open-api/tokens/{tokenId}/first-sync` 使用本人 JWT，只读且 `Cache-Control: no-store`。先验证连接归属，再查询相同 user/account/connection 的真实已生效库存记录；返回 `connection_id / account_id / synced / record_id / received_at / data_type=inventory`，没有连接码明文。没有证据时 `synced=false`；未知、他人或已撤销连接返回404。
+
+Open API 库存写入仍要求原有 `inventory:write` 权限，并在现有事务内将认证连接编号保存为 `inventory_records.sourceConnectionId`。普通 JWT/手工导入不标记来源；历史记录及幂等重传不会被追认为新连接成果。教程不依赖 producer 自报平台、普通更新时间、revision 或 SSE toast；站外 MaaYuan 设置不可直接观察。网页刷新/跨页后可重新查询已有成果。
+
+前后端需要同时提供此契约。旧后端不支持该接口时，教程保留未验证状态。运行客户端任务以实际游戏库存为准，不为教程造测试数据。该接口证明指定连接实际写入库存，Bearer 凭证不能证明运行客户端的进程身份；其他工具持同一连接上传真实库存也会产生相同有效证据。
+
 ### 库存联调 Smoke Test
 
 另开一个已进入 `nix develop path:.` 的终端，将刚生成的完整 API Token 放入环境变量后运行：

@@ -315,3 +315,9 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 8. `item` 与 `agent` 的相同 ID 互不冲突。
 9. 同一文件重复导入的响应可解释且最终库存不变。
 10. 月/周查询只聚合 `reward_delta`，不聚合快照。
+
+## 连接来源与首次同步验证
+
+`inventory_records.sourceConnectionId` 是可空的服务端连接编号，取自已通过 `inventory:write` 验证的 Open API 连接，随真实流水在原库存事务内落库。交换正文不能声明该字段；JWT 导入及旧记录默认无来源。幂等重传不更新来源，不改变库存基线、数量或 revision 语义。
+
+本人 JWT `GET /user/open-api/tokens/{tokenId}/first-sync` 先校验 token 归属，再按 userId/accountId/sourceConnectionId/stockEffect=applied 查询已有流水。只返回记录编号与服务端接收时间等证据，不返回库存全量或 token 明文；无缓存、无写入。history_only/superseded、手工记录与普通更新时间均不是成功证据。删除记录或撤销连接后，以重新查询结果为准，不信任客户端历史完成标记。

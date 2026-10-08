@@ -175,6 +175,40 @@ class InventoryServiceTest {
     }
 
     @Test
+    fun `connection attribution is saved with real import and duplicate upload cannot claim a manual record`() {
+        val request = document(reward("manual", "2026-08-16T10:00:00+08:00", "baijinbi", 5))
+        service.import("u1", request)
+        assertEquals(null, records[Triple("u1", "main", "manual")]?.sourceConnectionId)
+        assertEquals(1, service.importFromConnection("u1", "main", "connection", request).duplicates)
+        assertEquals(null, records[Triple("u1", "main", "manual")]?.sourceConnectionId)
+        service.importFromConnection("u1", "main", "connection", document(reward("real", "2026-08-16T11:00:00+08:00", "baijinbi", 7)))
+        assertEquals("connection", records[Triple("u1", "main", "real")]?.sourceConnectionId)
+        assertEquals("applied", records[Triple("u1", "main", "real")]?.stockEffect)
+        assertEquals(12, count("u1", "baijinbi"))
+    }
+
+    @Test
+    fun `first sync queries exact owner account connection and only applied records`() {
+        every {
+            recordRepository.findFirstByUserIdAndAccountIdAndSourceConnectionIdAndStockEffectOrderByReceivedAtAsc(
+                "u1",
+                "main",
+                "connection",
+                "applied",
+            )
+        } returns null
+        assertEquals(null, service.firstConnectionSync("u1", "main", "connection"))
+        verify(exactly = 1) {
+            recordRepository.findFirstByUserIdAndAccountIdAndSourceConnectionIdAndStockEffectOrderByReceivedAtAsc(
+                "u1",
+                "main",
+                "connection",
+                "applied",
+            )
+        }
+    }
+
+    @Test
     fun `retransmission is idempotent and changed body conflicts`() {
         val request = document(reward("reward-1", "2026-08-16T10:00:00+08:00", "baijinbi", 5))
 

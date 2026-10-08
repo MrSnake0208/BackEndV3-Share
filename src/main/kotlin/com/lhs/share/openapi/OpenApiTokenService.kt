@@ -180,6 +180,19 @@ class OpenApiTokenService(
         )
     }
 
+    fun accountIdForToken(userId: String, tokenId: String): String = tokenRepository.findByIdAndUserId(tokenId, userId)?.accountId
+        ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
+
+    /** Called only after the existing scope validation; cache is not provenance. */
+    fun connectionIdForAuthorization(authorization: String?, principal: OpenApiPrincipal): String {
+        val secret = authorization?.removePrefix(BEARER_PREFIX)?.trim()
+        val entity = secret?.let(tokenRepository::findByToken)
+        if (entity == null || entity.userId != principal.userId || entity.accountId != principal.accountId) {
+            throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is invalid")
+        }
+        return checkNotNull(entity.id)
+    }
+
     fun secret(userId: String, tokenId: String): String = tokenRepository.findByIdAndUserId(tokenId, userId)?.token
         ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "token 不存在")
 

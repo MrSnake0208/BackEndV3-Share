@@ -117,7 +117,10 @@ class InventoryControllerContractTest {
     fun `API token with inventory write can import`() {
         every { tokenService.validateAuthorization("Bearer write-token", OpenApiPermission.INVENTORY_WRITE) } returns
             OpenApiPrincipal("token-user", "main")
-        every { inventoryService.import("token-user", "main", any()) } returns
+        every {
+            tokenService.connectionIdForAuthorization("Bearer write-token", OpenApiPrincipal("token-user", "main"))
+        } returns "connection-id"
+        every { inventoryService.importFromConnection("token-user", "main", "connection-id", any()) } returns
             InventoryImportResult(accepted = 1, warnings = listOf("已忽略如鸢不支持的零值密探：周忠"))
 
         mockMvc.perform(
@@ -131,9 +134,10 @@ class InventoryControllerContractTest {
             .andExpect(jsonPath("$.data.warnings[0]").value("已忽略如鸢不支持的零值密探：周忠"))
 
         verify {
-            inventoryService.import(
+            inventoryService.importFromConnection(
                 "token-user",
                 "main",
+                "connection-id",
                 match { it.records.single().let { record -> record.recordId == "test:1" && record.staminaCost == 80L } },
             )
         }
