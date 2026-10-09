@@ -247,9 +247,9 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 | GET /summary | account_id必填；完整集合中筛选已开始、未结束、未完成且7天内截止，再排序取3项；返回items、total_pending、subscribed_count |
 | GET /{eventId} | account_id必填；包括已取消历史；无记录404 subscription_not_found |
 | PUT /{eventId} | account_id、expected_version、subscribed；首次创建expected_version=null，后续使用读取的版本 |
-| PUT /{eventId}/progress | account_id、expected_version、completed、checklist；可选memo_title、memo_note、manual_completed；替换清单/旧完成字段，按提供字段更新备忘及独立完成覆盖 |
+| PUT /{eventId}/progress | account_id、expected_version、completed、checklist；可选progress_mode、memo_title、memo_note、manual_completed；新checklist模式仅替换清单，旧请求保留兼容（见文末） |
 
-请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。未传manual_completed的旧协议：非空清单要求completed=false；覆盖字段缺失时响应整体完成由所有项目计算，空清单使用旧completed。存在明确覆盖时整体完成始终优先取覆盖值（见文末独立完成契约）。新项目默认未完成是UI默认值，接口允许用户主动勾选的新项目。
+请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。未传manual_completed的旧协议：非空清单要求completed=false；覆盖字段缺失时响应整体完成由所有项目计算，空清单响应completed=false，旧completed仅保留为历史。历史覆盖字段仅保留，响应完成态统一取非空清单全部勾选（见文末待办契约）。新项目默认未完成是UI默认值，接口允许用户主动勾选的新项目。
 
 私人备忘字段（2026-10-09）：响应使用snake_case `memo_title`（默认“本期备忘”）及 `memo_note`（默认空串），Mongo沿用camelCase `memoTitle`/`memoNote`，实体默认值兼容历史缺字段记录；读取不触发写入或迁移。PUT省略任一新字段时保留服务器现值；显式null/错误类型拒绝422，memo_title空白拒绝422、原始文本最多60字、保存时trim；memo_note原样多行纯文本最多1000字，空字符串表示清空。旧客户端继续保存checklist/completed，不会抹掉新客户端备忘。标题与备注不参与isCompleted、仅未完成筛选或首页摘要；所有字段同一次@Version/CAS写入。取消/恢复保留整份备忘，权属仍为(userId,accountId,eventId)。先升级后端再启用发送备忘字段的前端，旧后端严格decoder会拒绝新字段。
 
@@ -277,31 +277,37 @@ Mongo测试必须使用项目TestMongo管理的自有临时容器，不连接已
 
 第二条要求 Docker，由测试独占临时容器，绝不能改用开发/生产 Mongo。新增测试覆盖字段缺失的旧文档、枚举 BSON 往返、原始建议/采纳快照及公开响应、独立记录计数；既有导入隔离测试覆盖重复、并发与预览过期。不会因为 Docker 未运行而跳过有效断言。
 
-## 整期完成与待办独立（2026-10-09）
+## 一个活动、一份待办清单（2026-10-09）
 
-编辑备忘展开后，「活动备忘录」标题下的「本期已完成」始终显示，说明「与下方待办清单独立」。单独的「待办事项 · 已完成 X/Y 项」表示个人清单进度；整期 true + 0/1、整期 false + 2/2 都是合法状态。新增、删除（含最后一条）、勾选和改名不会改变整期状态；备忘标题即使叫「本期已完成」也不参与状态判断。编辑保持默认折叠、最多50条及原草稿/409保护。
+活动待办是唯一新录入内容，三视图复用 CalendarSubscriptionControls。取消独立整期完成开关与标题/文字备注输入；添加待办即聚焦，最多50条、标题1–80字、稳定唯一ID。空清单显示“暂无待办”，非空全部勾选才显示“待办全部完成”，其余显示X/Y。订阅不要求待办。修改前后的卡片摘要与编辑进度一致；筛选在保存或确认放弃后更新，避免隐藏草稿。
 
-| 字段/情况 | 读取与写入语义 |
+| 数据或请求 | 完成态 / 保存语义 |
 | --- | --- |
-| Mongo `manualCompleted` / JSON `manual_completed` 缺失或存储 null | 历史模式：非空checklist取全部完成，空checklist取旧completed；读取不写库 |
-| `manual_completed: true` 或 `false` | 独立整期状态，优先于清单；明确false不会被当成缺失 |
-| 响应 `completed` | 始终为有效整期状态，供列表、详情、仅未完成和首页摘要使用 |
-| 请求 `completed` | 保留旧协议字段语义；未传独立字段时，非空清单仍要求false；新协议可通过manual_completed独立设置true |
-| 请求省略 `manual_completed` | 保留已有覆盖状态；不会清空或迁移。显式null、数字或字符串均422 |
+| 空checklist，旧completed/manual任意值 | completed=false；全部订阅保留；不进入“有未完成待办”；满足原日期条件则首页提醒 |
+| 部分勾选，旧manual=true | completed=false；待办筛选与首页提醒纳入 |
+| 全部勾选，旧manual=false | completed=true；待办筛选与首页提醒排除 |
+| 新请求progress_mode="checklist" | completed必须false，memo_title/memo_note/manual_completed不得同时提供；仅更新checklist和版本/时间，不修改旧字段 |
+| 旧请求省略progress_mode | 继续按旧规则验证/保存已提供字段；省略的备忘/manual保留；返回completed一律按清单衍生 |
+| 未识别、null或错误类型progress_mode | 422，不静默忽略、不降级重试 |
 
-新订阅初始有效状态false，覆盖字段暂缺失以兼容旧客户端。新编辑器首次实际修改TODO（新增、确认删除、勾选、改名）前，先将操作前有效整期状态写入明确覆盖，然后修改清单；首次手动操作整体开关也写覆盖。只改标题/备注、打开编辑器或取消删除均不迁移。旧客户端不传新字段仍使用旧清单协议，但不能擦除已存在的独立覆盖。
+响应completed是非空checklist全勾选的衍生结果；Mongo completed保留为历史字段，新增响应legacy_completed用于只读历史说明；manual_completed仍原样返回，但不影响新状态。加载不写库、不批量迁移、不删除字段或改唯一索引。清单模式保留未改动项目的原始title/id/顺序/勾选；新编辑标题仍按原规则去首尾空白。旧客户端的显式历史字段编辑继续兼容，不会因省略字段误删内容。
 
-保留旧completed、清单项目ID、唯一索引和(account/user/event)边界；不批量迁移。覆盖与备忘同一次版本CAS保存，取消/恢复保留；已截止仍按原规则编辑，来源不可用只读、不进入首页提醒。服务端集中通过isCompleted产生有效completed，前端subscriptionCompleted用相同优先级。useCalendarSubscriptions原样透传草稿可选字段，未保存延迟刷新和保存失败/409确认流程继续复用。
+旧自定义标题（默认“本期备忘”不展示）、非空备注和旧完成标记在“查看旧备忘内容（历史数据）”内折叠只读；无历史内容不显示。纯文本插值，保留换行、不执行HTML。新编辑器不透传旧字段，避免旧客户端覆盖值影响TODO保存；completed/manual字段只能作为历史信息读取。
 
-发布顺序：先支持新字段的后端，再前端；当前运行的旧后端严格decoder会拒绝新字段，不应绕过校验。此任务未重启服务或部署。
+“有未完成待办”仅收录非空且存在未勾选项，包括不可用来源的只读订阅；全部视图保留空订阅。首页“我的订阅 · 即将截止”使用原已开始、未截止、7天内截止条件，纳入空清单与部分清单，先计算total_pending再取3项；计数单位为活动。来源不可用不提醒，截止后已订阅的有效来源仍可编辑，不能新增/恢复已截止订阅。
 
-最小定向验证（分别在前/后端仓库运行）：
+用户×游戏账号×活动期次隔离、权限、CAS/expected_version/409、账号fence、迟到响应隔离、dirty阻断后台刷新和午夜更新均沿用。新增空行即dirty；保存中禁重复提交；删除确认仅影响当前活动草稿；收起/切视图筛选/账号/路由/取消订阅均保留已有确认。409、5xx、网络结果不明保留草稿并阻断继续保存，安全读取最新状态后还须确认替换；拒绝替换保留草稿。普通422可修正后重试。
+
+升级顺序：先升级兼容后端，再前端。旧后端严格decoder会拒绝progress_mode，显示失败并保留草稿，不绕过协议。此任务不部署、不重启服务。
+
+最小定向验证（分别在前/后端仓库）：
 
 ```bash
 node --test test/activityCalendarSubscriptions.test.js
 npx --no-install vitest run behavior/activityCalendarSubscriptions.spec.js behavior/activityCalendarSubscriptionApi.spec.js behavior/activityCalendarSubscriptionIdentity.spec.js behavior/todayCalendarSubscriptions.spec.js behavior/activityCalendarViews.spec.js behavior/activityCalendarFilters.spec.js
+npm run test:static
 ./gradlew test --tests '*ActivityCalendarSubscriptionServiceTest' --tests '*ActivityCalendarSubscriptionControllerContractTest' --tests '*ActivityCalendarSecurityTest' --console=plain
 ./gradlew integrationTest --tests '*ActivityCalendarSubscriptionMongoTest' --console=plain
 ```
 
-最后一项必须使用TestMongo自有临时容器；不能连接开发/生产数据库。真实设备软键盘仍需人工检查。
+Mongo仅允许TestMongo自有临时容器；真实手机软键盘与Safari仍须人工检查。测试结果以本任务verification.md为准。

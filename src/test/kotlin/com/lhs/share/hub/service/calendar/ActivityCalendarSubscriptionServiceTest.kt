@@ -81,10 +81,13 @@ class ActivityCalendarSubscriptionServiceTest {
         every { repository.find("user", "account", "event") } returns completed
         val cancelled = service.subscribe("user", "event", CalendarSubscribeRequest("account", 0, false))
         assertFalse(cancelled.subscribed)
-        assertTrue(cancelled.completed)
+        assertFalse(cancelled.completed)
+        assertTrue(cancelled.legacyCompleted)
         every { repository.find("user", "account", "event") } returns completed.copy(subscribed = false, version = 1)
         val restored = service.subscribe("user", "event", CalendarSubscribeRequest("account", 1, true))
-        assertTrue(restored.subscribed && restored.completed)
+        assertTrue(restored.subscribed)
+        assertFalse(restored.completed)
+        assertTrue(restored.legacyCompleted)
         verify(exactly = 3) { accounts.fenceRecruitmentWrite("user", "account", "如鸢") }
     }
 
@@ -118,7 +121,7 @@ class ActivityCalendarSubscriptionServiceTest {
         )
         assertFalse(added.completed)
         assertEquals("第二关", added.checklist.last().title)
-        assertTrue(service.progress("user", "event", CalendarProgressRequest("account", 0, true, emptyList())).completed)
+        assertFalse(service.progress("user", "event", CalendarProgressRequest("account", 0, true, emptyList())).completed)
         assertFalse(service.progress("user", "event", CalendarProgressRequest("account", 0, false, emptyList())).completed)
         failure(422) { service.progress("user", "event", CalendarProgressRequest("account", 0, true, entries)) }
         failure(422) { service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries + entries)) }
@@ -198,7 +201,12 @@ class ActivityCalendarSubscriptionServiceTest {
     fun `future completed wrong-game and stopped events never become reminders`() {
         every { calendar.publicItems("如鸢", null, null, null) } returns
             ActivityCalendarResponse(listOf(item("future").copy(startDate = day.plusDays(1)), item("done")))
-        every { repository.list("user", "account") } returns listOf(record("future"), record("done").copy(completed = true), record("gone"))
+        every { repository.list("user", "account") } returns
+            listOf(
+                record("future"),
+                record("done").copy(completed = true, checklist = listOf(CalendarChecklistEntry("done", "完成", true))),
+                record("gone"),
+            )
         assertEquals(0, service.summary("user", "account").totalPending)
         every { repository.find("user", "account", "gone") } returns record("gone")
         assertFalse(service.subscribe("user", "gone", CalendarSubscribeRequest("account", 0, false)).subscribed)
@@ -289,7 +297,7 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
-    fun `manual true and false override checklist across writes and old clients preserve either value`() {
+    fun `manual true and false are historical across new and old client writes`() {
         val pending = listOf(CalendarChecklistEntry("old-id", "待办", false))
         listOf(true, false).forEach { manual ->
             var stored = record().copy(checklist = pending)
@@ -299,21 +307,21 @@ class ActivityCalendarSubscriptionServiceTest {
                 firstArg<ActivityCalendarSubscription>().copy(version = stored.version!! + 1).also { stored = it }
             }
             val saved = service.progress("user", "event", CalendarProgressRequest("account", 0, manual, pending, manualCompleted = manual))
-            assertEquals(manual, saved.completed)
+            assertFalse(saved.completed)
             assertEquals(manual, saved.manualCompleted)
             val allDone = pending.map { it.copy(completed = true) }
             val oldClient = service.progress("user", "event", CalendarProgressRequest("account", saved.version, false, allDone))
-            assertEquals(manual, oldClient.completed)
+            assertTrue(oldClient.completed)
             assertEquals(manual, stored.manualCompleted)
-            assertEquals(if (manual) 0 else 1, service.summary("user", "account").totalPending)
-            assertEquals(manual, service.list("user", "account", day, day.plusDays(7), null).items.single().completed)
+            assertEquals(0, service.summary("user", "account").totalPending)
+            assertTrue(service.list("user", "account", day, day.plusDays(7), null).items.single().completed)
             val cancelled = service.subscribe("user", "event", CalendarSubscribeRequest("account", oldClient.version, false))
             val restored = service.subscribe("user", "event", CalendarSubscribeRequest("account", cancelled.version, true))
             assertEquals(manual, restored.manualCompleted)
             val deleted = service.progress("user", "event", CalendarProgressRequest("account", restored.version, false, emptyList()))
             val added = service.progress("user", "event", CalendarProgressRequest("account", deleted.version, false, pending))
-            assertEquals(manual, deleted.completed)
-            assertEquals(manual, added.completed)
+            assertFalse(deleted.completed)
+            assertFalse(added.completed)
             failure(409) {
                 service.progress("user", "event", CalendarProgressRequest("account", 0, false, pending, manualCompleted = !manual))
             }
@@ -322,7 +330,7 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
-    fun `legacy effective completion stays unchanged on reads and memo only writes until explicit freeze`() {
+    fun `legacy completion never overrides checklist on reads or legacy memo writes`() {
         val done = listOf(CalendarChecklistEntry("stable-id", "旧待办", true))
         val cases = listOf(
             record().copy(completed = true),
@@ -332,7 +340,7 @@ class ActivityCalendarSubscriptionServiceTest {
         )
         cases.forEach { legacy ->
             every { repository.find("user", "account", "event") } returns legacy
-            val expected = if (legacy.checklist.isEmpty()) legacy.completed else legacy.checklist.all { it.completed }
+            val expected = legacy.checklist.isNotEmpty() && legacy.checklist.all { it.completed }
             val read = service.get("user", "account", "event")
             assertEquals(expected, read.completed)
             assertEquals(null, read.manualCompleted)
@@ -354,8 +362,76 @@ class ActivityCalendarSubscriptionServiceTest {
                     manualCompleted = expected,
                 ),
             )
-            assertEquals(expected, frozen.completed)
+            assertEquals(!expected, frozen.completed)
             assertEquals(expected, frozen.manualCompleted)
+        }
+    }
+
+    @Test
+    fun `checklist mode preserves every historical field while all entry states drive reminders`() {
+        listOf(true, false).forEach { manual ->
+            var stored = record().copy(completed = true, manualCompleted = manual, memoTitle = "旧标题", memoNote = "备注\n原样")
+            every { repository.find("user", "account", "event") } answers { stored }
+            every { repository.list("user", "account") } answers { listOf(stored) }
+            every { repository.save(any()) } answers {
+                firstArg<ActivityCalendarSubscription>().copy(version = stored.version!! + 1).also { stored = it }
+            }
+            val done = listOf(CalendarChecklistEntry("stable", "旧项", true))
+            listOf(emptyList(), done, done + CalendarChecklistEntry("next", "新项", false), emptyList()).forEach { entries ->
+                val saved = service.progress(
+                    "user",
+                    "event",
+                    CalendarProgressRequest("account", stored.version!!, false, entries, progressMode = "checklist"),
+                )
+                assertEquals(entries, saved.checklist)
+                assertEquals(entries.isNotEmpty() && entries.all { it.completed }, saved.completed)
+                assertEquals("旧标题", stored.memoTitle)
+                assertEquals("备注\n原样", stored.memoNote)
+                assertTrue(stored.completed)
+                assertTrue(saved.legacyCompleted)
+                assertEquals(manual, stored.manualCompleted)
+                assertEquals(if (saved.completed) 0 else 1, service.summary("user", "account").totalPending)
+            }
+            failure(422) {
+                service.progress(
+                    "user",
+                    "event",
+                    CalendarProgressRequest("account", stored.version!!, false, done, memoNote = "", progressMode = "checklist"),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `checklist mode keeps unchanged historical titles and enforces entry bounds`() {
+        val historical = CalendarChecklistEntry("stable", " 原标题 ", true)
+        every { repository.find("user", "account", "event") } returns record().copy(checklist = listOf(historical))
+        assertEquals(
+            listOf(historical),
+            service.progress(
+                "user",
+                "event",
+                CalendarProgressRequest("account", 0, false, listOf(historical), progressMode = "checklist"),
+            ).checklist,
+        )
+        val maximum = (1..50).map { CalendarChecklistEntry("id-$it", "字".repeat(80), false) }
+        assertEquals(
+            50,
+            service.progress(
+                "user",
+                "event",
+                CalendarProgressRequest("account", 0, false, maximum, progressMode = "checklist"),
+            ).checklist.size,
+        )
+        listOf(
+            maximum + CalendarChecklistEntry("extra", "事项", false),
+            listOf(CalendarChecklistEntry("id", "字".repeat(81), false)),
+            listOf(CalendarChecklistEntry("invalid id", "事项", false)),
+            listOf(CalendarChecklistEntry("id", "事项", false), CalendarChecklistEntry("id", "重复", true)),
+        ).forEach { entries ->
+            failure(422) {
+                service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries, progressMode = "checklist"))
+            }
         }
     }
 }

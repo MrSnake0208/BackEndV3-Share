@@ -24,7 +24,7 @@ data class ActivityCalendarSubscription(
     val memoNote: String = "",
     val manualCompleted: Boolean? = null,
 ) {
-    fun isCompleted(): Boolean = manualCompleted ?: if (checklist.isEmpty()) completed else checklist.all { it.completed }
+    fun isCompleted(): Boolean = checklist.isNotEmpty() && checklist.all { it.completed }
 }
 
 data class CalendarChecklistEntry(val id: String, val title: String, val completed: Boolean)

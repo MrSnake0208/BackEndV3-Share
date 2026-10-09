@@ -151,7 +151,8 @@ class ActivityCalendarSubscriptionMongoTest {
             concurrent(List(2) { { service.progress("owner", eventId, CalendarProgressRequest("account", 0, true, emptyList())) } })
         assertEquals(1, results.count { it.isSuccess })
         assertEquals(1L, repository.find("owner", "account", eventId)!!.version)
-        assertTrue(repository.find("owner", "account", eventId)!!.isCompleted())
+        assertFalse(repository.find("owner", "account", eventId)!!.isCompleted())
+        assertTrue(repository.find("owner", "account", eventId)!!.completed)
         assertThrows(ActivityCalendarApiException::class.java) {
             service.progress("owner", eventId, CalendarProgressRequest("account", 0, false, emptyList()))
         }
@@ -280,7 +281,7 @@ class ActivityCalendarSubscriptionMongoTest {
         assertEquals(winner.memoTitle, saved.memoTitle)
         assertEquals(winner.memoNote, saved.memoNote)
         assertEquals(winner.manualCompleted, saved.manualCompleted)
-        assertEquals(winner.manualCompleted, saved.completed)
+        assertFalse(saved.completed)
         assertEquals(1L, saved.version)
         assertEquals("本期备忘", service.get("owner", "account", otherEvent).memoTitle)
         assertEquals("", service.get("owner", "account-b", eventId).memoNote)
@@ -311,7 +312,7 @@ class ActivityCalendarSubscriptionMongoTest {
             collection.updateOne(filter, Document("$" + "unset", Document("manualCompleted", "")))
             val before = collection.find(filter).first()!!
             val legacy = service.get("owner", "account", eventId)
-            val effective = if (entries.isEmpty()) old else entries.all { it.completed }
+            val effective = entries.isNotEmpty() && entries.all { it.completed }
             assertEquals(effective, legacy.completed)
             assertNull(legacy.manualCompleted)
             assertEquals(before, collection.find(filter).first())
@@ -335,12 +336,54 @@ class ActivityCalendarSubscriptionMongoTest {
                     manualCompleted = effective,
                 ),
             )
-            assertEquals(effective, frozen.completed)
+            assertEquals(!effective, frozen.completed)
             assertEquals(effective, collection.find(filter).first()!!.getBoolean("manualCompleted"))
-            assertEquals(effective, service.get("owner", "account", eventId).completed)
+            assertEquals(!effective, service.get("owner", "account", eventId).completed)
             val oldClient = service.progress("owner", eventId, CalendarProgressRequest("account", frozen.version, !effective, emptyList()))
-            assertEquals(effective, oldClient.completed)
+            assertFalse(oldClient.completed)
             assertEquals(effective, repository.find("owner", "account", eventId)!!.manualCompleted)
+        }
+    }
+
+    @Test
+    fun `checklist only CAS writes preserve legacy BSON and account event isolation`() {
+        service.subscribe("owner", eventId, CalendarSubscribeRequest("account", null, true))
+        listOf(true, false).forEach { manual ->
+            val original = repository.find("owner", "account", eventId)!!
+            val saved = repository.save(
+                original.copy(completed = true, manualCompleted = manual, memoTitle = "旧标题", memoNote = "历史\n内容"),
+            )
+            val entries = listOf(CalendarChecklistEntry("stable", "事项", !manual))
+            val result = service.progress(
+                "owner",
+                eventId,
+                CalendarProgressRequest("account", saved.version!!, false, entries, progressMode = "checklist"),
+            )
+            assertEquals(!manual, result.completed)
+            val stored = repository.find("owner", "account", eventId)!!
+            assertTrue(stored.completed)
+            assertEquals(manual, stored.manualCompleted)
+            assertEquals("旧标题", stored.memoTitle)
+            assertEquals("历史\n内容", stored.memoNote)
+            assertEquals(entries, stored.checklist)
+            assertEquals(saved.version!! + 1, stored.version)
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.progress(
+                    "owner",
+                    eventId,
+                    CalendarProgressRequest("account", saved.version!!, false, emptyList(), progressMode = "checklist"),
+                )
+            }
+            assertEquals(entries, repository.find("owner", "account", eventId)!!.checklist)
+            assertNull(repository.find("other", "account", eventId))
+            val empty = service.progress(
+                "owner",
+                eventId,
+                CalendarProgressRequest("account", result.version, false, emptyList(), progressMode = "checklist"),
+            )
+            assertFalse(empty.completed)
+            assertTrue(empty.legacyCompleted)
+            assertEquals(manual, empty.manualCompleted)
         }
     }
 }

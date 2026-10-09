@@ -166,4 +166,31 @@ class ActivityCalendarSubscriptionControllerContractTest {
         }
         verify(exactly = 2) { service.progress(any(), any(), any()) }
     }
+
+    @Test
+    fun `checklist mode accepts only checklist writes and rejects conflicting or unknown protocol`() {
+        val base = "\"account_id\":\"a\",\"expected_version\":0,\"completed\":false,\"checklist\":[]"
+        every { service.progress("owner", "recruitment:pool-one", any()) } returns
+            CalendarSubscriptionResponse("recruitment:pool-one", 1, true, false, emptyList(), null, legacyCompleted = true)
+        mvc.perform(
+            put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base,\"progress_mode\":\"checklist\"}"),
+        ).andExpect(status().isOk).andExpect(jsonPath("$.data.legacy_completed").value(true))
+        verify { service.progress("owner", "recruitment:pool-one", match { it.progressMode == "checklist" && it.memoNote == null }) }
+        listOf(
+            "\"progress_mode\":null",
+            "\"progress_mode\":true",
+            "\"progress_mode\":\"other\"",
+            "\"progress_mode\":\"checklist\",\"memo_note\":\"\"",
+            "\"progress_mode\":\"checklist\",\"manual_completed\":false",
+            "\"progress_mode\":\"checklist\",\"memo_title\":\"标题\"",
+        ).forEach { fields ->
+            mvc.perform(put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base,$fields}"))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        val complete = base.replace("\"completed\":false", "\"completed\":true")
+        mvc.perform(
+            put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$complete,\"progress_mode\":\"checklist\"}"),
+        ).andExpect(status().isUnprocessableEntity)
+        verify(exactly = 1) { service.progress(any(), any(), any()) }
+    }
 }

@@ -13,6 +13,7 @@ data class CalendarProgressRequest(
     val memoTitle: String? = null,
     val memoNote: String? = null,
     val manualCompleted: Boolean? = null,
+    val progressMode: String? = null,
 )
 
 object CalendarSubscriptionRequestDecoder {
@@ -25,8 +26,15 @@ object CalendarSubscriptionRequestDecoder {
         fields(
             node,
             setOf("account_id", "expected_version", "completed", "checklist"),
-            setOf("memo_title", "memo_note", "manual_completed"),
+            setOf("memo_title", "memo_note", "manual_completed", "progress_mode"),
         )
+        val mode = node.get("progress_mode")?.let {
+            if (!it.isTextual || it.asText() != "checklist") throw calendarInvalid("不支持的待办保存协议")
+            if (listOf("memo_title", "memo_note", "manual_completed").any(node::has) || boolean(node, "completed")) {
+                throw calendarInvalid("待办保存不能同时修改历史备忘或整期完成状态")
+            }
+            it.asText()
+        }
         val list = node.get("checklist") ?: throw calendarInvalid("请提供待办清单")
         if (!list.isArray || list.size() > 50) throw calendarInvalid("待办清单最多50项")
         val entries = list.map {
@@ -41,6 +49,7 @@ object CalendarSubscriptionRequestDecoder {
             optionalText(node, "memo_title", 60, false),
             optionalText(node, "memo_note", 1000, true),
             if (node.has("manual_completed")) boolean(node, "manual_completed") else null,
+            mode,
         )
     }
 

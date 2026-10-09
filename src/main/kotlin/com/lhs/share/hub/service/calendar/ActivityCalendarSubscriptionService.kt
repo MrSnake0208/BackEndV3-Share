@@ -107,8 +107,20 @@ class ActivityCalendarSubscriptionService(
         if (current.version != request.expectedVersion) throw calendarConflict()
         val item = sources(owner)[eventId]
         if (!current.subscribed || item == null || current.game != item.game) throw calendarInvalid("该订阅当前不可编辑")
-        val entries = request.checklist.map { it.copy(title = it.title.trim()) }
-        if (entries.size > 50 || entries.any { it.title.length !in 1..80 || !it.id.matches(Regex("[A-Za-z0-9_-]{1,80}")) } ||
+        val checklistOnly = request.progressMode == "checklist"
+        if (request.progressMode != null && (
+                !checklistOnly || request.completed || request.memoTitle != null ||
+                    request.memoNote != null || request.manualCompleted != null
+                )
+        ) {
+            throw calendarInvalid("待办保存不能同时修改历史备忘或整期完成状态")
+        }
+        val previousTitles = current.checklist.associate { it.id to it.title }
+        val entries = request.checklist.map {
+            if (checklistOnly && previousTitles[it.id] == it.title) it else it.copy(title = it.title.trim())
+        }
+        if (entries.size > 50 ||
+            entries.any { it.title.isBlank() || it.title.length !in 1..80 || !it.id.matches(Regex("[A-Za-z0-9_-]{1,80}")) } ||
             entries.map { it.id }.distinct().size != entries.size ||
             (entries.isNotEmpty() && request.completed && request.manualCompleted == null)
         ) {
@@ -117,7 +129,7 @@ class ActivityCalendarSubscriptionService(
         val memoTitle = request.memoTitle?.trim() ?: current.memoTitle
         val memoNote = request.memoNote ?: current.memoNote
         if (memoTitle.isBlank() || memoTitle.length > 60 || memoNote.length > 1000) throw calendarInvalid("备忘标题或备注不正确")
-        val completed = entries.isEmpty() && request.completed
+        val completed = if (checklistOnly) current.completed else entries.isEmpty() && request.completed
         response(
             repository.save(
                 current.copy(
@@ -153,6 +165,7 @@ class ActivityCalendarSubscriptionService(
         record.memoTitle,
         record.memoNote,
         record.manualCompleted,
+        record.completed,
     )
 
     private fun account(userId: String, accountId: String): SubAccount = accounts.findByUserIdAndAccountId(userId, accountId)
