@@ -76,6 +76,12 @@ Windows 上的 MaaY 通常可直接用 `http://127.0.0.1:8080` 访问 WSL 后端
 
 ### 创建本地账号和 API Token
 
+YuanHub-All 工作区的 Agent 真实浏览器验证另有隔离入口：根目录
+`python3 scripts/agent-test/agent.py setup`，操作说明见工作区 `scripts/agent-test/README.md`。
+它使用独占容器、`local,agent-test` profile、受保护 manifest 和真实账号/JWT，
+默认普通身份无管理/招募授权，管理身份仅有活动日历编辑角色。
+不要在下述普通开发数据库上运行 Agent 种子或清理操作。
+
 local profile 已开启 `debug.email.no-send: true`，不会连接 SMTP。先请求注册验证码：
 
 ```bash
