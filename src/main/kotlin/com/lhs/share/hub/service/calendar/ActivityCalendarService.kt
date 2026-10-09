@@ -10,6 +10,7 @@ import com.lhs.share.hub.repository.ActivityCalendarRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
 import com.lhs.share.hub.service.account.SubAccountService
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpStatus
@@ -69,6 +70,7 @@ class ActivityCalendarService(
                     item = ActivityCalendarItem(
                         "recruitment:${pool.poolId}", ActivityCalendarSourceType.RECRUITMENT_POOL, pool.poolId,
                         pool.game, pool.name, ActivityCalendarCategory.RECRUITMENT, start, end, sourceUrl = pool.sourceUrl,
+                        poolType = pool.poolType,
                     ),
                     readOnly = true, enabled = true, version = null, sourceNote = pool.sourceNote,
                     createdBy = null, createdAt = null, updatedBy = pool.updatedBy, updatedAt = pool.updatedAt,
@@ -117,6 +119,12 @@ class ActivityCalendarService(
         requireGame(request.game)
         val title = request.title.trim().takeIf { it.length in 1..120 } ?: throw calendarInvalid("标题须为1至120字", "title")
         if (request.category == ActivityCalendarCategory.RECRUITMENT) throw calendarInvalid("招募活动由卡池目录派生", "category")
+        if (request.subtype != null && request.category !in request.subtype.categories) {
+            throw calendarInvalid("细分类别与活动类型不匹配", "subtype")
+        }
+        if (request.subtypeDetail != null && request.subtype != ActivityCalendarSubtype.FURNITURE) {
+            throw calendarInvalid("神秘洞窟必须属于活动下的家具", "subtype_detail")
+        }
         if (request.endDate < request.startDate) throw calendarInvalid("结束日期不能早于开始日期", "end_date")
         if ((request.startTime == null) != (request.endTime == null)) {
             throw calendarInvalid("开始和结束时间须成对填写", if (request.startTime == null) "start_time" else "end_time")
@@ -151,6 +159,7 @@ class ActivityCalendarService(
             id, request.game, title, request.category, request.startDate, request.endDate,
             request.startTime, request.endTime, request.timeZone, request.description, sourceUrl, request.sourceNote, request.enabled,
             current?.createdBy ?: actor, current?.createdAt ?: now, actor, now, current?.version,
+            subtype = request.subtype, subtypeDetail = request.subtypeDetail,
         )
     }
 
@@ -168,6 +177,7 @@ class ActivityCalendarService(
         ActivityCalendarItem(
             event.id, ActivityCalendarSourceType.MANUAL, null, event.game, event.title, event.category,
             event.startDate, event.endDate, event.startTime, event.endTime, event.timeZone, event.description, event.sourceUrl,
+            subtype = event.subtype, subtypeDetail = event.subtypeDetail,
         ),
         false, event.enabled, event.version, event.sourceNote, event.createdBy, event.createdAt, event.updatedBy, event.updatedAt,
     )

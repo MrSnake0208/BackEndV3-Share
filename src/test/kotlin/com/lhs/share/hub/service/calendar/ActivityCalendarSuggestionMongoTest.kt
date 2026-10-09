@@ -9,6 +9,8 @@ import com.lhs.share.hub.repository.ActivityCalendarSuggestionRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestion
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionStatus
 import com.lhs.share.testinfra.TestMongo
@@ -264,5 +266,26 @@ class ActivityCalendarSuggestionMongoTest {
             }.status.value(),
         )
         assertEquals(before, template.getCollection("activity_calendar_suggestions").find().into(mutableListOf()))
+    }
+
+    @Test
+    fun `classification survives suggestion transaction original snapshot and public event without duplicating records`() {
+        val classified = event.copy(
+            subtype = ActivityCalendarSubtype.FURNITURE,
+            subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE,
+        )
+        val suggestion = service.submit("owner", ActivityCalendarSuggestionSubmitRequest(classified, null, "classification"))
+        val result = service.accept("editor", suggestion.id, ActivityCalendarSuggestionAcceptRequest(0, classified, null))
+        val stored = repository.find(suggestion.id)!!
+        assertEquals(ActivityCalendarSubtype.FURNITURE, stored.original.subtype)
+        assertEquals(ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE, stored.original.subtypeDetail)
+        assertEquals(classified.subtypeDetail, stored.acceptedSnapshot!!.subtypeDetail)
+        assertEquals(classified.subtypeDetail, result.currentEvent!!.item.subtypeDetail)
+        assertEquals(classified.subtypeDetail, calendar.publicItems(null, null, null, null).items.single().subtypeDetail)
+        assertEquals(
+            result.eventId,
+            service.accept("editor", suggestion.id, ActivityCalendarSuggestionAcceptRequest(0, classified, null)).eventId,
+        )
+        assertEquals(1L, template.getCollection("activity_calendar_events").countDocuments())
     }
 }

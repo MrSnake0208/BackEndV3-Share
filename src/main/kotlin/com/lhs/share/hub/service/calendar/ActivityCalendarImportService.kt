@@ -179,6 +179,7 @@ class ActivityCalendarImportService(
     private fun request(event: ActivityCalendarEvent) = ActivityCalendarWriteRequest(
         event.game, event.title.trim(), event.category, event.startDate, event.endDate, event.startTime, event.endTime,
         event.timeZone, event.description, event.sourceUrl, event.sourceNote, event.enabled,
+        subtype = event.subtype, subtypeDetail = event.subtypeDetail,
     )
 
     private fun key(data: ActivityCalendarWriteRequest): String = mapper.writeValueAsString(
@@ -195,6 +196,8 @@ class ActivityCalendarImportService(
     )
 
     private fun differences(a: ActivityCalendarWriteRequest, b: ActivityCalendarWriteRequest): List<String> = listOf(
+        "subtype" to (a.subtype != b.subtype),
+        "subtype_detail" to (a.subtypeDetail != b.subtypeDetail),
         "description" to (a.description != b.description),
         "source_url" to (a.sourceUrl != b.sourceUrl),
         "source_note" to (a.sourceNote != b.sourceNote),

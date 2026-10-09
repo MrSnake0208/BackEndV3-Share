@@ -244,4 +244,24 @@ class ActivityCalendarSuggestionControllerContractTest {
         }
         verify { transactions wasNot io.mockk.Called }
     }
+
+    @Test
+    fun `submission and accept decoder carry optional classification while public server fields remain forbidden`() {
+        every { repository.findRequest("owner", "request-one") } returns null
+        every { repository.insert(any()) } answers { firstArg() }
+        val node = (mapper.readTree(body) as ObjectNode).deepCopy()
+            .put("subtype", "FURNITURE").put("subtype_detail", "MYSTERIOUS_CAVE")
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.original.subtype").value("FURNITURE"))
+            .andExpect(jsonPath("$.data.original.subtype_detail").value("MYSTERIOUS_CAVE"))
+        val event = node.deepCopy().apply { remove(listOf("client_request_id", "submission_note")) }
+        val accept = mapper.createObjectNode().put("expected_version", 0).apply { set<ObjectNode>("event", event) }
+        val decoded = com.lhs.share.hub.controller.calendar.request.ActivityCalendarSuggestionRequestDecoder(mapper).accept(accept)
+        org.junit.jupiter.api.Assertions.assertEquals("FURNITURE", decoded.event.subtype!!.name)
+        org.junit.jupiter.api.Assertions.assertEquals("MYSTERIOUS_CAVE", decoded.event.subtypeDetail!!.name)
+        node.put("subtype", "STAR_POOL")
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+            .andExpect(status().isUnprocessableEntity)
+    }
 }

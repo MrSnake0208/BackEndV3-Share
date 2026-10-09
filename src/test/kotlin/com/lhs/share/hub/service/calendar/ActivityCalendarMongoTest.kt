@@ -4,11 +4,14 @@ import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteReques
 import com.lhs.share.hub.repository.ActivityCalendarRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.testinfra.TestMongo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -33,6 +36,39 @@ class ActivityCalendarMongoTest {
     fun cleanup() {
         TestMongo.dropDatabase(client, database)
         client.close()
+    }
+
+    @Test
+    fun `Mongo optional classification round trips and missing historical fields keep legacy identity`() {
+        val furniture = service.create("editor", request.copy(subtype = ActivityCalendarSubtype.FURNITURE))
+        val cave = service.create(
+            "editor",
+            request.copy(
+                title = "洞窟",
+                subtype = ActivityCalendarSubtype.FURNITURE,
+                subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE,
+            ),
+        )
+        val saved = repository.find(cave.item.id)!!
+        assertEquals(ActivityCalendarSubtype.FURNITURE, saved.subtype)
+        assertEquals(ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE, saved.subtypeDetail)
+        val collection = template.getCollection("activity_calendar_events")
+        val raw = collection.find(org.bson.Document("_id", cave.item.id)).first()!!
+        assertEquals("FURNITURE", raw["subtype"])
+        assertEquals("MYSTERIOUS_CAVE", raw["subtypeDetail"])
+        assertEquals(2, service.publicItems(null, null, null, null).items.size)
+        assertTrue(furniture.item.id != cave.item.id)
+        collection.updateOne(
+            org.bson.Document("_id", cave.item.id),
+            org.bson.Document("\$unset", org.bson.Document("subtype", "").append("subtypeDetail", ""))
+                .append("\$set", org.bson.Document("category", "LOGIN")),
+        )
+        val legacy = repository.find(cave.item.id)!!
+        assertEquals(ActivityCalendarCategory.LOGIN, legacy.category)
+        assertNull(legacy.subtype)
+        assertNull(legacy.subtypeDetail)
+        assertEquals(cave.item.startDate, legacy.startDate)
+        assertEquals(cave.item.endDate, legacy.endDate)
     }
 
     @Test

@@ -215,4 +215,29 @@ class ActivityCalendarControllerContractTest {
         }
         verify(exactly = 0) { repository.save(any()) }
     }
+
+    @Test
+    fun `optional classification round trips with snake case and pool type is response only`() {
+        editor()
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }
+        val node = mapper.readTree(body).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+            .put("subtype", "FURNITURE").put("subtype_detail", "MYSTERIOUS_CAVE")
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.item.subtype").value("FURNITURE"))
+            .andExpect(jsonPath("$.data.item.subtype_detail").value("MYSTERIOUS_CAVE"))
+        every { recruitment.all() } returns listOf(RecruitmentCatalogPool("pool", "如鸢", "卡池", date, date.plusDays(1), poolType = "复刻限定"))
+        mvc.perform(get("/v1/activity-calendar"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[1].pool_type").value("复刻限定"))
+            .andExpect(jsonPath("$.data.items[0].subtype").isEmpty)
+        for ((field, value) in listOf("subtype" to "UNKNOWN", "subtype" to "0", "subtype_detail" to "0", "pool_type" to "限定")) {
+            val invalid = mapper.readTree(body).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().put(field, value)
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(invalid.toString()))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        node.put("category", "OTHER")
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+            .andExpect(status().isUnprocessableEntity)
+    }
 }

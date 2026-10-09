@@ -24,6 +24,7 @@ class ActivityCalendarSuggestionRequestDecoder(mapper: ObjectMapper) {
     private val calendar = ActivityCalendarRequestDecoder(mapper)
     private val originalFields = setOf(
         "game", "title", "category", "start_date", "end_date", "start_time", "end_time", "description", "source_url",
+        "subtype", "subtype_detail",
     )
 
     fun submit(node: JsonNode): ActivityCalendarSuggestionSubmitRequest {

@@ -1,6 +1,8 @@
 package com.lhs.share.hub.controller.calendar.response
 
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -22,6 +24,9 @@ data class ActivityCalendarItem(
     val timeZone: String = "Asia/Shanghai",
     val description: String? = null,
     val sourceUrl: String? = null,
+    val subtype: ActivityCalendarSubtype? = null,
+    val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
+    val poolType: String? = null,
 ) {
     val startAt: Instant? get() = startTime?.let { startDate.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }
     val endAt: Instant? get() = endTime?.let { endDate.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }

@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.service.calendar.calendarInvalid
 import java.time.LocalDate
 
@@ -23,6 +25,8 @@ data class ActivityCalendarWriteRequest(
     val sourceNote: String? = null,
     val enabled: Boolean = true,
     val expectedVersion: Long? = null,
+    val subtype: ActivityCalendarSubtype? = null,
+    val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
 )
 
 /** Use the same strict boundary as recruitment, without changing the shared mapper. */
@@ -36,7 +40,7 @@ class ActivityCalendarRequestDecoder(mapper: ObjectMapper) {
         if (!node.isObject) throw calendarInvalid("请求必须是JSON对象")
         val fields = setOf(
             "game", "title", "category", "start_date", "end_date", "start_time", "end_time", "time_zone",
-            "description", "source_url", "source_note", "enabled", "expected_version",
+            "description", "source_url", "source_note", "enabled", "expected_version", "subtype", "subtype_detail",
         )
         node.fieldNames().forEachRemaining { field ->
             if (field !in fields) throw calendarInvalid("不接受字段 $field", field)
@@ -47,6 +51,7 @@ class ActivityCalendarRequestDecoder(mapper: ObjectMapper) {
         // Jackson still coerces numbers to strings and accepts ordinal enums despite ALLOW_COERCION_OF_SCALARS.
         for (field in listOf(
             "game", "title", "category", "start_time", "end_time", "time_zone", "description", "source_url", "source_note",
+            "subtype", "subtype_detail",
         )) {
             val value = node.get(field)
             if (value != null && !value.isNull && !value.isTextual) throw calendarInvalid("$field 必须是字符串", field)
@@ -55,6 +60,12 @@ class ActivityCalendarRequestDecoder(mapper: ObjectMapper) {
         if (node.has("time_zone") && node["time_zone"].isNull) throw calendarInvalid("time_zone 必须是字符串", "time_zone")
         if (ActivityCalendarCategory.entries.none { it.name == node["category"].asText() }) {
             throw calendarInvalid("不支持的活动类别", "category")
+        }
+        for ((field, allowed) in listOf(
+            "subtype" to ActivityCalendarSubtype.entries.map { it.name },
+            "subtype_detail" to ActivityCalendarSubtypeDetail.entries.map { it.name },
+        )) {
+            if (node.hasNonNull(field) && node[field].asText() !in allowed) throw calendarInvalid("不支持的细分类别或细目", field)
         }
         for (field in listOf("start_date", "end_date")) {
             val value = node.get(field)

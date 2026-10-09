@@ -36,6 +36,7 @@ class ActivityCalendarSuggestionService(
         val original = ActivityCalendarSuggestionOriginal(
             event.game, event.title, event.category, event.startDate, event.endDate,
             event.startTime, event.endTime, event.description, source,
+            subtype = event.subtype, subtypeDetail = event.subtypeDetail,
         )
         fun reuse(existing: ActivityCalendarSuggestion): ActivityCalendarSuggestionResponse {
             if (existing.original != original || existing.submissionNote != note) throw conflict("同一请求标识的资料不同，请使用新的提交标识")
