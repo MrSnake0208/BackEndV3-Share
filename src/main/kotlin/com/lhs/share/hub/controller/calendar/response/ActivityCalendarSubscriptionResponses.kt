@@ -12,6 +12,7 @@ data class CalendarSubscriptionResponse(
     val memoTitle: String = "本期备忘",
     val memoNote: String = "",
     val manualCompleted: Boolean? = null,
+    val legacyCompleted: Boolean = false,
 )
 
 data class CalendarSubscriptionsResponse(
