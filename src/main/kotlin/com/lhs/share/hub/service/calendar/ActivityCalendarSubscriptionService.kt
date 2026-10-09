@@ -109,7 +109,8 @@ class ActivityCalendarSubscriptionService(
         if (!current.subscribed || item == null || current.game != item.game) throw calendarInvalid("该订阅当前不可编辑")
         val entries = request.checklist.map { it.copy(title = it.title.trim()) }
         if (entries.size > 50 || entries.any { it.title.length !in 1..80 || !it.id.matches(Regex("[A-Za-z0-9_-]{1,80}")) } ||
-            entries.map { it.id }.distinct().size != entries.size || (entries.isNotEmpty() && request.completed)
+            entries.map { it.id }.distinct().size != entries.size ||
+            (entries.isNotEmpty() && request.completed && request.manualCompleted == null)
         ) {
             throw calendarInvalid("待办名称、标识或完成状态不正确")
         }
@@ -122,6 +123,7 @@ class ActivityCalendarSubscriptionService(
                 current.copy(
                     checklist = entries,
                     completed = completed,
+                    manualCompleted = request.manualCompleted ?: current.manualCompleted,
                     memoTitle = memoTitle,
                     memoNote = memoNote,
                     updatedAt = clock.instant(),
@@ -150,6 +152,7 @@ class ActivityCalendarSubscriptionService(
         item?.takeIf { it.game == record.game },
         record.memoTitle,
         record.memoNote,
+        record.manualCompleted,
     )
 
     private fun account(userId: String, accountId: String): SubAccount = accounts.findByUserIdAndAccountId(userId, accountId)

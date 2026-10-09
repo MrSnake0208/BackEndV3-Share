@@ -254,7 +254,22 @@ class ActivityCalendarSubscriptionMongoTest {
         service.subscribe("owner", eventId, CalendarSubscribeRequest("account-b", null, true))
         val results = concurrent(
             (1..2).map { number ->
-                { service.progress("owner", eventId, CalendarProgressRequest("account", 0, false, emptyList(), "标题$number", "备注$number")) }
+                {
+                    service.progress(
+                        "owner",
+                        eventId,
+                        CalendarProgressRequest(
+                            "account",
+                            0,
+                            false,
+                            emptyList(),
+                            "标题$number",
+                            "备注$number",
+                            manualCompleted =
+                            number == 1,
+                        ),
+                    )
+                }
             },
         )
         assertEquals(1, results.count { it.isSuccess })
@@ -264,12 +279,68 @@ class ActivityCalendarSubscriptionMongoTest {
         val saved = service.get("owner", "account", eventId)
         assertEquals(winner.memoTitle, saved.memoTitle)
         assertEquals(winner.memoNote, saved.memoNote)
+        assertEquals(winner.manualCompleted, saved.manualCompleted)
+        assertEquals(winner.manualCompleted, saved.completed)
         assertEquals(1L, saved.version)
         assertEquals("本期备忘", service.get("owner", "account", otherEvent).memoTitle)
         assertEquals("", service.get("owner", "account-b", eventId).memoNote)
+        assertNull(service.get("owner", "account", otherEvent).manualCompleted)
+        assertNull(service.get("owner", "account-b", eventId).manualCompleted)
         assertThrows(ActivityCalendarApiException::class.java) {
             service.progress("other", eventId, CalendarProgressRequest("account", saved.version, false, emptyList(), "越权"))
         }
         assertEquals(saved.memoTitle, service.get("owner", "account", eventId).memoTitle)
+    }
+
+    @Test
+    fun `missing manual field reads legacy progress without writes and boolean overrides survive Mongo round trips`() {
+        service.subscribe("owner", eventId, CalendarSubscribeRequest("account", null, true))
+        val collection = mongo.getCollection("activity_calendar_subscriptions")
+        val filter = Document("eventId", eventId)
+        val done = listOf(CalendarChecklistEntry("stable-id", "旧待办", true))
+        listOf(
+            true to emptyList(),
+            false to emptyList(),
+            false to done,
+            true to done.map {
+                it.copy(completed = false)
+            },
+        ).forEach { (old, entries) ->
+            val current = repository.find("owner", "account", eventId)!!
+            repository.save(current.copy(completed = old, checklist = entries))
+            collection.updateOne(filter, Document("$" + "unset", Document("manualCompleted", "")))
+            val before = collection.find(filter).first()!!
+            val legacy = service.get("owner", "account", eventId)
+            val effective = if (entries.isEmpty()) old else entries.all { it.completed }
+            assertEquals(effective, legacy.completed)
+            assertNull(legacy.manualCompleted)
+            assertEquals(before, collection.find(filter).first())
+            val memo = service.progress(
+                "owner",
+                eventId,
+                CalendarProgressRequest("account", legacy.version, entries.isEmpty() && old, entries, memoNote = "只改备注"),
+            )
+            assertNull(memo.manualCompleted)
+            assertEquals(effective, memo.completed)
+            val frozen = service.progress(
+                "owner",
+                eventId,
+                CalendarProgressRequest(
+                    "account",
+                    memo.version,
+                    false,
+                    done.map {
+                        it.copy(completed = !effective)
+                    },
+                    manualCompleted = effective,
+                ),
+            )
+            assertEquals(effective, frozen.completed)
+            assertEquals(effective, collection.find(filter).first()!!.getBoolean("manualCompleted"))
+            assertEquals(effective, service.get("owner", "account", eventId).completed)
+            val oldClient = service.progress("owner", eventId, CalendarProgressRequest("account", frozen.version, !effective, emptyList()))
+            assertEquals(effective, oldClient.completed)
+            assertEquals(effective, repository.find("owner", "account", eventId)!!.manualCompleted)
+        }
     }
 }

@@ -287,4 +287,75 @@ class ActivityCalendarSubscriptionServiceTest {
         failure(409) { service.progress("user", "event", CalendarProgressRequest("account", 2, false, emptyList(), "并发修改")) }
         assertEquals("保留历史", service.subscribe("user", "event", CalendarSubscribeRequest("account", 0, false)).memoNote)
     }
+
+    @Test
+    fun `manual true and false override checklist across writes and old clients preserve either value`() {
+        val pending = listOf(CalendarChecklistEntry("old-id", "待办", false))
+        listOf(true, false).forEach { manual ->
+            var stored = record().copy(checklist = pending)
+            every { repository.find("user", "account", "event") } answers { stored }
+            every { repository.list("user", "account") } answers { listOf(stored) }
+            every { repository.save(any()) } answers {
+                firstArg<ActivityCalendarSubscription>().copy(version = stored.version!! + 1).also { stored = it }
+            }
+            val saved = service.progress("user", "event", CalendarProgressRequest("account", 0, manual, pending, manualCompleted = manual))
+            assertEquals(manual, saved.completed)
+            assertEquals(manual, saved.manualCompleted)
+            val allDone = pending.map { it.copy(completed = true) }
+            val oldClient = service.progress("user", "event", CalendarProgressRequest("account", saved.version, false, allDone))
+            assertEquals(manual, oldClient.completed)
+            assertEquals(manual, stored.manualCompleted)
+            assertEquals(if (manual) 0 else 1, service.summary("user", "account").totalPending)
+            assertEquals(manual, service.list("user", "account", day, day.plusDays(7), null).items.single().completed)
+            val cancelled = service.subscribe("user", "event", CalendarSubscribeRequest("account", oldClient.version, false))
+            val restored = service.subscribe("user", "event", CalendarSubscribeRequest("account", cancelled.version, true))
+            assertEquals(manual, restored.manualCompleted)
+            val deleted = service.progress("user", "event", CalendarProgressRequest("account", restored.version, false, emptyList()))
+            val added = service.progress("user", "event", CalendarProgressRequest("account", deleted.version, false, pending))
+            assertEquals(manual, deleted.completed)
+            assertEquals(manual, added.completed)
+            failure(409) {
+                service.progress("user", "event", CalendarProgressRequest("account", 0, false, pending, manualCompleted = !manual))
+            }
+            assertEquals(manual, stored.manualCompleted)
+        }
+    }
+
+    @Test
+    fun `legacy effective completion stays unchanged on reads and memo only writes until explicit freeze`() {
+        val done = listOf(CalendarChecklistEntry("stable-id", "旧待办", true))
+        val cases = listOf(
+            record().copy(completed = true),
+            record(),
+            record().copy(checklist = done),
+            record().copy(checklist = done + CalendarChecklistEntry("pending", "未完成", false)),
+        )
+        cases.forEach { legacy ->
+            every { repository.find("user", "account", "event") } returns legacy
+            val expected = if (legacy.checklist.isEmpty()) legacy.completed else legacy.checklist.all { it.completed }
+            val read = service.get("user", "account", "event")
+            assertEquals(expected, read.completed)
+            assertEquals(null, read.manualCompleted)
+            val memo = service.progress(
+                "user",
+                "event",
+                CalendarProgressRequest("account", 0, legacy.checklist.isEmpty() && legacy.completed, legacy.checklist, "本期已完成", "只改备注"),
+            )
+            assertEquals(expected, memo.completed)
+            assertEquals(null, memo.manualCompleted)
+            val frozen = service.progress(
+                "user",
+                "event",
+                CalendarProgressRequest(
+                    "account",
+                    0,
+                    false,
+                    done + CalendarChecklistEntry("new", "新待办", !expected),
+                    manualCompleted = expected,
+                ),
+            )
+            assertEquals(expected, frozen.completed)
+            assertEquals(expected, frozen.manualCompleted)
+        }
+    }
 }

@@ -136,4 +136,34 @@ class ActivityCalendarSubscriptionControllerContractTest {
         }
         verify { service wasNot io.mockk.Called }
     }
+
+    @Test
+    fun `manual completion accepts both booleans independently and rejects null and coercion`() {
+        val base = "\"account_id\":\"a\",\"expected_version\":0,\"completed\":true," +
+            "\"checklist\":[{\"id\":\"old\",\"title\":\"待办\",\"completed\":false}]"
+        listOf(true, false).forEach { manual ->
+            every { service.progress("owner", "recruitment:pool-one", any()) } returns
+                CalendarSubscriptionResponse("recruitment:pool-one", 1, true, manual, emptyList(), null, manualCompleted = manual)
+            mvc.perform(
+                put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base,\"manual_completed\":$manual}"),
+            ).andExpect(status().isOk).andExpect(jsonPath("$.data.completed").value(manual))
+                .andExpect(jsonPath("$.data.manual_completed").value(manual))
+            verify {
+                service.progress(
+                    "owner",
+                    "recruitment:pool-one",
+                    match {
+                        it.manualCompleted == manual &&
+                            it.checklist.single().id == "old"
+                    },
+                )
+            }
+        }
+        listOf("null", "\"false\"", "0", "{}", "[]").forEach { invalid ->
+            mvc.perform(
+                put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base,\"manual_completed\":$invalid}"),
+            ).andExpect(status().isUnprocessableEntity)
+        }
+        verify(exactly = 2) { service.progress(any(), any(), any()) }
+    }
 }
