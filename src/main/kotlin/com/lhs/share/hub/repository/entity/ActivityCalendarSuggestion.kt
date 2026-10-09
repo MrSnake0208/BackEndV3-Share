@@ -20,6 +20,8 @@ data class ActivityCalendarSuggestionOriginal(
     val endTime: String? = null,
     val description: String? = null,
     val sourceUrl: String,
+    val subtype: ActivityCalendarSubtype? = null,
+    val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
 )
 
 @Document("activity_calendar_suggestions")

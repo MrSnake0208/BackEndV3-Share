@@ -9,6 +9,8 @@ import com.lhs.share.hub.repository.ActivityCalendarSuggestionRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestion
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionOriginal
 import com.lhs.share.hub.repository.entity.ActivityCalendarSuggestionStatus
@@ -191,5 +193,24 @@ class ActivityCalendarSuggestionServiceTest {
             events.save(any())
         }
         verify { transactions wasNot io.mockk.Called }
+    }
+
+    @Test
+    fun `suggestion original retains furniture detail and rejects conflicting retry classification`() {
+        every { repository.findRequest("owner", "req-one") } returns null
+        every { repository.insert(any()) } answers { firstArg() }
+        val classified = submit.copy(
+            event = event.copy(
+                subtype = ActivityCalendarSubtype.FURNITURE,
+                subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE,
+            ),
+        )
+        val response = service.submit("owner", classified)
+        assertEquals(ActivityCalendarSubtype.FURNITURE, response.original.subtype)
+        assertEquals(ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE, response.original.subtypeDetail)
+        every { repository.findRequest("owner", "req-one") } returns pending.copy(original = response.original)
+        failure(409) { service.submit("owner", submit) }
+        failure(422) { service.submit("owner", classified.copy(event = classified.event.copy(category = ActivityCalendarCategory.OTHER))) }
+        verify { events wasNot io.mockk.Called }
     }
 }

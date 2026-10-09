@@ -7,6 +7,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.repository.ActivityCalendarRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -193,5 +195,49 @@ class ActivityCalendarImportServiceTest {
         every { repository.list(null, null, null, emptySet(), null) } answers { listOf(event!!.copy(title = "已编辑")) }
         assertEquals(1, importer.preview(batch(item)).conflicts)
         verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `classification imports preserve original natural keys and surface differences rather than create duplicates`() {
+        val cave = item.dropLast(1) + ",\"subtype\":\"FURNITURE\",\"subtype_detail\":\"MYSTERIOUS_CAVE\"}"
+        val json = batch(cave)
+        val preview = importer.preview(json)
+        assertEquals(1, preview.ready)
+        assertEquals(ActivityCalendarSubtype.FURNITURE, preview.rows.single().data!!.subtype)
+        assertEquals(ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE, preview.rows.single().data!!.subtypeDetail)
+        var saved: ActivityCalendarEvent? = null
+        every { repository.insert(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0).also { saved = it } }
+        assertEquals(1, importer.commit("editor", json, preview.previewToken).created)
+        every { repository.list(null, null, null, emptySet(), null) } answers { listOf(saved!!) }
+        val legacy = importer.preview(batch(item))
+        assertEquals(1, legacy.existing)
+        assertEquals(setOf("subtype", "subtype_detail"), legacy.rows.single().issues.map { it.field }.toSet())
+        assertEquals(0, importer.commit("editor", batch(item), legacy.previewToken).created)
+        every { repository.list(null, null, null, emptySet(), null) } returns emptyList()
+        val conflicting = importer.preview(batch(item, cave))
+        assertEquals(1, conflicting.conflicts)
+        assertEquals(setOf("subtype", "subtype_detail"), conflicting.rows[1].issues.map { it.field }.toSet())
+        assertThrows(ActivityCalendarApiException::class.java) { importer.commit("editor", batch(item, cave), conflicting.previewToken) }
+        verify(exactly = 1) { repository.insert(any()) }
+    }
+
+    @Test
+    fun `classification rejects unknown enum ordinal and cross group values at strict import boundary`() {
+        for ((field, value) in listOf(
+            "subtype" to "123",
+            "subtype" to "\"0\"",
+            "subtype" to "\"UNKNOWN\"",
+            "subtype" to "\"STAR_POOL\"",
+            "subtype_detail" to "\"MYSTERIOUS_CAVE\"",
+            "subtype_detail" to "false",
+            "pool_type" to "\"限定\"",
+        )) {
+            val json = batch(item.dropLast(1) + ",\"$field\":$value}")
+            val report = importer.preview(json)
+            assertEquals(1, report.invalid)
+            assertEquals(field, report.rows.single().issues.single().field)
+        }
+        assertEquals(1, importer.preview(batch(item.dropLast(1) + ",\"subtype\":null,\"subtype_detail\":null}")).ready)
+        verify(exactly = 0) { repository.insert(any()) }
     }
 }

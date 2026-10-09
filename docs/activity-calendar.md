@@ -2,6 +2,27 @@
 
 提供手工目录、招募卡池聚合、管理员 JSON 批量导入，以及独立的用户建议和维护成员审核；不提供物理删除。
 
+## 可选细分类别（2026-10-09）
+
+持久化 `category` 及查询值继续使用 `ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER`，不为展示分组迁移旧记录。手工事件、写请求、公开/管理响应、建议原始资料与采纳快照新增 `subtype`、`subtype_detail`，均可省略或为 null，历史 Mongo 文档缺字段时默认为 null。PUT 仍为完整替换：省略或 null 会清除细类/细目。
+
+| category | 允许的 subtype |
+| --- | --- |
+| ACTIVITY | LARGE_EVENT（大型活动）、MEDIUM_EVENT（中型活动）、UNDERGROUND（地宫）、TAISHAN_FU（泰山府）、SIGN_IN（签到）、FURNITURE（家具） |
+| LOGIN | SIGN_IN；旧记录未标注时前端仍展示签到 |
+| SHOP | RECRUITMENT_SHOP（卡池商店）、ACTIVITY_SHOP（活动商店） |
+| OTHER | MAINTENANCE（维护）、STAR_POOL（星池） |
+| MAINTENANCE | MAINTENANCE；旧记录未标注时前端仍展示维护 |
+| RECRUITMENT | 不接受手工写入；卡池由目录派生 |
+
+`subtype_detail` 唯一值为 `MYSTERIOUS_CAVE`（神秘洞窟），且必须有 `category=ACTIVITY`、`subtype=FURNITURE`，即“活动 → 家具 → 神秘洞窟”。未知代码、数字/数字字符串枚举、中文作为代码、跨类别细类以及无家具父级的细目返回 422。建议提交与采纳沿用同一严格解码/业务校验，仍拒绝服务端字段及越权写入。
+
+`RECRUITMENT_POOL` 的日历响应增加只读 `pool_type`，直接取 `RecruitmentCatalogPool.poolType` 原始值。该字段不持久化到手工事件、不接受手工/建议/导入写入。派生 ID `recruitment:<poolId>`、`source_ref`、`read_only`、停用/隐藏/缺日期过滤均保持原义。自由文本类型的已知别名、组合优先级和中性回退由前端与招募档案共用的 `recruitmentPoolTypes.js` 处理；不按活动名称推断。
+
+批量 JSON 仍为 v1、1–200 条。自然键与导入 ID 不增加细类字段；`subtype/subtype_detail` 属于内容差异：已有记录同键则跳过并逐字段提示，文件内同键细类不同则冲突阻止提交。旧 JSON 可以照常导入；历史分类补全请使用带版本校验的目录编辑。不同细类不会变相创建重复活动。
+
+没有新增档期关联 ID，不自动合并家具/神秘洞窟或地宫/泰山府实体，不改起止时间、不复制活动、不取消独立订阅。家具与洞窟同档时间由维护者核对；类型关联不能证明两条记录属于同一期。无需数据库迁移、索引变更或定时任务。
+
 ## 管理员 JSON v1 批量导入
 
 两个接口均需要 JWT + `ACTIVITY_CALENDAR_WRITE`（`activity_calendar:write`）；匿名 401、无权限 403，校验前检查权限。仅创建手工活动，不导入卡池或招募，不更新、覆盖、删除已有记录。
@@ -244,3 +265,12 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 ```
 
 Mongo测试必须使用项目TestMongo管理的自有临时容器，不连接已有开发/生产实例。integrationTest验证唯一约束、CAS、故障回滚、取消历史清理及账号删除竞争；普通test通过不能替代它。先发布兼容后端再发布前端；本次未部署、未改变开放范围。
+
+细分类别变更的最小隔离验证（cwd BackEndV3-Share）：
+
+```bash
+./gradlew test --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarImportServiceTest' --tests '*ActivityCalendarSuggestionServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSuggestionControllerContractTest' --tests '*ActivityCalendarImportContractTest' --console=plain
+./gradlew integrationTest --tests '*ActivityCalendarMongoTest' --tests '*ActivityCalendarSuggestionMongoTest' --tests '*ActivityCalendarImportMongoTest' --console=plain
+```
+
+第二条要求 Docker，由测试独占临时容器，绝不能改用开发/生产 Mongo。新增测试覆盖字段缺失的旧文档、枚举 BSON 往返、原始建议/采纳快照及公开响应、独立记录计数；既有导入隔离测试覆盖重复、并发与预览过期。不会因为 Docker 未运行而跳过有效断言。

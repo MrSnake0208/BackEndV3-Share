@@ -18,6 +18,21 @@ enum class ActivityCalendarCategory {
     OTHER,
 }
 
+enum class ActivityCalendarSubtype(val categories: Set<ActivityCalendarCategory>) {
+    LARGE_EVENT(setOf(ActivityCalendarCategory.ACTIVITY)),
+    MEDIUM_EVENT(setOf(ActivityCalendarCategory.ACTIVITY)),
+    UNDERGROUND(setOf(ActivityCalendarCategory.ACTIVITY)),
+    TAISHAN_FU(setOf(ActivityCalendarCategory.ACTIVITY)),
+    SIGN_IN(setOf(ActivityCalendarCategory.ACTIVITY, ActivityCalendarCategory.LOGIN)),
+    FURNITURE(setOf(ActivityCalendarCategory.ACTIVITY)),
+    RECRUITMENT_SHOP(setOf(ActivityCalendarCategory.SHOP)),
+    ACTIVITY_SHOP(setOf(ActivityCalendarCategory.SHOP)),
+    MAINTENANCE(setOf(ActivityCalendarCategory.OTHER, ActivityCalendarCategory.MAINTENANCE)),
+    STAR_POOL(setOf(ActivityCalendarCategory.OTHER)),
+}
+
+enum class ActivityCalendarSubtypeDetail { MYSTERIOUS_CAVE }
+
 @Document("activity_calendar_events")
 data class ActivityCalendarEvent(
     @Id val id: String,
@@ -38,6 +53,8 @@ data class ActivityCalendarEvent(
     val updatedBy: String,
     val updatedAt: Instant,
     @Version val version: Long? = null,
+    val subtype: ActivityCalendarSubtype? = null,
+    val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
 )
 
 /** Property-scoped conversion avoids the default LocalDate -> BSON Date/time-zone conversion. */

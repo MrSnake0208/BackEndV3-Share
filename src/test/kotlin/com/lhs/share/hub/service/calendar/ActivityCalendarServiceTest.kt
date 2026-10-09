@@ -6,6 +6,8 @@ import com.lhs.share.hub.repository.ActivityCalendarRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
+import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import io.mockk.every
 import io.mockk.mockk
@@ -191,4 +193,61 @@ class ActivityCalendarServiceTest {
         RecruitmentCatalogPool(id, "如鸢", "卡池", start, end, sourceUrl = "https://example.com/pool", sourceNote = "来源备注")
 
     private fun failure(action: () -> Unit) = assertThrows(ActivityCalendarApiException::class.java, action)
+
+    @Test
+    fun `all explicit subtypes validate and survive writes reads without relabeling legacy categories`() {
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }
+        for (subtype in ActivityCalendarSubtype.entries) {
+            for (category in subtype.categories) {
+                val result = service.create("editor", request.copy(category = category, subtype = subtype))
+                assertEquals(category, result.item.category)
+                assertEquals(subtype, result.item.subtype)
+            }
+        }
+        val cave = service.create(
+            "editor",
+            request.copy(subtype = ActivityCalendarSubtype.FURNITURE, subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE),
+        )
+        assertEquals(ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE, cave.item.subtypeDetail)
+        for (category in ActivityCalendarCategory.entries.filter { it != ActivityCalendarCategory.RECRUITMENT }) {
+            val result = service.adminItem(event.copy(category = category))
+            assertEquals(category, result.item.category)
+            assertNull(result.item.subtype)
+            assertNull(result.item.subtypeDetail)
+        }
+        assertEquals(
+            "subtype",
+            failure {
+                service.validate(request.copy(category = ActivityCalendarCategory.OTHER, subtype = ActivityCalendarSubtype.FURNITURE))
+            }.field,
+        )
+        assertEquals(
+            "subtype_detail",
+            failure {
+                service.validate(request.copy(subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE))
+            }.field,
+        )
+        every { repository.find(event.id) } returns event
+        val updated = service.update("editor", event.id, request.copy(expectedVersion = 0, subtype = ActivityCalendarSubtype.LARGE_EVENT))
+        assertEquals(ActivityCalendarSubtype.LARGE_EVENT, updated.item.subtype)
+        assertEquals(event.startDate, updated.item.startDate)
+        assertEquals(event.endDate, updated.item.endDate)
+    }
+
+    @Test
+    fun `catalog raw pool type is passed through with stable source identity visibility and read only`() {
+        every { repository.list(null, null, null, emptySet(), null) } returns emptyList()
+        every { recruitment.all() } returns listOf(
+            pool("typed", date, date).copy(poolType = "复刻限定"),
+            pool("unknown", date, date).copy(poolType = "未识别类型"),
+            pool("hidden", date, date).copy(poolType = "限定", hidden = true),
+            pool("disabled", date, date).copy(poolType = "限定", enabled = false),
+        )
+        val result = service.adminItems(null, null, null, null, null, null).items
+        assertEquals(listOf("recruitment:typed", "recruitment:unknown"), result.map { it.item.id })
+        assertEquals(listOf("复刻限定", "未识别类型"), result.map { it.item.poolType })
+        assertTrue(result.all { it.readOnly && it.version == null && it.item.subtype == null })
+        assertEquals(listOf("typed", "unknown"), result.map { it.item.sourceRef })
+        verify(exactly = 0) { repository.save(any()) }
+    }
 }
