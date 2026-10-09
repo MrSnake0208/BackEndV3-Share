@@ -10,6 +10,8 @@ data class CalendarProgressRequest(
     val expectedVersion: Long,
     val completed: Boolean,
     val checklist: List<CalendarChecklistEntry>,
+    val memoTitle: String? = null,
+    val memoNote: String? = null,
 )
 
 object CalendarSubscriptionRequestDecoder {
@@ -19,20 +21,35 @@ object CalendarSubscriptionRequestDecoder {
     }
 
     fun progress(node: JsonNode): CalendarProgressRequest {
-        fields(node, setOf("account_id", "expected_version", "completed", "checklist"))
-        val list = node.get("checklist") ?: throw calendarInvalid("请提供关卡清单")
-        if (!list.isArray || list.size() > 50) throw calendarInvalid("关卡清单最多50项")
+        fields(node, setOf("account_id", "expected_version", "completed", "checklist"), setOf("memo_title", "memo_note"))
+        val list = node.get("checklist") ?: throw calendarInvalid("请提供待办清单")
+        if (!list.isArray || list.size() > 50) throw calendarInvalid("待办清单最多50项")
         val entries = list.map {
             fields(it, setOf("id", "title", "completed"))
             CalendarChecklistEntry(string(it, "id"), string(it, "title"), boolean(it, "completed"))
         }
-        return CalendarProgressRequest(string(node, "account_id"), checkNotNull(version(node, false)), boolean(node, "completed"), entries)
+        return CalendarProgressRequest(
+            string(node, "account_id"),
+            checkNotNull(version(node, false)),
+            boolean(node, "completed"),
+            entries,
+            optionalText(node, "memo_title", 60, false),
+            optionalText(node, "memo_note", 1000, true),
+        )
     }
 
-    private fun fields(node: JsonNode, allowed: Set<String>) {
-        if (!node.isObject || node.fieldNames().asSequence().any { it !in allowed } || allowed.any { !node.has(it) }) {
+    private fun fields(node: JsonNode, required: Set<String>, optional: Set<String> = emptySet()) {
+        if (!node.isObject || node.fieldNames().asSequence().any { it !in required && it !in optional } || required.any { !node.has(it) }) {
             throw calendarInvalid("请求字段不正确")
         }
+    }
+
+    private fun optionalText(node: JsonNode, key: String, limit: Int, allowBlank: Boolean): String? {
+        val value = node.get(key) ?: return null
+        if (!value.isTextual || value.asText().length > limit || (!allowBlank && value.asText().isBlank())) {
+            throw calendarInvalid(if (key == "memo_title") "备忘标题须为1–60字，不能为空" else "文字备注须为纯文本，最多1000字")
+        }
+        return value.asText()
     }
 
     private fun string(node: JsonNode, key: String): String {

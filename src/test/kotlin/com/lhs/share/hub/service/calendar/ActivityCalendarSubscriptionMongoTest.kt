@@ -11,6 +11,7 @@ import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
 import com.lhs.share.hub.repository.entity.ActivityCalendarSubscription
+import com.lhs.share.hub.repository.entity.CalendarChecklistEntry
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.openapi.OpenApiTokenService
@@ -18,6 +19,7 @@ import com.lhs.share.testinfra.TestMongo
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
+import org.bson.Document
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -202,5 +204,72 @@ class ActivityCalendarSubscriptionMongoTest {
         assertNull(mongo.findById("account-doc", SubAccount::class.java))
         assertFalse(repository.exists("owner", "account"))
         assertNotNull(mongo.findById("other-doc", SubAccount::class.java))
+    }
+
+    @Test
+    fun `legacy Mongo without memo fields reads without writes and roundtrips with old client safely`() {
+        val created = service.subscribe("owner", eventId, CalendarSubscribeRequest("account", null, true))
+        val entries = listOf(CalendarChecklistEntry("legacy-one", "旧关卡", true), CalendarChecklistEntry("legacy-two", "旧兑换", false))
+        service.progress("owner", eventId, CalendarProgressRequest("account", created.version, false, entries))
+        val collection = mongo.getCollection("activity_calendar_subscriptions")
+        val filter = Document("eventId", eventId)
+        collection.updateOne(filter, Document("$" + "unset", Document("memoTitle", "").append("memoNote", "")))
+        val before = collection.find(filter).first()!!
+        val legacy = service.get("owner", "account", eventId)
+        assertEquals("本期备忘", legacy.memoTitle)
+        assertEquals("", legacy.memoNote)
+        assertEquals(entries, legacy.checklist)
+        assertFalse(legacy.completed)
+        assertEquals(before, collection.find(filter).first())
+        val updated = service.progress(
+            "owner",
+            eventId,
+            CalendarProgressRequest("account", legacy.version, false, entries, "本期已完成", "备注\n保留"),
+        )
+        val oldClient = service.progress("owner", eventId, CalendarProgressRequest("account", updated.version, false, entries))
+        assertEquals("本期已完成", oldClient.memoTitle)
+        assertEquals("备注\n保留", oldClient.memoNote)
+        val cancelled = service.subscribe("owner", eventId, CalendarSubscribeRequest("account", oldClient.version, false))
+        val restored = service.subscribe("owner", eventId, CalendarSubscribeRequest("account", cancelled.version, true))
+        assertEquals(entries, restored.checklist)
+        assertEquals(updated.memoTitle, restored.memoTitle)
+        assertEquals(updated.memoNote, service.get("owner", "account", eventId).memoNote)
+    }
+
+    @Test
+    fun `memo CAS writes remain isolated by account and event and cannot overwrite winning memo`() {
+        mongo.insert(SubAccount(id = "account-b-doc", userId = "owner", accountId = "account-b", name = "本人小号", game = "如鸢"))
+        val otherEvent = calendar.create(
+            "editor",
+            ActivityCalendarWriteRequest(
+                "如鸢",
+                "另一活动",
+                ActivityCalendarCategory.ACTIVITY,
+                LocalDate.parse("2026-10-05"),
+                LocalDate.parse("2026-10-08"),
+            ),
+        ).item.id
+        service.subscribe("owner", eventId, CalendarSubscribeRequest("account", null, true))
+        service.subscribe("owner", otherEvent, CalendarSubscribeRequest("account", null, true))
+        service.subscribe("owner", eventId, CalendarSubscribeRequest("account-b", null, true))
+        val results = concurrent(
+            (1..2).map { number ->
+                { service.progress("owner", eventId, CalendarProgressRequest("account", 0, false, emptyList(), "标题$number", "备注$number")) }
+            },
+        )
+        assertEquals(1, results.count { it.isSuccess })
+        val winner = results.single {
+            it.isSuccess
+        }.getOrThrow() as com.lhs.share.hub.controller.calendar.response.CalendarSubscriptionResponse
+        val saved = service.get("owner", "account", eventId)
+        assertEquals(winner.memoTitle, saved.memoTitle)
+        assertEquals(winner.memoNote, saved.memoNote)
+        assertEquals(1L, saved.version)
+        assertEquals("本期备忘", service.get("owner", "account", otherEvent).memoTitle)
+        assertEquals("", service.get("owner", "account-b", eventId).memoNote)
+        assertThrows(ActivityCalendarApiException::class.java) {
+            service.progress("other", eventId, CalendarProgressRequest("account", saved.version, false, emptyList(), "越权"))
+        }
+        assertEquals(saved.memoTitle, service.get("owner", "account", eventId).memoTitle)
     }
 }

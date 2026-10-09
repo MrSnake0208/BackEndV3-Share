@@ -107,4 +107,33 @@ class ActivityCalendarSubscriptionControllerContractTest {
         }
         verify { service wasNot io.mockk.Called }
     }
+
+    @Test
+    fun `progress accepts optional snake case memo fields and legacy omission without coercion`() {
+        every { service.progress("owner", "recruitment:pool-one", any()) } returns
+            CalendarSubscriptionResponse("recruitment:pool-one", 1, true, false, emptyList(), null, "本期目标", "换行\n备注")
+        val base = """"account_id":"a","expected_version":0,"completed":false,"checklist":[]"""
+        mvc.perform(put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.memo_title").value("本期目标"))
+            .andExpect(jsonPath("$.data.memo_note").value("换行\n备注"))
+        verify { service.progress("owner", "recruitment:pool-one", match { it.memoTitle == null && it.memoNote == null }) }
+        mvc.perform(
+            put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("""{$base,"memo_title":"本期已完成","memo_note":""}"""),
+        ).andExpect(status().isOk)
+        verify { service.progress("owner", "recruitment:pool-one", match { it.memoTitle == "本期已完成" && it.memoNote == "" }) }
+    }
+
+    @Test
+    fun `memo decoder rejects null blank title wrong types and overlong fields before service`() {
+        val base = """"account_id":"a","expected_version":0,"completed":false,"checklist":[]"""
+        listOf(
+            """"memo_title":null""", """"memo_title":""""", """"memo_title":"   """", """"memo_title":42""",
+            """"memo_title":"${"字".repeat(61)}"""", """"memo_note":null""", """"memo_note":[]""", """"memo_note":false""",
+            """"memo_note":"${"字".repeat(1001)}"""", """"memoTitle":"wrong case"""",
+        ).forEach { field ->
+            mvc.perform(put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{$base,$field}"))
+                .andExpect(status().isUnprocessableEntity).andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+        }
+        verify { service wasNot io.mockk.Called }
+    }
 }

@@ -111,10 +111,24 @@ class ActivityCalendarSubscriptionService(
         if (entries.size > 50 || entries.any { it.title.length !in 1..80 || !it.id.matches(Regex("[A-Za-z0-9_-]{1,80}")) } ||
             entries.map { it.id }.distinct().size != entries.size || (entries.isNotEmpty() && request.completed)
         ) {
-            throw calendarInvalid("关卡名称、标识或完成状态不正确")
+            throw calendarInvalid("待办名称、标识或完成状态不正确")
         }
+        val memoTitle = request.memoTitle?.trim() ?: current.memoTitle
+        val memoNote = request.memoNote ?: current.memoNote
+        if (memoTitle.isBlank() || memoTitle.length > 60 || memoNote.length > 1000) throw calendarInvalid("备忘标题或备注不正确")
         val completed = entries.isEmpty() && request.completed
-        response(repository.save(current.copy(checklist = entries, completed = completed, updatedAt = clock.instant())), item)
+        response(
+            repository.save(
+                current.copy(
+                    checklist = entries,
+                    completed = completed,
+                    memoTitle = memoTitle,
+                    memoNote = memoNote,
+                    updatedAt = clock.instant(),
+                ),
+            ),
+            item,
+        )
     }
 
     private fun sources(account: SubAccount): Map<String, ActivityCalendarItem> =
@@ -134,6 +148,8 @@ class ActivityCalendarSubscriptionService(
         record.isCompleted(),
         record.checklist,
         item?.takeIf { it.game == record.game },
+        record.memoTitle,
+        record.memoNote,
     )
 
     private fun account(userId: String, accountId: String): SubAccount = accounts.findByUserIdAndAccountId(userId, accountId)
