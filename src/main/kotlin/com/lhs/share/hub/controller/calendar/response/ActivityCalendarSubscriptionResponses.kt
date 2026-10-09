@@ -11,6 +11,7 @@ data class CalendarSubscriptionResponse(
     val item: ActivityCalendarItem?,
     val memoTitle: String = "本期备忘",
     val memoNote: String = "",
+    val manualCompleted: Boolean? = null,
 )
 
 data class CalendarSubscriptionsResponse(

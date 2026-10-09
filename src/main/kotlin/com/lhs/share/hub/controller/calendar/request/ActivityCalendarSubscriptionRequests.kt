@@ -12,6 +12,7 @@ data class CalendarProgressRequest(
     val checklist: List<CalendarChecklistEntry>,
     val memoTitle: String? = null,
     val memoNote: String? = null,
+    val manualCompleted: Boolean? = null,
 )
 
 object CalendarSubscriptionRequestDecoder {
@@ -21,7 +22,11 @@ object CalendarSubscriptionRequestDecoder {
     }
 
     fun progress(node: JsonNode): CalendarProgressRequest {
-        fields(node, setOf("account_id", "expected_version", "completed", "checklist"), setOf("memo_title", "memo_note"))
+        fields(
+            node,
+            setOf("account_id", "expected_version", "completed", "checklist"),
+            setOf("memo_title", "memo_note", "manual_completed"),
+        )
         val list = node.get("checklist") ?: throw calendarInvalid("请提供待办清单")
         if (!list.isArray || list.size() > 50) throw calendarInvalid("待办清单最多50项")
         val entries = list.map {
@@ -35,6 +40,7 @@ object CalendarSubscriptionRequestDecoder {
             entries,
             optionalText(node, "memo_title", 60, false),
             optionalText(node, "memo_note", 1000, true),
+            if (node.has("manual_completed")) boolean(node, "manual_completed") else null,
         )
     }
 
