@@ -1,6 +1,77 @@
 # 活动日历与用户建议 API
 
-提供手工目录、招募卡池聚合，以及独立的用户建议和维护成员审核；不提供物理删除或导入接口。
+提供手工目录、招募卡池聚合、管理员 JSON 批量导入，以及独立的用户建议和维护成员审核；不提供物理删除。
+
+## 管理员 JSON v1 批量导入
+
+两个接口均需要 JWT + `ACTIVITY_CALENDAR_WRITE`（`activity_calendar:write`）；匿名 401、无权限 403，校验前检查权限。仅创建手工活动，不导入卡池或招募，不更新、覆盖、删除已有记录。
+
+`POST /v1/admin/activity-calendar/import/preview` 的请求为 `{"json":"原始 JSON 文本"}`。成功返回 `data` 报告：`total`、`ready`（待新建）、`existing`、`duplicates`、`invalid`、`conflicts`、`public_count`（待新建并公开）、`created`、`failed`、`preview_token`、`rows`。预览无数据库写入。
+
+`POST /v1/admin/activity-calendar/import/commit` 使用同一原文及预览令牌：`{"json":"原始 JSON 文本","preview_token":"预览返回的值"}`。服务端重新解码、业务校验、查询重复项及比对预览快照。缺少令牌、原文变化或相关数据库记录变化返回 409 `calendar_import_preview_expired`，本次整批未开始写入，须重新预览。无效行或文件内内容冲突返回 422，整批不写入。前端确认不是服务端安全边界。
+
+每行 `row` 为活动数组条目序号（从 1 起，不是文本物理行号），`status` 为 `READY / EXISTS / DUPLICATE / INVALID / CONFLICT / CREATED / FAILED`；`title/game` 用于定位，`data` 为规范化预览（非法行为空），`issues` 为 `{field,message}` 列表，`event_id` 为匹配或创建的记录。JSON 语法错误另提供文本行列位置；单行业务错误指出字段。
+
+推荐文件格式，可直接复制（两条均为本地验收示例）：
+
+```json
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "game": "代号鸢",
+      "title": "导入验收示例活动",
+      "category": "ACTIVITY",
+      "start_date": "2026-10-10",
+      "end_date": "2026-10-20",
+      "start_time": null,
+      "end_time": null,
+      "time_zone": "Asia/Shanghai",
+      "description": "仅用于本地验收，请调整日期和标题。",
+      "source_url": "https://example.com/notice",
+      "source_note": "管理员内部备注",
+      "enabled": true
+    },
+    {
+      "game": "如鸢",
+      "title": "导入验收示例登录活动",
+      "category": "LOGIN",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-15",
+      "start_time": "05:00",
+      "end_time": "23:59",
+      "enabled": false
+    }
+  ]
+}
+```
+
+兼容纯顶层数组；包裹格式必须为整数 `schema_version=1`，不支持未知版本。UTF-8 文件及 JSON 原文最多 **1 MiB（1,048,576 字节）**，每批 **1–200 条**。请求包因 JSON 字符串转义允许最多 `6 MiB + 4096` 字节，不能绕过原文 1 MiB 校验。服务端只接收文本，不接受本地文件路径。拒绝重复对象字段、尾随 JSON、未知字段、错误类型和隐式数值/布尔转文本。
+
+| 字段 | 要求与默认值 |
+| --- | --- |
+| `game/title/category/start_date/end_date` | 必填；游戏仅 `代号鸢/如鸢`；标题 trim 后 1–120 字；类别仅 `ACTIVITY/LOGIN/SHOP/MAINTENANCE/OTHER`；日期严格 `YYYY-MM-DD`，结束不得早于开始 |
+| `start_time/end_time` | 可选或 null，必须成对且为 `HH:mm`；同日结束时间不得早于开始 |
+| `time_zone/enabled` | 缺省分别 `Asia/Shanghai` / `true`，显式 null 不接受；时区遵循单条创建的有效 ZoneId 规则；日期/时间按该时区记录，未填精确时间不补造时刻，推荐统一使用 Asia/Shanghai |
+| `description/source_note` | 可选或 null，各 ≤1000 字；与现有服务器单条创建一致保留文本，`source_note` 仅管理端可见 |
+| `source_url` | 可选或 null；trim 后空值归为 null；非空须 http(s)、有域名且 ≤2048 字，与单条创建共用校验 |
+
+拒绝 `id/version/expected_version/source_type/source_ref` 等服务器字段；`RECRUITMENT` 派生项始终只读，不参与导入目标或覆盖。
+
+自然键由游戏、类别、trim 后标题、起止日期、成对精确时间及时区组成。同名不同游戏/期次可共存。已有手工记录（含停用、历史随机 ID）同键则跳过；说明、链接、内部备注或启用值不同，在预览中逐字段提示并保留原内容。文件内完全重复跳过；同键不同内容为冲突，须修正整批再提交。
+
+导入使用 `evt_import_<自然键SHA256>` 和 Mongo `insert`，依靠既有 `_id` 唯一约束防止并发批量导入重复；不新建索引、不迁移或清理历史数据，不调用 save 覆盖。重复插入会重新读取核对，内容相同跳过、不同则该行失败。已导入活动被改成另一自然键而占用旧导入标识时明确冲突，须人工检查。此保证针对批量导入；单条新建保留原有随机 ID 语义，避免在导入期间用单条入口并发创建同一活动。
+
+提交采用**部分成功**，不依赖 Mongo 事务：HTTP 200 也可能含 `failed>0`，必须查看逐行结果，不可只看 HTTP 状态。错误/超时可能意味着写入未确认；重新预览原 JSON，再确认导入即可安全重试，已创建行跳过。第二次导入相同原文显示已存在（文件内重复行仍显示文件内重复），不创建新记录。成功项复用单条创建审计字段及版本初始化；公共查询仍仅展示启用活动。
+
+最小定向验证（不接触现有数据库）：
+
+```bash
+./gradlew test --tests '*ActivityCalendarImportServiceTest' --tests '*ActivityCalendarImportContractTest' --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSecurityTest' --console=plain
+./gradlew integrationTest --tests '*ActivityCalendarImportMongoTest' --tests '*ActivityCalendarMongoTest' --console=plain
+```
+
+第二条需要 Docker，由 TestMongo 创建并清理专属容器/随机测试库。
 
 ## 管理员测试阶段查询
 

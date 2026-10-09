@@ -103,6 +103,9 @@ class ActivityCalendarService(
         return request.copy(title = validated.title, sourceUrl = validated.sourceUrl)
     }
 
+    fun insertImported(actor: String, id: String, request: ActivityCalendarWriteRequest): ActivityCalendarEvent =
+        repository.insert(event(actor, id, request, null))
+
     fun findAdminItem(id: String): ActivityCalendarAdminItem? = repository.find(id)?.let(::adminItem)
 
     private fun event(
@@ -112,31 +115,35 @@ class ActivityCalendarService(
         current: ActivityCalendarEvent?,
     ): ActivityCalendarEvent {
         requireGame(request.game)
-        val title = request.title.trim().takeIf { it.length in 1..120 } ?: throw calendarInvalid("标题须为1至120字")
-        if (request.category == ActivityCalendarCategory.RECRUITMENT) throw calendarInvalid("招募活动由卡池目录派生")
-        if (request.endDate < request.startDate) throw calendarInvalid("结束日期不能早于开始日期")
-        if ((request.startTime == null) != (request.endTime == null)) throw calendarInvalid("开始和结束时间须成对填写")
-        for (time in listOfNotNull(request.startTime, request.endTime)) {
-            if (!Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]").matches(time)) throw calendarInvalid("时间须为HH:mm")
+        val title = request.title.trim().takeIf { it.length in 1..120 } ?: throw calendarInvalid("标题须为1至120字", "title")
+        if (request.category == ActivityCalendarCategory.RECRUITMENT) throw calendarInvalid("招募活动由卡池目录派生", "category")
+        if (request.endDate < request.startDate) throw calendarInvalid("结束日期不能早于开始日期", "end_date")
+        if ((request.startTime == null) != (request.endTime == null)) {
+            throw calendarInvalid("开始和结束时间须成对填写", if (request.startTime == null) "start_time" else "end_time")
+        }
+        for ((field, time) in listOf("start_time" to request.startTime, "end_time" to request.endTime)) {
+            if (time != null && !Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]").matches(time)) throw calendarInvalid("时间须为HH:mm", field)
         }
         if (request.startDate.isEqual(request.endDate) && request.startTime != null && request.endTime!! < request.startTime) {
-            throw calendarInvalid("结束时间不能早于开始时间")
+            throw calendarInvalid("结束时间不能早于开始时间", "end_time")
         }
         try {
             ZoneId.of(request.timeZone)
         } catch (_: DateTimeException) {
-            throw calendarInvalid("时区不正确")
+            throw calendarInvalid("时区不正确", "time_zone")
         }
-        if ((request.description?.length ?: 0) > 1000 || (request.sourceNote?.length ?: 0) > 1000) throw calendarInvalid("说明或来源备注不能超过1000字")
+        for ((field, value) in listOf("description" to request.description, "source_note" to request.sourceNote)) {
+            if ((value?.length ?: 0) > 1000) throw calendarInvalid("说明或来源备注不能超过1000字", field)
+        }
         val sourceUrl = request.sourceUrl?.trim()?.takeIf { it.isNotEmpty() }
         if (sourceUrl != null) {
             val uri = try {
                 URI(sourceUrl)
             } catch (_: java.net.URISyntaxException) {
-                throw calendarInvalid("来源链接不正确")
+                throw calendarInvalid("来源链接不正确", "source_url")
             }
             if (sourceUrl.length > 2048 || uri.scheme?.lowercase() !in setOf("http", "https") || uri.host.isNullOrBlank()) {
-                throw calendarInvalid("来源链接须为http/https地址")
+                throw calendarInvalid("来源链接须为http/https地址", "source_url")
             }
         }
         val now = Instant.now()
@@ -154,7 +161,7 @@ class ActivityCalendarService(
     }
 
     private fun requireGame(game: String) {
-        if (game !in SubAccountService.SUPPORTED_GAMES) throw calendarInvalid("游戏只支持代号鸢或如鸢")
+        if (game !in SubAccountService.SUPPORTED_GAMES) throw calendarInvalid("游戏只支持代号鸢或如鸢", "game")
     }
 
     fun adminItem(event: ActivityCalendarEvent) = ActivityCalendarAdminItem(
