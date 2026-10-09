@@ -62,7 +62,13 @@ class ActivityCalendarControllerContractTest {
     fun setup() {
         mvc = MockMvcBuilders.standaloneSetup(
             ActivityCalendarController(service, helper, authorization),
-            AdminActivityCalendarController(service, helper, authorization, mapper),
+            AdminActivityCalendarController(
+                service,
+                helper,
+                authorization,
+                mapper,
+                com.lhs.share.hub.service.calendar.ActivityCalendarImportService(service, repository, mapper),
+            ),
         ).setControllerAdvice(ActivityCalendarExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
         every { helper.requireUserId() } returns "editor"
         every { authorization.hasAnyAdminCapability("editor") } returns true

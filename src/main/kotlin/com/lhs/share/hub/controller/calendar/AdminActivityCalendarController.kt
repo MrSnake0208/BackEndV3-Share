@@ -6,18 +6,22 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.controller.calendar.request.ActivityCalendarImportRequest
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarRequestDecoder
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminItem
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminResponse
+import com.lhs.share.hub.controller.calendar.response.CalendarImportReport
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
+import com.lhs.share.hub.service.calendar.ActivityCalendarImportService
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -40,8 +44,37 @@ class AdminActivityCalendarController(
     private val helper: AuthenticationHelper,
     private val authorization: AdminAuthorizationService,
     mapper: ObjectMapper,
+    private val importer: ActivityCalendarImportService,
 ) {
     private val decoder = ActivityCalendarRequestDecoder(mapper)
+
+    @Operation(
+        summary = "只读预览JSON v1手工活动导入；请求json为原始文本，最多1 MiB/200条",
+        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = [Content(schema = Schema(implementation = ActivityCalendarImportRequest::class))],
+        ),
+    )
+    @PostMapping("/import/preview", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun previewImport(request: HttpServletRequest): ApiResult<CalendarImportReport> {
+        requireEditor()
+        val (json, _) = importer.envelope(request.inputStream.readNBytes(ActivityCalendarImportService.MAX_ENVELOPE_BYTES + 1))
+        return success(importer.preview(json))
+    }
+
+    @Operation(
+        summary = "重新校验并创建手工活动；需json与preview_token，重复跳过，部分成功逐行返回",
+        requestBody = io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = [Content(schema = Schema(implementation = ActivityCalendarImportRequest::class))],
+        ),
+    )
+    @PostMapping("/import/commit", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun commitImport(request: HttpServletRequest): ApiResult<CalendarImportReport> {
+        val actor = requireEditor()
+        val (json, token) = importer.envelope(request.inputStream.readNBytes(ActivityCalendarImportService.MAX_ENVELOPE_BYTES + 1))
+        return success(importer.commit(actor, json, token))
+    }
 
     @Operation(summary = "查询活动目录，含停用手工活动及只读招募来源")
     @GetMapping

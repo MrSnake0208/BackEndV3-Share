@@ -71,6 +71,8 @@ class ActivityCalendarSecurityTest {
 
     @MockitoBean lateinit var subscriptions: ActivityCalendarSubscriptionService
 
+    @MockitoBean lateinit var importer: com.lhs.share.hub.service.calendar.ActivityCalendarImportService
+
     @MockitoBean lateinit var service: ActivityCalendarService
 
     @MockitoBean lateinit var suggestions: ActivityCalendarSuggestionService
@@ -90,9 +92,15 @@ class ActivityCalendarSecurityTest {
         mvc.perform(get("/v1/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(get("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(post("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
+        mvc.perform(
+            post("/v1/admin/activity-calendar/import/preview").contentType(MediaType.APPLICATION_JSON).content("{}"),
+        ).andExpect(status().isUnauthorized)
+        mvc.perform(
+            post("/v1/admin/activity-calendar/import/commit").contentType(MediaType.APPLICATION_JSON).content("{}"),
+        ).andExpect(status().isUnauthorized)
         mvc.perform(put("/v1/admin/activity-calendar/evt_test")).andExpect(status().isUnauthorized)
         mvc.perform(post("/v1/activity-calendar")).andExpect(status().isUnauthorized)
-        verifyNoInteractions(service, authorization, stringRedisTemplate)
+        verifyNoInteractions(service, importer, authorization, stringRedisTemplate)
     }
 
     @Test
@@ -104,7 +112,7 @@ class ActivityCalendarSecurityTest {
         `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(false)
         mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
             .andExpect(status().isForbidden)
-        verifyNoInteractions(service)
+        verifyNoInteractions(service, importer)
         `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(true)
         `when`(service.publicItems(null, null, null, null)).thenReturn(ActivityCalendarResponse(emptyList()))
         mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
@@ -126,12 +134,14 @@ class ActivityCalendarSecurityTest {
         listOf(
             get("/v1/admin/activity-calendar"),
             post("/v1/admin/activity-calendar"),
+            post("/v1/admin/activity-calendar/import/preview"),
+            post("/v1/admin/activity-calendar/import/commit"),
             put("/v1/admin/activity-calendar/evt_test"),
         ).forEach {
             mvc.perform(it.header("Authorization", "Bearer synthetic").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isForbidden)
         }
-        verifyNoInteractions(service)
+        verifyNoInteractions(service, importer)
         `when`(authorization.hasPermission("editor", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(true)
         `when`(service.adminItems(null, null, null, null, null, null)).thenReturn(ActivityCalendarAdminResponse(emptyList()))
         mvc.perform(get("/v1/admin/activity-calendar").header("Authorization", "Bearer synthetic")).andExpect(status().isOk)

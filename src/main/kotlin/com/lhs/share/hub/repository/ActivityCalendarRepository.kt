@@ -30,4 +30,6 @@ class ActivityCalendarRepository(@param:Qualifier("hubMongoTemplate") private va
     fun find(id: String): ActivityCalendarEvent? = template.findById(id, ActivityCalendarEvent::class.java)
 
     fun save(event: ActivityCalendarEvent): ActivityCalendarEvent = template.save(event)
+
+    fun insert(event: ActivityCalendarEvent): ActivityCalendarEvent = template.insert(event)
 }
