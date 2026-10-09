@@ -247,9 +247,11 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 | GET /summary | account_id必填；完整集合中筛选已开始、未结束、未完成且7天内截止，再排序取3项；返回items、total_pending、subscribed_count |
 | GET /{eventId} | account_id必填；包括已取消历史；无记录404 subscription_not_found |
 | PUT /{eventId} | account_id、expected_version、subscribed；首次创建expected_version=null，后续使用读取的版本 |
-| PUT /{eventId}/progress | account_id、expected_version、completed、checklist；整体替换私人进度 |
+| PUT /{eventId}/progress | account_id、expected_version、completed、checklist；可选memo_title、memo_note；替换清单/完成状态，按提供字段更新备忘 |
 
 请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。非空清单要求completed=false，响应整体完成由所有项目计算；空清单使用请求completed（包括客户端删除最后一项时提交的草稿整体完成状态）。新项目默认未完成是UI默认值，接口允许用户主动勾选的新项目。
+
+私人备忘字段（2026-10-09）：响应使用snake_case `memo_title`（默认“本期备忘”）及 `memo_note`（默认空串），Mongo沿用camelCase `memoTitle`/`memoNote`，实体默认值兼容历史缺字段记录；读取不触发写入或迁移。PUT省略任一新字段时保留服务器现值；显式null/错误类型拒绝422，memo_title空白拒绝422、原始文本最多60字、保存时trim；memo_note原样多行纯文本最多1000字，空字符串表示清空。旧客户端继续保存checklist/completed，不会抹掉新客户端备忘。标题与备注不参与isCompleted、仅未完成筛选或首页摘要；所有字段同一次@Version/CAS写入。取消/恢复保留整份备忘，权属仍为(userId,accountId,eventId)。先升级后端再启用发送备忘字段的前端，旧后端严格decoder会拒绝新字段。
 
 存储集合 `activity_calendar_subscriptions`，唯一键(userId,accountId,eventId)，使用@Version和expected_version防覆盖；重复创建、旧版本和事务写冲突返回409。取消只切换subscribed，保留进度；列表只包含活跃订阅，详情可读取已取消记录用于恢复。来源只保存稳定eventId，手工活动与 `recruitment:<poolId>` 通过既有公开投影批量解析，读请求不写库，无活动资料复制或管理备注泄露。
 

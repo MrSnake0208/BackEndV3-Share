@@ -20,6 +20,8 @@ data class ActivityCalendarSubscription(
     val createdAt: Instant,
     val updatedAt: Instant,
     @Version val version: Long? = null,
+    val memoTitle: String = "本期备忘",
+    val memoNote: String = "",
 ) {
     fun isCompleted(): Boolean = if (checklist.isEmpty()) completed else checklist.all { it.completed }
 }

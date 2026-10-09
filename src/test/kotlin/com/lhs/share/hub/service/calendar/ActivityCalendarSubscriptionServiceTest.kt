@@ -216,4 +216,75 @@ class ActivityCalendarSubscriptionServiceTest {
             repository.save(any())
         }
     }
+
+    @Test
+    fun `memo fields are independent of completion and omitted fields retain saved values`() {
+        val entries = listOf(CalendarChecklistEntry("legacy", "旧关卡", false))
+        every { repository.find("user", "account", "event") } returns record().copy(checklist = entries)
+        val saved = service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries, " 本期已完成 ", "兑换\n提示"))
+        assertEquals("本期已完成", saved.memoTitle)
+        assertEquals("兑换\n提示", saved.memoNote)
+        assertFalse(saved.completed)
+        assertEquals(entries, saved.checklist)
+        every { repository.find("user", "account", "event") } returns record().copy(
+            checklist = entries,
+            memoTitle = saved.memoTitle,
+            memoNote = saved.memoNote,
+        )
+        val legacy = service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries))
+        assertEquals(saved.memoTitle, legacy.memoTitle)
+        assertEquals(saved.memoNote, legacy.memoNote)
+        val cleared = service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries, memoNote = ""))
+        assertEquals(saved.memoTitle, cleared.memoTitle)
+        assertEquals("", cleared.memoNote)
+        val renamed = service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries, memoTitle = "新标题"))
+        assertEquals("新标题", renamed.memoTitle)
+        assertEquals(saved.memoNote, renamed.memoNote)
+        every { repository.list("user", "account") } returns listOf(record().copy(checklist = entries, memoTitle = "本期已完成"))
+        assertEquals(1, service.summary("user", "account").totalPending)
+    }
+
+    @Test
+    fun `memo boundaries validate before save and title alone never completes empty checklist`() {
+        every { repository.find("user", "account", "event") } returns record()
+        listOf(
+            CalendarProgressRequest("account", 0, false, emptyList(), ""),
+            CalendarProgressRequest("account", 0, false, emptyList(), "   "),
+            CalendarProgressRequest("account", 0, false, emptyList(), "字".repeat(61)),
+            CalendarProgressRequest("account", 0, false, emptyList(), memoNote = "字".repeat(1001)),
+        ).forEach { request -> failure(422) { service.progress("user", "event", request) } }
+        verify(exactly = 0) { repository.save(any()) }
+        val maximum = service.progress(
+            "user",
+            "event",
+            CalendarProgressRequest("account", 0, false, emptyList(), "字".repeat(60), "字".repeat(1000)),
+        )
+        assertEquals(60, maximum.memoTitle.length)
+        assertEquals(1000, maximum.memoNote.length)
+        assertFalse(service.progress("user", "event", CalendarProgressRequest("account", 0, false, emptyList(), "本期已完成")).completed)
+    }
+
+    @Test
+    fun `memo survives cancellation restoration cutoff and unavailable source without widening permissions`() {
+        val original = record().copy(memoTitle = "本期目标", memoNote = "保留历史", checklist = listOf(CalendarChecklistEntry("old", "旧待办", true)))
+        every { repository.find("user", "account", "event") } returns original
+        val cancelled = service.subscribe("user", "event", CalendarSubscribeRequest("account", 0, false))
+        assertEquals("本期目标", cancelled.memoTitle)
+        assertEquals(original.checklist, cancelled.checklist)
+        every { repository.find("user", "account", "event") } returns original.copy(subscribed = false, version = 1)
+        val restored = service.subscribe("user", "event", CalendarSubscribeRequest("account", 1, true))
+        assertEquals("保留历史", restored.memoNote)
+        every { repository.find("user", "account", "event") } returns original
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(item(end = day.minusDays(1))))
+        assertEquals(
+            "截止后修改",
+            service.progress("user", "event", CalendarProgressRequest("account", 0, true, emptyList(), "截止后修改")).memoTitle,
+        )
+        failure(422) { service.subscribe("user", "event", CalendarSubscribeRequest("account", 0, true)) }
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(emptyList())
+        assertEquals("保留历史", service.get("user", "account", "event").memoNote)
+        failure(422) { service.progress("user", "event", CalendarProgressRequest("account", 0, false, emptyList(), "越权修改")) }
+        failure(409) { service.progress("user", "event", CalendarProgressRequest("account", 2, false, emptyList(), "并发修改")) }
+        assertEquals("保留历史", service.subscribe("user", "event", CalendarSubscribeRequest("account", 0, false)).memoNote)
+    }
 }
