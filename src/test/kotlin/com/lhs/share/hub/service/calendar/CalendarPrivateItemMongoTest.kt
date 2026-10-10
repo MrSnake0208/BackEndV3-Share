@@ -123,7 +123,7 @@ class CalendarPrivateItemMongoTest {
         listOf("owner" to "b", "other" to "c", "other" to "a").forEach { (user, account) ->
             listOf<() -> Any>(
                 { service.get(user, account, a.id) },
-                { service.update(user, a.id, request(account).copy(expectedVersion = 0)) },
+                { service.update(user, a.id, request(account).copy(endDate = day.plusDays(5), expectedVersion = 0)) },
                 { service.delete(user, account, a.id, 0) },
             ).forEach { action -> assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) { action() }.status.value()) }
         }
@@ -205,6 +205,111 @@ class CalendarPrivateItemMongoTest {
         assertFalse(repository.exists("owner", "a"))
         assertNotNull(mongo.findById("doc-b", SubAccount::class.java))
         assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) { service.create("owner", request()) }.status.value())
+    }
+
+    @Test
+    fun `raw legacy documents read without rewriting then expand persist collapse and retain content`() {
+        val created = service.create("owner", request())
+        val collection = mongo.getCollection("activity_calendar_private_items")
+        collection.updateOne(org.bson.Document("_id", created.id), org.bson.Document("$" + "unset", org.bson.Document("endDate", "")))
+        val before = collection.find(org.bson.Document("_id", created.id)).first()!!
+        assertFalse(before.containsKey("endDate"))
+        val legacy = service.get("owner", "a", created.id)
+        assertEquals(day, legacy.startDate)
+        assertEquals(day, legacy.endDate)
+        assertEquals(listOf(legacy), service.list("owner", "a", day, day).items)
+        assertTrue(service.list("owner", "a", day.plusDays(1), day.plusDays(1)).items.isEmpty())
+        assertEquals(before, collection.find(org.bson.Document("_id", created.id)).first())
+        val decoder = com.lhs.share.hub.controller.calendar.request.CalendarPrivateItemRequestDecoder
+        val mapper = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+        val omitted = decoder.decode(
+            mapper.readTree("""{"account_id":"a","title":"旧客户端修改","date":"2026-10-15","expected_version":0}"""),
+            true,
+        )
+        val legacyUpdated = service.update("owner", created.id, omitted)
+        assertEquals("23:59", legacyUpdated.time)
+        assertEquals("私人说明", legacyUpdated.note)
+        assertEquals(day, legacyUpdated.endDate)
+        val expanded = service.update(
+            "owner",
+            created.id,
+            request().copy(date = day.minusDays(40), endDate = day.plusDays(40), expectedVersion = 1),
+        )
+        assertEquals(expanded, service.get("owner", "a", created.id))
+        val stored = collection.find(org.bson.Document("_id", created.id)).first()!!
+        assertTrue(stored.containsKey("endDate"))
+        assertEquals(
+            422,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.update("owner", created.id, omitted.copy(expectedVersion = 2))
+            }.status.value(),
+        )
+        assertEquals(stored, collection.find(org.bson.Document("_id", created.id)).first())
+        val collapsed = service.update("owner", created.id, request().copy(endDate = day, expectedVersion = 2))
+        assertEquals(day, collapsed.startDate)
+        assertEquals(day, collapsed.endDate)
+        assertEquals(collapsed, service.get("owner", "a", created.id))
+        service.delete("owner", "a", created.id, 3)
+        assertTrue(service.list("owner", "a", day, day).items.isEmpty())
+    }
+
+    @Test
+    fun `overlap query includes both endpoints adjacent windows long ranges and leap dates with owner isolation`() {
+        val start = LocalDate.parse("2026-12-30")
+        val end = LocalDate.parse("2027-01-02")
+        val interval = service.create("owner", request().copy(date = start, endDate = end))
+        val legacy = service.create("owner", request().copy(date = end, time = null))
+        mongo.getCollection("activity_calendar_private_items").updateOne(
+            org.bson.Document("_id", legacy.id),
+            org.bson.Document("$" + "unset", org.bson.Document("endDate", "")),
+        )
+        for (date in listOf(start, start.plusDays(1), end.minusDays(1), end)) {
+            val ids = service.list("owner", "a", date, date).items.map { it.id }
+            assertTrue(interval.id in ids)
+            assertEquals(date == end, legacy.id in ids)
+        }
+        for (date in listOf(start.minusDays(1), end.plusDays(1))) assertTrue(service.list("owner", "a", date, date).items.isEmpty())
+        assertEquals(
+            listOf(interval.id, legacy.id),
+            service.list("owner", "a", LocalDate.parse("2027-01-01"), LocalDate.parse("2027-01-31")).items.map {
+                it.id
+            },
+        )
+        val long = service.create("owner", request().copy(date = LocalDate.parse("2020-01-01"), endDate = LocalDate.parse("2030-12-31")))
+        val leap = LocalDate.parse("2028-02-29")
+        val leapItem = service.create("owner", request().copy(date = leap, endDate = leap.plusDays(1)))
+        assertEquals(listOf(long.id, leapItem.id), service.list("owner", "a", leap, leap).items.map { it.id })
+        assertTrue(service.list("owner", "b", start, end).items.isEmpty())
+        assertTrue(service.list("other", "c", start, end).items.isEmpty())
+        val foreign = service.create("other", request("c").copy(date = start, endDate = end))
+        assertEquals(listOf(foreign.id), service.list("other", "c", start, end).items.map { it.id })
+        val query = org.bson.Document("userId", "owner").append("accountId", "a").append("game", "如鸢")
+            .append("date", org.bson.Document("$" + "lte", java.util.Date.from(end.atStartOfDay(java.time.ZoneOffset.UTC).toInstant())))
+            .append(
+                "$" + "or",
+                listOf(
+                    org.bson.Document(
+                        "endDate",
+                        org.bson.Document("$" + "gte", java.util.Date.from(start.atStartOfDay(java.time.ZoneOffset.UTC).toInstant())),
+                    ),
+                    org.bson.Document(
+                        "endDate",
+                        null,
+                    ).append(
+                        "date",
+                        org.bson.Document("$" + "gte", java.util.Date.from(start.atStartOfDay(java.time.ZoneOffset.UTC).toInstant())),
+                    ),
+                ),
+            )
+        val explanation = mongo.executeCommand(
+            org.bson.Document(
+                "explain",
+                org.bson.Document("find", "activity_calendar_private_items").append("filter", query)
+                    .append("hint", "calendar_private_owner_date"),
+            ).append("verbosity", "queryPlanner"),
+        )
+        assertTrue(explanation.toJson().contains("calendar_private_owner_date"))
+        assertFalse(mongo.collectionExists("activity_calendar_events"))
     }
 
     private fun concurrent(actions: List<() -> Any>): List<Result<Any>> {

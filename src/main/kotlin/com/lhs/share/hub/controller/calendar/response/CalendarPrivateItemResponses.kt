@@ -15,6 +15,8 @@ data class CalendarPrivateItemResponse(
     val createdAt: Instant,
     val updatedAt: Instant,
     val timeZone: String = "Asia/Shanghai",
+    val startDate: LocalDate = date,
+    val endDate: LocalDate = date,
 )
 
 data class CalendarPrivateItemsResponse(val items: List<CalendarPrivateItemResponse>)

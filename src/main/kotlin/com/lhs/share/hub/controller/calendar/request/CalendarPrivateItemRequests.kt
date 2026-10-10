@@ -12,21 +12,24 @@ data class CalendarPrivateItemRequest(
     val time: String?,
     val note: String,
     val expectedVersion: Long?,
+    val endDate: LocalDate? = null,
+    val timeProvided: Boolean = true,
+    val noteProvided: Boolean = true,
 )
 
 object CalendarPrivateItemRequestDecoder {
     fun decode(node: JsonNode, update: Boolean): CalendarPrivateItemRequest {
-        val required = setOf("account_id", "title", "date") + if (update) setOf("expected_version") else emptySet()
-        val allowed = required + setOf("time", "note")
+        val required = setOf("account_id", "title") + if (update) setOf("expected_version") else emptySet()
+        val allowed = required + setOf("date", "start_date", "end_date", "time", "note")
         if (!node.isObject || required.any { !node.has(it) } || node.fieldNames().asSequence().any { it !in allowed }) {
             throw calendarInvalid("私人事项请求字段不正确")
         }
-        val date = text(node, "date", 10)
-        if (!date.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) || date.startsWith("0000")) throw calendarInvalid("日期不正确", "date")
-        val parsedDate = try {
-            LocalDate.parse(date)
-        } catch (_: DateTimeParseException) {
-            throw calendarInvalid("日期不正确", "date")
+        val range = node.has("start_date") || node.has("end_date")
+        val parsedDate = date(node, if (range) "start_date" else "date")
+        val endDate = if (range) date(node, "end_date") else null
+        if (endDate != null && endDate < parsedDate) throw calendarInvalid("结束日期不能早于开始日期", "end_date")
+        if (range && node.has("date") && date(node, "date") != parsedDate) {
+            throw calendarInvalid("date须与start_date一致", "date")
         }
         val time = node.get("time")?.takeUnless { it.isNull }?.let {
             if (!it.isTextual || !it.asText().matches(Regex("([01][0-9]|2[0-3]):[0-5][0-9]"))) throw calendarInvalid("时间须为HH:mm", "time")
@@ -46,7 +49,20 @@ object CalendarPrivateItemRequestDecoder {
             time,
             if (node.has("note")) text(node, "note", 1000, allowBlank = true) else "",
             version,
+            endDate,
+            node.has("time"),
+            node.has("note"),
         )
+    }
+
+    private fun date(node: JsonNode, key: String): LocalDate {
+        val value = text(node, key, 10)
+        if (!value.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) || value.startsWith("0000")) throw calendarInvalid("日期不正确", key)
+        return try {
+            LocalDate.parse(value)
+        } catch (_: DateTimeParseException) {
+            throw calendarInvalid("日期不正确", key)
+        }
     }
 
     fun requireVersion(value: Long) {

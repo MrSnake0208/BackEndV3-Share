@@ -114,6 +114,49 @@ class CalendarPrivateItemServiceTest {
     }
 
     @Test
+    fun `range create update and legacy reads retain dates time note and version`() {
+        val end = LocalDate.parse("2027-01-02")
+        val start = LocalDate.parse("2026-12-30")
+        val created = service.create("owner", request().copy(date = start, endDate = end, time = "23:59"))
+        assertEquals(start, created.startDate)
+        assertEquals(start, created.date)
+        assertEquals(end, created.endDate)
+        val legacy = service.get("owner", "a", id)
+        assertEquals(day, legacy.startDate)
+        assertEquals(day, legacy.endDate)
+        val expanded = service.update("owner", id, request().copy(endDate = day.plusDays(5), expectedVersion = 0))
+        assertEquals(day.plusDays(5), expanded.endDate)
+        val multiDay = record().copy(endDate = day.plusDays(5), time = "09:00")
+        every { repository.find("owner", "a", "如鸢", id) } returns multiDay
+        val retained = service.update(
+            "owner",
+            id,
+            request().copy(endDate = day.plusDays(6), timeProvided = false, noteProvided = false, expectedVersion = 0),
+        )
+        assertEquals("09:00", retained.time)
+        assertEquals(multiDay.note, retained.note)
+        failure(422) { service.update("owner", id, request().copy(expectedVersion = 0)) }
+        val collapsed = service.update("owner", id, request().copy(endDate = day, time = null, note = "", expectedVersion = 0))
+        assertEquals(day, collapsed.endDate)
+        assertNull(collapsed.time)
+        assertEquals("", collapsed.note)
+    }
+
+    @Test
+    fun `range validation accepts leap year and long spans but rejects reversed or out of bounds dates`() {
+        val leap = LocalDate.parse("2028-02-29")
+        assertEquals(leap, service.create("owner", request().copy(date = leap, endDate = leap)).endDate)
+        assertEquals(
+            LocalDate.parse("2030-12-31"),
+            service.create("owner", request().copy(endDate = LocalDate.parse("2030-12-31"))).endDate,
+        )
+        failure(422) { service.create("owner", request().copy(endDate = day.minusDays(1))) }
+        failure(422) { service.update("owner", id, request().copy(endDate = day.minusDays(1), expectedVersion = 0)) }
+        failure(422) { service.create("owner", request().copy(endDate = LocalDate.of(10000, 1, 1))) }
+        failure(422) { service.create("owner", request().copy(date = LocalDate.of(0, 1, 1))) }
+    }
+
+    @Test
     fun `validation applies even to direct service callers`() {
         listOf(
             request().copy(title = " "),

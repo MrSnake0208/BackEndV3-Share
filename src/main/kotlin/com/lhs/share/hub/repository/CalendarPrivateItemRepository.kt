@@ -14,7 +14,12 @@ class CalendarPrivateItemRepository(@param:Qualifier("hubMongoTemplate") private
     private fun owner(userId: String, accountId: String) = Criteria.where("userId").`is`(userId).and("accountId").`is`(accountId)
 
     fun list(userId: String, accountId: String, game: String, from: LocalDate, to: LocalDate): List<CalendarPrivateItem> = template.find(
-        Query(owner(userId, accountId).and("game").`is`(game).and("date").gte(from).lte(to))
+        Query(
+            owner(userId, accountId).and("game").`is`(game).and("date").lte(to).orOperator(
+                Criteria.where("endDate").gte(from),
+                Criteria.where("endDate").`is`(null).and("date").gte(from),
+            ),
+        )
             .with(Sort.by("date", "time", "_id")).limit(1001),
         CalendarPrivateItem::class.java,
     )

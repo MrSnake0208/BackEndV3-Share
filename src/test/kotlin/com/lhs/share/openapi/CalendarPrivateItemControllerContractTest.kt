@@ -81,6 +81,7 @@ class CalendarPrivateItemControllerContractTest {
         mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"time\":\"00:00\"}"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.account_id").value("a"))
             .andExpect(jsonPath("$.data.time_zone").value("Asia/Shanghai"))
+            .andExpect(jsonPath("$.data.start_date").value("2026-10-15")).andExpect(jsonPath("$.data.end_date").value("2026-10-15"))
             .andExpect(jsonPath("$.data.user_id").doesNotExist()).andExpect(jsonPath("$.data.event_id").doesNotExist())
             .andExpect(jsonPath("$.data.end_time").doesNotExist()).andExpect(jsonPath("$.data.created_at").value(now.toString()))
         verify { service.create("owner", match { it.title == "私人内容" && it.time == "00:00" && it.expectedVersion == null }) }
@@ -88,6 +89,54 @@ class CalendarPrivateItemControllerContractTest {
             .andExpect(status().isOk).andExpect(jsonPath("$.data.version").value(1))
         mvc.perform(get("$path/$id").param("account_id", "a")).andExpect(status().isOk)
         mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "1")).andExpect(status().isOk)
+    }
+
+    @Test
+    fun `paired range contract round trips and missing optional update fields remain distinguishable`() {
+        val start = LocalDate.parse("2026-12-30")
+        val end = LocalDate.parse("2027-01-02")
+        val now = Instant.parse("2026-10-10T04:00:00Z")
+        val result = CalendarPrivateItemResponse(id, "a", "如鸢", "私人内容", start, "09:00", "保留", 0, now, now, endDate = end)
+        val range = """{"account_id":"a","title":"私人内容","start_date":"2026-12-30","end_date":"2027-01-02"}"""
+        every { service.create("owner", any()) } returns result
+        every { service.update("owner", id, any()) } returns result.copy(version = 1)
+        every { service.get("owner", "a", id) } returns result
+        every { service.list("owner", "a", start, end) } returns
+            com.lhs.share.hub.controller.calendar.response.CalendarPrivateItemsResponse(listOf(result))
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(range))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.start_date").value(start.toString()))
+            .andExpect(jsonPath("$.data.end_date").value(end.toString())).andExpect(jsonPath("$.data.date").value(start.toString()))
+        mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(range.dropLast(1) + ",\"expected_version\":0}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.end_date").value(end.toString()))
+        verify { service.update("owner", id, match { it.date == start && it.endDate == end && !it.timeProvided && !it.noteProvided }) }
+        mvc.perform(get("$path/$id").param("account_id", "a")).andExpect(jsonPath("$.data.end_date").value(end.toString()))
+        mvc.perform(get(path).param("account_id", "a").param("from", start.toString()).param("to", end.toString()))
+            .andExpect(
+                jsonPath("$.data.items[0].start_date").value(start.toString()),
+            ).andExpect(jsonPath("$.data.items[0].end_date").value(end.toString()))
+    }
+
+    @Test
+    fun `range decoder rejects partial reversed invalid leap and alias mismatch without calling service`() {
+        val range = """{"account_id":"a","title":"私人内容","start_date":"2028-02-29","end_date":"2028-03-01"}"""
+        listOf(
+            range.replace("2028-02-29", "2026-02-29"), range.replace("2028-03-01", "2028-02-28"),
+            range.replace("2028-03-01", "2028-04-31"), range.replace("2028-03-01", "0000-01-01"),
+            range.replace("\"start_date\":\"2028-02-29\",", ""), range.replace(",\"end_date\":\"2028-03-01\"", ""),
+            range.replace("\"2028-03-01\"", "null"), range.replace("\"2028-03-01\"", "20280301"),
+            range.dropLast(1) + ",\"date\":\"2028-02-28\"}",
+        ).forEach { invalid ->
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isUnprocessableEntity)
+            mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(invalid.dropLast(1) + ",\"expected_version\":0}"))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify { service wasNot io.mockk.Called }
+        val decoder = com.lhs.share.hub.controller.calendar.request.CalendarPrivateItemRequestDecoder
+        val decoded = decoder.decode(mapper.readTree(range), false)
+        org.junit.jupiter.api.Assertions.assertEquals(LocalDate.parse("2028-02-29"), decoded.date)
+        org.junit.jupiter.api.Assertions.assertEquals(LocalDate.parse("2028-03-01"), decoded.endDate)
+        val alias = decoder.decode(mapper.readTree(range.dropLast(1) + ",\"date\":\"2028-02-29\"}"), false)
+        org.junit.jupiter.api.Assertions.assertEquals(decoded, alias)
     }
 
     @Test
