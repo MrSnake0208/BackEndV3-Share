@@ -5,6 +5,7 @@ import com.lhs.share.hub.controller.calendar.ActivityCalendarSubscriptionControl
 import com.lhs.share.hub.controller.calendar.ActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarSuggestionController
+import com.lhs.share.hub.controller.calendar.CalendarPrivateItemController
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarError
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarErrorResponse
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
@@ -24,6 +25,7 @@ import org.springframework.web.server.ResponseStatusException
     assignableTypes = [
         ActivityCalendarController::class, AdminActivityCalendarController::class,
         ActivityCalendarSubscriptionController::class,
+        CalendarPrivateItemController::class,
         ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
     ],
 )

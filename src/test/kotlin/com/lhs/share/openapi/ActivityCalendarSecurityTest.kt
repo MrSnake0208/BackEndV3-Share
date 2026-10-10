@@ -11,6 +11,7 @@ import com.lhs.share.hub.controller.calendar.ActivityCalendarSubscriptionControl
 import com.lhs.share.hub.controller.calendar.ActivityCalendarSuggestionController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarController
 import com.lhs.share.hub.controller.calendar.AdminActivityCalendarSuggestionController
+import com.lhs.share.hub.controller.calendar.CalendarPrivateItemController
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarSuggestionSubmitRequest
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminResponse
@@ -27,6 +28,7 @@ import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
 import com.lhs.share.hub.service.calendar.ActivityCalendarSubscriptionService
 import com.lhs.share.hub.service.calendar.ActivityCalendarSuggestionService
+import com.lhs.share.hub.service.calendar.CalendarPrivateItemService
 import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtAuthToken
 import com.lhs.share.service.jwt.JwtService
@@ -42,6 +44,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
@@ -52,6 +55,7 @@ import java.time.LocalDate
 @ActiveProfiles("test")
 @WebMvcTest(
     controllers = [
+        CalendarPrivateItemController::class,
         ActivityCalendarSubscriptionController::class,
         ActivityCalendarController::class, AdminActivityCalendarController::class,
         ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
@@ -68,6 +72,8 @@ import java.time.LocalDate
 )
 class ActivityCalendarSecurityTest {
     @Autowired lateinit var mvc: MockMvc
+
+    @MockitoBean lateinit var privateItems: CalendarPrivateItemService
 
     @MockitoBean lateinit var subscriptions: ActivityCalendarSubscriptionService
 
@@ -232,5 +238,35 @@ class ActivityCalendarSecurityTest {
             get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
         ).andExpect(status().isOk)
         verifyNoInteractions(betaService, stringRedisTemplate)
+    }
+
+    @Test
+    fun `private item CRUD requires real JWT and admin gate before any data access`() {
+        val path = "/v1/activity-calendar/private-items"
+        val id = "pci_00000000-0000-0000-0000-000000000001"
+        fun requests() = listOf(
+            get(path).param("account_id", "a").param("from", "2026-10-01").param("to", "2026-10-31"),
+            get("$path/$id").param("account_id", "a"),
+            post(path),
+            put("$path/$id"),
+            delete("$path/$id").param("account_id", "a").param("expected_version", "0"),
+        )
+        requests().forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized) }
+        verifyNoInteractions(privateItems)
+        val now = Instant.now()
+        val token = JwtAuthToken("owner", "private-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
+        token.isAuthenticated = true
+        `when`(jwtService.verifyAndParseAuthToken("private-token")).thenReturn(token)
+        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(false)
+        requests().forEach {
+            mvc.perform(it.header("Authorization", "Bearer private-token").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden)
+        }
+        verifyNoInteractions(privateItems, service, subscriptions, suggestions)
+        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(true)
+        `when`(privateItems.list("owner", "a", LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-31")))
+            .thenReturn(com.lhs.share.hub.controller.calendar.response.CalendarPrivateItemsResponse(emptyList()))
+        mvc.perform(requests().first().header("Authorization", "Bearer private-token")).andExpect(status().isOk)
+        verifyNoInteractions(betaService, stringRedisTemplate, service, subscriptions, suggestions)
     }
 }

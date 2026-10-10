@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.repository.ActivityCalendarSubscriptionRepository
+import com.lhs.share.hub.repository.CalendarPrivateItemRepository
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
 import com.lhs.share.hub.repository.InventoryCurrentRepository
 import com.lhs.share.hub.repository.InventoryDeletedRecordRepository
@@ -67,9 +68,12 @@ class SubAccountServiceTest {
     private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
     private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
     private val calendarSubscriptions = mockk<ActivityCalendarSubscriptionRepository>()
+    private val calendarPrivateItems = mockk<CalendarPrivateItemRepository>()
     private val recruitmentRepository = mockk<RecruitmentRepository>()
     init {
         every { calendarSubscriptions.exists(any(), any()) } returns false
+        every { calendarPrivateItems.exists(any(), any()) } returns false
+        every { calendarPrivateItems.deleteAccount(any(), any()) } just runs
         every { calendarSubscriptions.deleteAccount(any(), any()) } just runs
         every { accountRepository.fenceRecruitmentWrite(any(), any(), any()) } returns true
         every { recruitmentRepository.hasSubstantiveData(any(), any()) } returns false
@@ -108,6 +112,7 @@ class SubAccountServiceTest {
         starRecoveryRepository,
         recruitmentRepository,
         calendarSubscriptions = calendarSubscriptions,
+        calendarPrivateItems = calendarPrivateItems,
     )
 
     @Test
@@ -248,6 +253,7 @@ class SubAccountServiceTest {
 
         service.delete("u1", "main")
         verify(exactly = 1) { calendarSubscriptions.deleteAccount("u1", "main") }
+        verify(exactly = 1) { calendarPrivateItems.deleteAccount("u1", "main") }
 
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
@@ -348,5 +354,17 @@ class SubAccountServiceTest {
         assertEquals("activity_calendar_game_locked", error.code)
         verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), any(), any()) }
         assertEquals("新名", service.update("u1", "main", "新名", null).name)
+    }
+
+    @Test
+    fun `private calendar items lock game but allow rename`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(userId = "u1", accountId = "main", name = "大号", game = "代号鸢")
+        every { calendarPrivateItems.exists("u1", "main") } returns true
+        every { accountRepository.updateDetails(any(), any(), any(), any(), any()) } just runs
+        val error = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "如鸢") }
+        assertEquals("calendar_private_game_locked", error.code)
+        verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), any(), any()) }
+        assertEquals("改名", service.update("u1", "main", "改名", null).name)
     }
 }
