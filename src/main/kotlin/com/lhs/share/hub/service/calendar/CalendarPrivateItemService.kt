@@ -50,6 +50,7 @@ class CalendarPrivateItemService(
                 CalendarPrivateItem(
                     "pci_${UUID.randomUUID()}", userId, owner.accountId, owner.game,
                     request.title.trim(), request.date, request.time, request.note, now, now,
+                    endDate = request.endDate ?: request.date,
                 ),
             ),
         )
@@ -63,13 +64,17 @@ class CalendarPrivateItemService(
         CalendarPrivateItemRequestDecoder.requireVersion(version)
         if (current.version != version) throw conflict()
         validate(request)
+        if (request.endDate == null && current.endDate != null && current.endDate != current.date) {
+            throw calendarInvalid("多日事项请使用start_date/end_date编辑，原区间已保留", "end_date")
+        }
         response(
             repository.save(
                 current.copy(
                     title = request.title.trim(),
                     date = request.date,
-                    time = request.time,
-                    note = request.note,
+                    endDate = request.endDate ?: request.date,
+                    time = if (request.timeProvided) request.time else current.time,
+                    note = if (request.noteProvided) request.note else current.note,
                     updatedAt = clock.instant().truncatedTo(ChronoUnit.MILLIS),
                 ),
             ),
@@ -98,6 +103,9 @@ class CalendarPrivateItemService(
     }
 
     private fun validate(request: CalendarPrivateItemRequest) {
+        if (request.endDate != null && (request.endDate.year !in 1..9999 || request.endDate < request.date)) {
+            throw calendarInvalid("结束日期不能早于开始日期，且须为有效日期", "end_date")
+        }
         if (request.title.trim().length !in 1..100 || request.note.length > 1000 || request.date.year !in 1..9999 ||
             request.time != null && !request.time.matches(Regex("([01][0-9]|2[0-3]):[0-5][0-9]"))
         ) {
@@ -108,6 +116,7 @@ class CalendarPrivateItemService(
     private fun response(value: CalendarPrivateItem) = CalendarPrivateItemResponse(
         value.id, value.accountId, value.game, value.title, value.date, value.time, value.note,
         checkNotNull(value.version), value.createdAt, value.updatedAt,
+        endDate = value.endDate ?: value.date,
     )
 
     private fun <T : Any> write(action: () -> T): T = try {

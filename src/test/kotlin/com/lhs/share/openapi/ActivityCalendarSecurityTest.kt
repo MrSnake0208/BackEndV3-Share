@@ -251,7 +251,8 @@ class ActivityCalendarSecurityTest {
             put("$path/$id"),
             delete("$path/$id").param("account_id", "a").param("expected_version", "0"),
         )
-        requests().forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized) }
+        val body = """{"account_id":"a","title":"私人计划","start_date":"2026-10-12","end_date":"2026-10-20","expected_version":0}"""
+        requests().forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized) }
         verifyNoInteractions(privateItems)
         val now = Instant.now()
         val token = JwtAuthToken("owner", "private-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
@@ -259,7 +260,7 @@ class ActivityCalendarSecurityTest {
         `when`(jwtService.verifyAndParseAuthToken("private-token")).thenReturn(token)
         `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(false)
         requests().forEach {
-            mvc.perform(it.header("Authorization", "Bearer private-token").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            mvc.perform(it.header("Authorization", "Bearer private-token").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isForbidden)
         }
         verifyNoInteractions(privateItems, service, subscriptions, suggestions)

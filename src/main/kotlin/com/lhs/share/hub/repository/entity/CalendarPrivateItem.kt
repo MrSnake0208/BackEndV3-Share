@@ -21,4 +21,5 @@ data class CalendarPrivateItem(
     val createdAt: Instant,
     val updatedAt: Instant,
     @Version val version: Long? = null,
+    val endDate: LocalDate? = null,
 )

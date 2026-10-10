@@ -313,19 +313,19 @@ npm run test:static
 Mongo仅允许TestMongo自有临时容器；真实手机软键盘与Safari仍须人工检查。测试结果以本任务verification.md为准。
 ## 私人日历事项 API（2026-10-10）
 
-独立集合 `activity_calendar_private_items` 存储随机 `pci_UUID`、服务端定义的 user/account/game、title/date/time/note、`@Version`、createdAt/updatedAt（毫秒精度）。不写入公共事件/订阅集合，不进入导入、建议审核、公开聚合、RSS或分享URL，无迁移。索引 `(userId, accountId, game, date, _id)` 支持本人账号日期查询，`_id` 自带唯一约束。
+独立集合 `activity_calendar_private_items` 存储随机 `pci_UUID`、服务端定义的 user/account/game、title/date/endDate/time/note、`@Version`、createdAt/updatedAt（毫秒精度）。不写入公共事件/订阅集合，不进入导入、建议审核、公开聚合、RSS或分享URL，无迁移。索引 `(userId, accountId, game, date, _id)` 支持本人账号日期查询，`_id` 自带唯一约束。`date` 继续存开始日，`endDate` 存结束日；旧文档缺失/null时有效结束日等于date，读取不回写。保留原索引，无全量迁移；重叠查询使用owner/game索引前缀和date上界，再过滤endDate，不新增索引（超长历史积累时按实际explain评估）。
 
 所有接口在 `/v1/activity-calendar/private-items` 下，使用既有 snake_case ApiResult、JWT及管理员测试门禁。每次重新验证JWT用户拥有 `account_id`，游戏从账号推导，所有文档查询包含 user/account/game。不存在和非本人记录一致404；非本人账号使用同一 `account_not_found` 响应。管理员不能因此读取其他用户私人事项。
 
 | 方法 | 参数 / 行为 |
 | --- | --- |
-| GET 根路径 | 必填 `account_id/from/to`，ISO日期、含首尾最多100天；按日期/时间/id排序，读1001条用于检测超限，超过1000条422要求缩小范围；返回 `{items: [...]}`，无隐式截断 |
-| POST 根路径 | JSON必填 `account_id/title/date`；可选 `time/note`；返回新记录 |
+| GET 根路径 | 必填 `account_id/from/to`，ISO日期、含首尾最多100天；按闭区间重叠 `date<=to && (endDate>=from || (endDate=null && date>=from))` 查询，按开始日期/时间/id排序，读1001条用于检测超限，超过1000条422要求缩小范围；返回 `{items: [...]}`，无隐式截断 |
+| POST 根路径 | JSON必填 `account_id/title/start_date/end_date`（或旧 `date` 单日格式）；可选 `time/note`；返回新记录 |
 | GET `/{id}` | query `account_id`；返回本人记录 |
-| PUT `/{id}` | JSON同创建，并必填 `expected_version`；整体更新可编辑字段，CAS成功递增版本 |
+| PUT `/{id}` | JSON同创建，并必填 `expected_version`；更新区间；省略time/note保留已有内容，显式null时间/空说明可清空；CAS成功递增版本 |
 | DELETE `/{id}` | query `account_id/expected_version`；按版本条件删除，返回成功 |
 
-标题trim后1–100字，日期严格有效 `YYYY-MM-DD`（0001–9999年），可选时间仅 `HH:mm` 或null（全天），说明纯文本≤1000字（省略为空）。不推断结束时刻，不生成TODO；拒绝未知字段和客户端归属/game/event字段。版本为非负Long且小于Long.MAX_VALUE。响应含 `id/account_id/game/title/date/time/note/version/created_at/updated_at/time_zone`，`time_zone=Asia/Shanghai`，不返回用户ID。
+标题trim后1–100字，日期严格有效 `YYYY-MM-DD`（0001–9999年），可选时间仅 `HH:mm` 或null（全天），时间只表示开始日时刻；说明纯文本≤1000字（创建省略为空，更新省略保留）。不推断结束时刻，不生成TODO；拒绝未知字段和客户端归属/game/event字段。版本为非负Long且小于Long.MAX_VALUE。起止日期成对，结束不得早于开始，闭区间允许跨月/跨年/闰日及长跨度；混用旧date时必须等于start_date。旧date请求不能修改已有多日事项，返回422保留原记录，防止旧客户端压平跨度。响应含 `id/account_id/game/title/start_date/end_date/date/time/note/version/created_at/updated_at/time_zone`（date为开始日兼容别名），`time_zone=Asia/Shanghai`，不返回用户ID。
 
 创建/修改/删除在既有 Mongo 事务中先获取账号写fence；更新使用 `@Version`，删除使用版本条件，过期版本或事务竞争返回409 `private_item_conflict`。账号重命名不影响事项；存在事项时变更游戏409 `calendar_private_game_locked`。账号删除在原事务级联删除私人事项，后续失败整体回滚，与创建共享账号fence避免孤儿记录。公开数据、管理员活动维护权限和订阅TODO结构/历史字段均不变。
 
@@ -336,4 +336,4 @@ Mongo仅允许TestMongo自有临时容器；真实手机软键盘与Safari仍须
 ./gradlew integrationTest --tests '*CalendarPrivateItemMongoTest' --tests '*ActivityCalendarSubscriptionMongoTest' --console=plain
 ```
 
-覆盖HTTP/JWT契约、跨用户/账号CRUD、日期/长度/范围校验、真实持久化与唯一索引、CAS并发更新/删除、事务回滚、重命名/删除级联与删除竞争。升级时先兼容后端再前端；本次不部署、不重启服务。实际结果见根任务 `10-10-activity-calendar-private-items/verification.md`。
+覆盖HTTP/JWT新旧契约、跨用户/账号CRUD、起止范围/闰日/长度校验、旧文档无回写读取和保留内容的更新、跨月跨年重叠/相邻窗口/长区间、真实持久化与唯一索引、CAS并发更新/删除、事务回滚、重命名/删除级联与删除竞争。升级时先兼容后端再前端；本次不部署、不重启服务。实际结果见根任务 `10-10-activity-calendar-private-items/verification.md`。
