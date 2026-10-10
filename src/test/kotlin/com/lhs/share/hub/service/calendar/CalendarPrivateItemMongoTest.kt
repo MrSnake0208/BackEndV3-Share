@@ -1,0 +1,231 @@
+package com.lhs.share.hub.service.calendar
+
+import com.lhs.share.hub.controller.calendar.request.CalendarPrivateItemRequest
+import com.lhs.share.hub.repository.CalendarPrivateItemRepository
+import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepositoryImpl
+import com.lhs.share.hub.repository.entity.CalendarPrivateItem
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.openapi.OpenApiTokenService
+import com.lhs.share.testinfra.TestMongo
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Test
+import org.springframework.dao.DuplicateKeyException
+import org.springframework.data.mongodb.MongoTransactionManager
+import org.springframework.data.mongodb.core.MongoTemplate
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
+import org.springframework.data.mongodb.core.index.MongoPersistentEntityIndexResolver
+import org.springframework.data.mongodb.core.query.Criteria
+import org.springframework.data.mongodb.core.query.Query
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.LocalDate
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
+@Tag("integration")
+class CalendarPrivateItemMongoTest {
+    private val database = TestMongo.database("cal_private")
+    private val client = TestMongo.client()
+    private val factory = SimpleMongoClientDatabaseFactory(client, database)
+    private val mongo = MongoTemplate(factory)
+    private val transaction = TransactionTemplate(MongoTransactionManager(factory))
+    private val repository = CalendarPrivateItemRepository(mongo)
+    private val accounts = mockk<SubAccountRepository>()
+    private val accountWrites = SubAccountRepositoryImpl(mongo)
+    private val tokens = mockk<OpenApiTokenService>(relaxed = true)
+    private val service = CalendarPrivateItemService(repository, accounts, transaction)
+    private val day = LocalDate.parse("2026-10-15")
+    private fun request(account: String = "a") = CalendarPrivateItemRequest(account, "领取奖励", day, "23:59", "私人说明", null)
+    private val lifecycle = SubAccountService(
+        accountRepository = accounts, inventoryCurrentRepository = mockk(relaxed = true), inventoryRecordRepository = mockk(relaxed = true),
+        inventoryDeletedRecordRepository = mockk(relaxed = true), favoriteRepository = mockk(relaxed = true),
+        operatorCurrentRepository = mockk(relaxed = true), operatorRecordRepository = mockk(relaxed = true),
+        operatorCorrectionRecordRepository = mockk(relaxed = true), operatorV3ImportRecordRepository = mockk(relaxed = true),
+        operatorScanReviewRepository = mockk(relaxed = true), tokenService = tokens, transactionTemplate = transaction,
+        calendarPrivateItems = repository,
+    )
+
+    @BeforeEach
+    fun setup() {
+        listOf(SubAccount::class.java, CalendarPrivateItem::class.java).forEach { type ->
+            mongo.createCollection(type)
+            MongoPersistentEntityIndexResolver(mongo.converter.mappingContext).resolveIndexFor(type).forEach {
+                mongo.indexOps(type).createIndex(it)
+            }
+        }
+        listOf(
+            SubAccount(id = "doc-a", userId = "owner", accountId = "a", name = "大号", game = "如鸢"),
+            SubAccount(id = "doc-b", userId = "owner", accountId = "b", name = "小号", game = "代号鸢"),
+            SubAccount(id = "doc-other", userId = "other", accountId = "c", name = "别人", game = "如鸢"),
+        ).forEach { mongo.insert(it) }
+        every { accounts.findByUserIdAndAccountId(any(), any()) } answers {
+            mongo.findOne(
+                Query(Criteria.where("userId").`is`(firstArg<String>()).and("accountId").`is`(secondArg<String>())),
+                SubAccount::class.java,
+            )
+        }
+        every { accounts.fenceRecruitmentWrite(any(), any(), any()) } answers
+            { accountWrites.fenceRecruitmentWrite(firstArg(), secondArg(), thirdArg()) }
+        every { accounts.deleteById(any()) } answers
+            {
+                mongo.remove(Query(Criteria.where("_id").`is`(firstArg<String>())), SubAccount::class.java)
+                Unit
+            }
+        every { accounts.updateDetails(any(), any(), any(), any(), any()) } answers {
+            accountWrites.updateDetails(firstArg(), secondArg(), thirdArg(), arg(3), arg(4))
+        }
+    }
+
+    @AfterEach
+    fun cleanup() {
+        TestMongo.dropDatabase(client, database)
+        client.close()
+    }
+
+    @Test
+    fun `real persistence bounded range owner indexes and duplicate id are isolated from public data`() {
+        val a = service.create("owner", request())
+        val b = service.create("owner", request("b").copy(time = null))
+        val c = service.create("other", request("c"))
+        service.create("owner", request().copy(date = day.plusDays(1), title = "明天"))
+        assertEquals(listOf(a.id), service.list("owner", "a", day, day).items.map { it.id })
+        assertEquals(listOf(b.id), service.list("owner", "b", day, day).items.map { it.id })
+        assertEquals(listOf(c.id), service.list("other", "c", day, day).items.map { it.id })
+        assertEquals(a, service.get("owner", "a", a.id))
+        val before = mongo.getCollection("activity_calendar_private_items").find().into(mutableListOf())
+        service.list("owner", "a", day, day.plusDays(1))
+        assertEquals(before, mongo.getCollection("activity_calendar_private_items").find().into(mutableListOf()))
+        assertTrue(mongo.indexOps(CalendarPrivateItem::class.java).indexInfo.any { it.name == "calendar_private_owner_date" })
+        assertThrows(DuplicateKeyException::class.java) { mongo.insert(repository.find("owner", "a", "如鸢", a.id)!!) }
+        assertFalse(mongo.collectionExists("activity_calendar_events"))
+        assertFalse(mongo.collectionExists("activity_calendar_subscriptions"))
+        assertFalse(mongo.collectionExists("activity_calendar_suggestions"))
+        assertEquals(2, service.list("owner", "a", day, day.plusDays(1)).items.size)
+    }
+
+    @Test
+    fun `cross user account and game cannot read update or delete record and deleted read is 404`() {
+        val a = service.create("owner", request())
+        listOf("owner" to "b", "other" to "c", "other" to "a").forEach { (user, account) ->
+            listOf<() -> Any>(
+                { service.get(user, account, a.id) },
+                { service.update(user, a.id, request(account).copy(expectedVersion = 0)) },
+                { service.delete(user, account, a.id, 0) },
+            ).forEach { action -> assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) { action() }.status.value()) }
+        }
+        assertEquals("领取奖励", service.get("owner", "a", a.id).title)
+        service.delete("owner", "a", a.id, 0)
+        assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) { service.get("owner", "a", a.id) }.status.value())
+        assertFalse(repository.exists("owner", "a"))
+    }
+
+    @Test
+    fun `repository limits range reads and service refuses silently truncated results`() {
+        val created = service.create("owner", request())
+        val template = repository.find("owner", "a", "如鸢", created.id)!!
+        mongo.insert((1..1001).map { template.copy(id = "pci_${java.util.UUID.randomUUID()}") }, CalendarPrivateItem::class.java)
+        assertEquals(1001, repository.list("owner", "a", "如鸢", day, day).size)
+        assertEquals(422, assertThrows(ActivityCalendarApiException::class.java) { service.list("owner", "a", day, day) }.status.value())
+        assertTrue(service.list("owner", "a", day.plusDays(1), day.plusDays(1)).items.isEmpty())
+    }
+
+    @Test
+    fun `concurrent updates and update delete race admit one winner and preserve CAS`() {
+        val a = service.create("owner", request())
+        val updated =
+            concurrent(List(2) { index -> { service.update("owner", a.id, request().copy(title = "修改$index", expectedVersion = 0)) } })
+        assertEquals(1, updated.count { it.isSuccess })
+        assertEquals(409, (updated.single { it.isFailure }.exceptionOrNull() as ActivityCalendarApiException).status.value())
+        assertEquals(1L, service.get("owner", "a", a.id).version)
+        val raced = concurrent(
+            listOf(
+                { service.update("owner", a.id, request().copy(title = "新版本", expectedVersion = 1)) },
+                { service.delete("owner", "a", a.id, 1) },
+            ),
+        )
+        assertEquals(1, raced.count { it.isSuccess })
+        val stored = repository.find("owner", "a", "如鸢", a.id)
+        assertTrue(stored == null || stored.version == 2L)
+    }
+
+    @Test
+    fun `failed mutation rolls back document and account fence`() {
+        val broken = spyk(repository)
+        every { broken.save(any()) } answers {
+            repository.save(firstArg())
+            error("injected after write")
+        }
+        val failing = CalendarPrivateItemService(broken, accounts, transaction)
+        assertThrows(IllegalStateException::class.java) { failing.create("owner", request()) }
+        assertFalse(repository.exists("owner", "a"))
+        assertEquals(0L, mongo.findById("doc-a", SubAccount::class.java)!!.recruitmentFence)
+    }
+
+    @Test
+    fun `account rename preserves items and deletion cascade rolls back on later failure`() {
+        val a = service.create("owner", request())
+        val b = service.create("owner", request("b"))
+        lifecycle.update("owner", "a", "新名字", null)
+        assertEquals(a, service.get("owner", "a", a.id))
+        every { tokens.revokeByAccount("owner", "a") } throws IllegalStateException("injected delete failure")
+        assertThrows(IllegalStateException::class.java) { lifecycle.delete("owner", "a") }
+        assertNotNull(mongo.findById("doc-a", SubAccount::class.java))
+        assertNotNull(repository.find("owner", "a", "如鸢", a.id))
+        every { tokens.revokeByAccount("owner", "a") } returns Unit
+        lifecycle.delete("owner", "a")
+        assertNull(mongo.findById("doc-a", SubAccount::class.java))
+        assertFalse(repository.exists("owner", "a"))
+        assertEquals(b, service.get("owner", "b", b.id))
+    }
+
+    @Test
+    fun `account deletion races create without orphaning private records`() {
+        val results = concurrent(
+            listOf({ service.create("owner", request()) }, {
+                lifecycle.delete("owner", "a")
+                true
+            }),
+        )
+        assertTrue(results.any { it.isSuccess })
+        if (mongo.findById("doc-a", SubAccount::class.java) != null) lifecycle.delete("owner", "a")
+        assertFalse(repository.exists("owner", "a"))
+        assertNotNull(mongo.findById("doc-b", SubAccount::class.java))
+        assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) { service.create("owner", request()) }.status.value())
+    }
+
+    private fun concurrent(actions: List<() -> Any>): List<Result<Any>> {
+        val executor = Executors.newFixedThreadPool(actions.size)
+        val ready = CountDownLatch(actions.size)
+        val start = CountDownLatch(1)
+        return try {
+            val futures = actions.map { action ->
+                executor.submit(
+                    Callable {
+                        ready.countDown()
+                        check(start.await(10, TimeUnit.SECONDS))
+                        runCatching(action)
+                    },
+                )
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            futures.map { it.get(20, TimeUnit.SECONDS) }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+}

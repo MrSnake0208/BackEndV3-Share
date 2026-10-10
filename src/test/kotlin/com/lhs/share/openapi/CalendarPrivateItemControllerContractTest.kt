@@ -1,0 +1,110 @@
+package com.lhs.share.openapi
+
+import com.fasterxml.jackson.databind.PropertyNamingStrategies
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.config.security.AuthenticationHelper
+import com.lhs.share.handler.ActivityCalendarExceptionHandler
+import com.lhs.share.hub.controller.calendar.CalendarPrivateItemController
+import com.lhs.share.hub.controller.calendar.response.CalendarPrivateItemResponse
+import com.lhs.share.hub.service.admin.AdminAuthorizationService
+import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
+import com.lhs.share.hub.service.calendar.CalendarPrivateItemService
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import java.time.Instant
+import java.time.LocalDate
+
+class CalendarPrivateItemControllerContractTest {
+    private val service = mockk<CalendarPrivateItemService>()
+    private val helper = mockk<AuthenticationHelper>()
+    private val authorization = mockk<AdminAuthorizationService>()
+    private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+        .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+    private val path = "/v1/activity-calendar/private-items"
+    private val id = "pci_00000000-0000-0000-0000-000000000001"
+    private val body = """{"account_id":"a","title":"  私人内容  ","date":"2026-10-15"}"""
+    private lateinit var mvc: MockMvc
+
+    @BeforeEach
+    fun setup() {
+        every { helper.requireUserId() } returns "owner"
+        every { authorization.hasAnyAdminCapability("owner") } returns true
+        mvc = MockMvcBuilders.standaloneSetup(CalendarPrivateItemController(service, helper, authorization))
+            .setControllerAdvice(ActivityCalendarExceptionHandler())
+            .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
+    }
+
+    @Test
+    fun `strict fields reject forged ownership public event binding invalid dates and coercions`() {
+        listOf(
+            body.replace("2026-10-15", "2026-02-30"), body.replace("2026-10-15", "0000-01-01"),
+            body.replace("2026-10-15", "2026-1-15"), body.replace("\"  私人内容  \"", "false"),
+            body.dropLast(1) + ",\"user_id\":\"other\"}", body.dropLast(1) + ",\"game\":\"代号鸢\"}",
+            body.dropLast(1) + ",\"event_id\":\"evt\"}", body.dropLast(1) + ",\"expected_version\":0}",
+            body.dropLast(1) + ",\"time\":\"24:00\"}", body.dropLast(1) + ",\"time\":1}",
+            body.dropLast(1) + ",\"note\":null}", body.dropLast(1) + ",\"note\":\"${"文".repeat(1001)}\"}",
+            body.replace("  私人内容  ", "文".repeat(101)), body.replace("  私人内容  ", "   "),
+        ).forEach { mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(it)).andExpect(status().isUnprocessableEntity) }
+        listOf(body, body.dropLast(1) + ",\"expected_version\":null}", body.dropLast(1) + ",\"expected_version\":1.5}")
+            .forEach {
+                mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(it)).andExpect(status().isUnprocessableEntity)
+            }
+        mvc.perform(get(path).param("account_id", "a")).andExpect(status().isUnprocessableEntity)
+        mvc.perform(delete("$path/$id").param("account_id", "a")).andExpect(status().isUnprocessableEntity)
+        verify { service wasNot io.mockk.Called }
+    }
+
+    @Test
+    fun `create update get delete use JWT actor and snake case with optional single time`() {
+        val now = Instant.parse("2026-10-10T04:00:00Z")
+        val result = CalendarPrivateItemResponse(id, "a", "如鸢", "私人内容", LocalDate.parse("2026-10-15"), "00:00", "", 0, now, now)
+        every { service.create("owner", any()) } returns result
+        every { service.update("owner", id, any()) } returns result.copy(version = 1)
+        every { service.get("owner", "a", id) } returns result
+        every { service.delete("owner", "a", id, 1) } returns true
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"time\":\"00:00\"}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.account_id").value("a"))
+            .andExpect(jsonPath("$.data.time_zone").value("Asia/Shanghai"))
+            .andExpect(jsonPath("$.data.user_id").doesNotExist()).andExpect(jsonPath("$.data.event_id").doesNotExist())
+            .andExpect(jsonPath("$.data.end_time").doesNotExist()).andExpect(jsonPath("$.data.created_at").value(now.toString()))
+        verify { service.create("owner", match { it.title == "私人内容" && it.time == "00:00" && it.expectedVersion == null }) }
+        mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"expected_version\":0}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.version").value(1))
+        mvc.perform(get("$path/$id").param("account_id", "a")).andExpect(status().isOk)
+        mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "1")).andExpect(status().isOk)
+    }
+
+    @Test
+    fun `ordinary user rejected before every service operation and conflicts use standard envelope`() {
+        every { authorization.hasAnyAdminCapability("owner") } returns false
+        listOf(
+            get(path).param("account_id", "a").param("from", "2026-10-01").param("to", "2026-10-31"),
+            get("$path/$id").param("account_id", "a"),
+            post(path).content(body),
+            put("$path/$id").content(body),
+            delete("$path/$id").param("account_id", "a").param("expected_version", "0"),
+        ).forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON)).andExpect(status().isForbidden) }
+        verify { service wasNot io.mockk.Called }
+        every { authorization.hasAnyAdminCapability("owner") } returns true
+        every { service.delete("owner", "a", id, 0) } throws
+            ActivityCalendarApiException(HttpStatus.CONFLICT, "private_item_conflict", "changed")
+        mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "0"))
+            .andExpect(status().isConflict).andExpect(jsonPath("$.error.code").value("private_item_conflict"))
+    }
+}
