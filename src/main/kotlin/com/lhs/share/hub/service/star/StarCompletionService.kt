@@ -159,6 +159,16 @@ class StarCompletionService(
                     val consumed = required.filterValues { it > 0 }
                     val transactionId = "star_completion_${UUID.randomUUID()}"
                     if (consumed.isNotEmpty()) {
+                        // Consumption must follow every item source adopted by this transaction, including future-dated imports.
+                        val effectiveAt = maxOf(
+                            now,
+                            records.findFirstByUserIdAndAccountIdAndEntityTypeOrderByEffectiveAtDesc(
+                                userId,
+                                request.accountId,
+                                "item",
+                            )?.effectiveAt
+                                ?: now,
+                        )
                         val entries = checkNotNull(stock).entries.toMutableMap()
                         consumed.forEach { (id, _) ->
                             entries[id] = checkNotNull(entries[id]).copy(count = checkNotNull(balances.getValue(id)))
@@ -168,7 +178,7 @@ class StarCompletionService(
                             InventoryRecord(
                                 recordId = "completion:$transactionId:item", userId = userId, accountId = request.accountId,
                                 recordType = "consumption_delta", entityType = "item", acquisitionChannel = "星石养成",
-                                effectiveAt = now, receivedAt = now, producer = ProducerInfo("myshare", "star-completion-v1"),
+                                effectiveAt = effectiveAt, receivedAt = now, producer = ProducerInfo("myshare", "star-completion-v1"),
                                 entries = consumed.map { (id, count) -> RecordEntry(id, count = count) },
                                 stockEffect = "applied", transactionId = transactionId,
                             ),

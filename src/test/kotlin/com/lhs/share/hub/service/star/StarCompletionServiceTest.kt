@@ -124,6 +124,9 @@ class StarCompletionServiceTest {
         }
         every { inventories.save(any()) } answers { firstArg<InventoryCurrent>().also { stock = it } }
         every { records.insert(any<InventoryRecord>()) } answers { firstArg<InventoryRecord>().also(history::add) }
+        every { records.findFirstByUserIdAndAccountIdAndEntityTypeOrderByEffectiveAtDesc("u", "a", "item") } answers {
+            history.maxByOrNull { it.effectiveAt }
+        }
         every { receipts.findByUserIdAndAccountIdAndOperationId("u", "a", any()) } answers { savedReceipts[thirdArg<String>()] }
         every { receipts.insert(any<StarCompletion>()) } answers { firstArg<StarCompletion>().also { savedReceipts[it.operationId] = it } }
     }

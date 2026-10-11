@@ -304,3 +304,9 @@ YuanHub保持feat/growth-plan-workspace-p1，HEAD为185ee361faf42770993a3aca2849
 下一轮只能在前端测试fixture/注入transport中mock上述三个接口，继续让其他API和现有5175预览使用公开Backend。Mock必须在网络发送前截断completion请求，不能在公开API 404后补发真实写入，也不能自动改到本地8080。
 
 使用完全虚构的账号/实例/库存fixture，覆盖多星、实际经验低于估算、40→50临时修正、null/0区别、版本冲突、资源不足、同ID同正文重试和同ID异正文拒绝。模拟“服务端已提交但首个响应丢失”，然后通过receipt/同ID重试恢复同一回执，确认客户端不会再消费。用Mock结果验证前端状态采用与交互，不把它宣称为公开Backend E2E。P3-B实现、功能启用和Backend部署仍需后续单独授权。
+
+## 主线集成：未来生效记录与历史重放
+
+星石完成的消费记录 `effectiveAt` 取服务端当前时间与事务内该用户、该账号最新 item 流水生效时间的较大值，避免客户端未来快照在重放时覆盖已扣减余额。查询只取按生效时间倒序的首条记录；不读取完整历史。`receivedAt` 和回执 `completed_at` 仍为实际服务端完成时间，不因客户端未来时间而前移。库存 revision CAS 与历史导入/删除/恢复继续共用事务写冲突保护。
+
+真实 owned TestMongo 回归覆盖未来 `stock_snapshot` 和 `reward_delta`，删除/恢复无关历史后余额不变，且同操作重试仍只有一份回执和一条消费记录。
