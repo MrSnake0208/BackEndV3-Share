@@ -84,6 +84,8 @@ class SecurityConfig(
                 .authenticated()
                 .requestMatchers(HttpMethod.GET, "/v1/activity-calendar")
                 .authenticated()
+                .requestMatchers(HttpMethod.GET, "/hub/ledger/catalog")
+                .permitAll()
                 .requestMatchers(HttpMethod.GET, "/v1/development-goals")
                 .permitAll()
                 .anyRequest()
