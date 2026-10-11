@@ -19,6 +19,7 @@ import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
+import com.lhs.share.hub.repository.StarCompletionRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
@@ -60,6 +61,7 @@ class SubAccountServiceTest {
     private val annotationRepository = mockk<OperatorAnnotationRepository>()
     private val targetRepository = mockk<OperatorGrowthTargetRepository>()
     private val upgradeRepository = mockk<OperatorUpgradeTransactionRepository>()
+    private val completionRepository = mockk<StarCompletionRepository>(relaxed = true)
     private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
@@ -113,6 +115,7 @@ class SubAccountServiceTest {
         recruitmentRepository,
         calendarSubscriptions = calendarSubscriptions,
         calendarPrivateItems = calendarPrivateItems,
+        starCompletionRepository = completionRepository,
     )
 
     @Test
@@ -274,6 +277,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { completionRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
@@ -314,6 +318,7 @@ class SubAccountServiceTest {
         io.mockk.confirmVerified(accountRepository)
         io.mockk.verify { tokenService wasNot io.mockk.Called }
         verify(exactly = 0) { starStateRepository.deleteAllByUserIdAndAccountId(any(), any()) }
+        verify(exactly = 0) { completionRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { inventoryCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
         verify(exactly = 0) { operatorCurrentRepository.deleteAllByUserIdAndAccountId(any(), any()) }
     }
