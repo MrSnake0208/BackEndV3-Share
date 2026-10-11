@@ -65,6 +65,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
@@ -345,6 +347,29 @@ class StarCompletionMongoTransactionTest {
         inventoryService.restoreRecord("u", "a", "irrelevant")
         assertEquals(140L, stock().entries["jiezheping"]?.count)
         assertNotNull(service().receipt("u", "a", "op1"))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["stock_snapshot", "reward_delta"])
+    fun `future inventory sources cannot overwrite completion consumption on history replay`(type: String) {
+        val future = Instant.now().plusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+        inventoryService.import("u", importRequest("irrelevant", "reward_delta", "other", 1))
+        inventoryService.import("u", importRequest("future", type, "jiezheping", if (type == "stock_snapshot") 200 else 10, future))
+        val before = checkNotNull(stock().entries["jiezheping"]).count
+        val command = request().copy(expectedInventoryRevision = 9)
+        val result = service().complete("u", command)
+        val consumption = records.findByUserIdAndAccountIdOrderByEffectiveAtAsc("u", "a").single { it.recordType == "consumption_delta" }
+        assertTrue(result.completedAt.isBefore(future))
+        assertEquals(result.completedAt, consumption.receivedAt)
+        assertEquals(before - 50, stock().entries["jiezheping"]?.count)
+        inventoryService.deleteRecord("u", "a", "irrelevant")
+        assertEquals(before - 50, stock().entries["jiezheping"]?.count)
+        inventoryService.restoreRecord("u", "a", "irrelevant")
+        assertEquals(before - 50, stock().entries["jiezheping"]?.count)
+        assertTrue(!consumption.effectiveAt.isBefore(future))
+        assertEquals(result, service().complete("u", command))
+        assertEquals(1, receipts.count())
+        assertEquals(1, records.findByUserIdAndAccountIdOrderByEffectiveAtAsc("u", "a").count { it.recordType == "consumption_delta" })
     }
 
     @Test fun `same operation key is isolated across users and accounts`() {

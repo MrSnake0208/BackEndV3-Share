@@ -33,6 +33,12 @@ interface InventoryRecordRepository : MongoRepository<InventoryRecord, String> {
      */
     fun findByUserIdAndAccountIdOrderByEffectiveAtAsc(userId: String, accountId: String): List<InventoryRecord>
 
+    fun findFirstByUserIdAndAccountIdAndEntityTypeOrderByEffectiveAtDesc(
+        userId: String,
+        accountId: String,
+        entityType: String,
+    ): InventoryRecord?
+
     /**
      * 按用户 + 记录类型 + 生效时间区间分页查询(时段统计用,区间 [from, to))
      */
