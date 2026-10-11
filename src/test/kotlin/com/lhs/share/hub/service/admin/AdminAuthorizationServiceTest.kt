@@ -34,6 +34,7 @@ class AdminAuthorizationServiceTest {
         activeUser("platform")
         every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))
 
+        assertTrue(service.hasPermission("platform", AdminPermission.LEDGER_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.OPERATOR_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.RECRUITMENT_CATALOG_WRITE))
         assertTrue(service.hasPermission("platform", AdminPermission.RECRUITMENT_ACCESS_MANAGE))
@@ -51,6 +52,7 @@ class AdminAuthorizationServiceTest {
         activeUser("root")
         every { roleRepository.findById("root") } returns Optional.of(binding("root", AdminRole.SUPER_ADMIN))
 
+        assertTrue(service.hasPermission("root", AdminPermission.LEDGER_CATALOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.OPERATOR_CATALOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.RECRUITMENT_CATALOG_WRITE))
         assertTrue(service.hasPermission("root", AdminPermission.RECRUITMENT_ACCESS_MANAGE))
@@ -81,6 +83,7 @@ class AdminAuthorizationServiceTest {
         every { roleRepository.findById("reviewer") } returns Optional.of(binding("reviewer", AdminRole.CHANGELOG_REVIEWER))
 
         assertTrue(service.hasPermission("editor", AdminPermission.CHANGELOG_WRITE))
+        assertFalse(service.hasPermission("editor", AdminPermission.LEDGER_CATALOG_WRITE))
         assertFalse(service.hasPermission("editor", AdminPermission.CHANGELOG_REVIEW))
         assertFalse(service.hasPermission("editor", AdminPermission.DEVELOPMENT_GOAL_MANAGE))
         assertTrue(service.hasPermission("reviewer", AdminPermission.CHANGELOG_REVIEW))
