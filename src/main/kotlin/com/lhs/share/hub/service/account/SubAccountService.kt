@@ -20,6 +20,7 @@ import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
 import com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository
 import com.lhs.share.hub.repository.OperatorV3ImportRecordRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
+import com.lhs.share.hub.repository.StarCompletionRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
@@ -70,6 +71,7 @@ class SubAccountService(
     private val accountEvents: AccountEventService? = null,
     private val calendarSubscriptions: ActivityCalendarSubscriptionRepository? = null,
     private val calendarPrivateItems: CalendarPrivateItemRepository? = null,
+    private val starCompletionRepository: StarCompletionRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -174,6 +176,7 @@ class SubAccountService(
                 operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                starCompletionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
                 trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
