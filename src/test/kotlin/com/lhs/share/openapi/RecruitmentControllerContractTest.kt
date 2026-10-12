@@ -11,14 +11,11 @@ import com.lhs.share.hub.controller.recruitment.response.RecruitmentArchiveRespo
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentEventPage
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentSummary
-import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.hub.service.recruitment.RecruitmentApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
 import com.lhs.share.hub.service.recruitment.RecruitmentService
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
-import io.mockk.runs
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.BeforeEach
@@ -36,7 +33,6 @@ import org.springframework.web.server.ResponseStatusException
 
 class RecruitmentControllerContractTest {
     private val service = mockk<RecruitmentService>()
-    private val access = mockk<RecruitmentAccessService>()
     private val helper = mockk<AuthenticationHelper>()
     private val mapper = jacksonObjectMapper().registerModule(
         JavaTimeModule(),
@@ -44,13 +40,11 @@ class RecruitmentControllerContractTest {
     private lateinit var mvc: MockMvc
 
     @BeforeEach fun setup() {
-        every { access.requireAccess(any()) } just runs
         mvc =
             MockMvcBuilders.standaloneSetup(
                 RecruitmentController(
                     service,
                     RecruitmentCatalog(mapper, mockk(relaxed = true), mockk(relaxed = true)),
-                    access,
                     helper,
                     mapper,
                 ),
@@ -59,7 +53,7 @@ class RecruitmentControllerContractTest {
                 .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
 
-    @Test fun `catalog and recruitment endpoints are outside the global beta policy`() {
+    @Test fun `catalog remains public while private recruitment endpoints use the beta policy`() {
         mvc.perform(get("/v1/recruitment/catalog").param("game", "如鸢")).andExpect(status().isOk)
             .andExpect(jsonPath("$.data.pools").isEmpty)
         verify {
@@ -68,7 +62,7 @@ class RecruitmentControllerContractTest {
         }
         assertFalse(BetaAccessPolicy.requiresBeta("GET", "/v1/recruitment/catalog"))
         listOf("archive", "events", "commands", "import/commit").forEach {
-            assertFalse(BetaAccessPolicy.requiresBeta("POST", "/v1/recruitment/$it"))
+            org.junit.jupiter.api.Assertions.assertTrue(BetaAccessPolicy.requiresBeta("POST", "/v1/recruitment/$it"))
         }
     }
 
@@ -77,12 +71,7 @@ class RecruitmentControllerContractTest {
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a")).andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("unauthorized"))
         every { helper.requireUserId() } returns "u"
-        every { access.requireAccess("u") } throws
-            RecruitmentApiException(HttpStatus.FORBIDDEN, "recruitment_access_required", "Access required")
-        mvc.perform(get("/v1/recruitment/archive").param("account_id", "a")).andExpect(status().isForbidden)
-            .andExpect(jsonPath("$.error.code").value("recruitment_access_required"))
         verify(exactly = 0) { service.archive(any(), any()) }
-        every { access.requireAccess("u") } just runs
         listOf(HttpStatus.NOT_FOUND, HttpStatus.CONFLICT, HttpStatus.UNPROCESSABLE_ENTITY).forEach { code ->
             every { service.archive("u", "a") } throws RecruitmentApiException(code, "boundary", "test")
             mvc.perform(get("/v1/recruitment/archive").param("account_id", "a")).andExpect(status().`is`(code.value()))
