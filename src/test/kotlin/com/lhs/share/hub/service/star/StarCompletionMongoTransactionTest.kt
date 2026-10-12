@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.star
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.config.mongo.StarCompletionIndexCleanup
 import com.lhs.share.hub.controller.inventory.request.InventoryEntryRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryRecordRequest
@@ -67,11 +68,16 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import org.springframework.boot.DefaultApplicationArguments
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
 import org.springframework.data.mongodb.core.index.Index
+import org.springframework.data.mongodb.core.index.MongoPersistentEntityIndexResolver
+import org.springframework.data.mongodb.core.query.Criteria
+import org.springframework.data.mongodb.core.query.Query
+import org.springframework.data.mongodb.core.query.Update
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory
 import org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments
 import org.springframework.transaction.support.TransactionTemplate
@@ -147,11 +153,9 @@ class StarCompletionMongoTransactionTest {
         ).forEach {
             template.createCollection(it)
         }
-        template.indexOps(
-            StarCompletion::class.java,
-        ).ensureIndex(
-            Index().on("userId", Sort.Direction.ASC).on("accountId", Sort.Direction.ASC).on("operationId", Sort.Direction.ASC).unique(),
-        )
+        MongoPersistentEntityIndexResolver(template.converter.mappingContext).resolveIndexFor(StarCompletion::class.java).forEach {
+            template.indexOps(StarCompletion::class.java).ensureIndex(it)
+        }
         accounts.insert(SubAccount(userId = "u", accountId = "a", name = "owned", game = "如鸢"))
         states.insert(
             StarStateCurrent(
@@ -207,6 +211,76 @@ class StarCompletionMongoTransactionTest {
         assertEquals(response, service().complete("u", request()))
         assertEquals(1, receipts.count())
         assertEquals(2, records.count())
+    }
+
+    @Test fun `same account can complete twice with actual entity indexes and retry either receipt`() {
+        val first = service().complete("u", request())
+        val secondRequest = request().copy(
+            operationId = "op2",
+            expectedStarRevision = 4,
+            expectedInventoryRevision = 8,
+            stars = listOf(StarCompletionSelection("s2", 43, 50)),
+            bottlesConsumed = StarCompletionBottles(0, 0, 0),
+        )
+        val second = service().complete("u", secondRequest)
+        val after = state()
+        val afterStock = stock()
+        assertEquals(2, receipts.count())
+        assertEquals(5, after.revision)
+        assertEquals(9, revisions.findByUserIdAndAccountId("u", "a")?.revision)
+        assertTrue(after.inventory.all { it.level == 50 })
+        assertEquals(first, service().receipt("u", "a", "op1"))
+        assertEquals(second, service().receipt("u", "a", "op2"))
+        assertEquals(first, service().complete("u", request()))
+        assertEquals(second, service().complete("u", secondRequest))
+        assertEquals(after, state())
+        assertEquals(afterStock, stock())
+    }
+
+    @Test fun `legacy nested index cleanup preserves old receipt and permits the original rejected operation`() {
+        val first = service().complete("u", request())
+        // Existing receipts carry the former embedded entity's type hint.
+        template.updateFirst(
+            Query(Criteria.where("operationId").`is`("op1")),
+            Update().set("state._class", StarStateCurrent::class.java.name),
+            StarCompletion::class.java,
+        )
+        val indexes = template.indexOps(StarCompletion::class.java)
+        indexes.ensureIndex(
+            Index().on("state.userId", Sort.Direction.ASC).on("state.accountId", Sort.Direction.ASC)
+                .named("state.idx_star_state_owner").unique(),
+        )
+        val original = request().copy(
+            operationId = "op2",
+            expectedStarRevision = 4,
+            expectedInventoryRevision = 8,
+            stars = listOf(StarCompletionSelection("s2", 43, 50)),
+            bottlesConsumed = StarCompletionBottles(0, 0, 0),
+        )
+        val before = state()
+        val beforeStock = stock()
+        assertEquals(
+            "star_completion_concurrent_change",
+            assertThrows(InventoryApiException::class.java) { service().complete("u", original) }.code,
+        )
+        assertEquals(before, state())
+        assertEquals(beforeStock, stock())
+        assertEquals(8, revisions.findByUserIdAndAccountId("u", "a")?.revision)
+        assertEquals(1, receipts.count())
+        assertEquals(2, records.count())
+
+        StarCompletionIndexCleanup(template).run(DefaultApplicationArguments())
+        StarCompletionIndexCleanup(template).run(DefaultApplicationArguments()) // Safe on subsequent starts.
+        assertTrue(indexes.indexInfo.none { it.name == "state.idx_star_state_owner" })
+        assertTrue(indexes.indexInfo.any { it.name == "idx_star_completion_operation_unique" && it.isUnique })
+        assertEquals(first, service().receipt("u", "a", "op1"))
+        val second = service().complete("u", original)
+        assertEquals(second, service().complete("u", original))
+        assertEquals(first, service().complete("u", request()))
+        assertEquals(2, receipts.count())
+        assertEquals(5, state().revision)
+        assertEquals(9, revisions.findByUserIdAndAccountId("u", "a")?.revision)
+        assertEquals(StarStateExperience(8, 16, 24), state().experience)
     }
 
     @Test fun `failure at final receipt insert rolls back revisions stock state history and account fence`() {

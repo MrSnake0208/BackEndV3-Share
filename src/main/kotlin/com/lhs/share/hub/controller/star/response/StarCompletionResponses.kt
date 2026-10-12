@@ -33,7 +33,7 @@ data class StarCompletionResponse(
         fun of(value: StarCompletion) = StarCompletionResponse(
             value.operationId, value.accountId, value.game, value.state.generation, value.changes,
             value.experienceConsumed, value.bottlesConsumed, value.bottleBalances, value.state.revision,
-            value.inventoryRevision, StarStateCurrentResponse.of(value.state), value.createdAt, value.requestIdentity,
+            value.inventoryRevision, StarStateCurrentResponse.of(value.state.toCurrent()), value.createdAt, value.requestIdentity,
         )
     }
 }
