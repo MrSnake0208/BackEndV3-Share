@@ -95,6 +95,14 @@ yuanhub_backend upstream
 
 ## 4. 服务器 B：生产公共环境
 
+星石养成完成前端开放前，先部署包含回执快照和索引修复的后端（PR #11）。
+MongoDB 必须支持 replica set transaction；Hub 数据库账号须具备索引查询及删除权限。
+正常启动会仅清理 `star_completion` 上名称为 `state.idx_star_state_owner`、字段依次为
+`state.userId` / `state.accountId` 且为 unique 的旧错误索引，保留历史回执、
+operation ID 唯一索引和 `star_state_current` 的归属唯一索引。
+`test` profile 不自动运行启动清理；隔离 MongoDB 回归测试显式调用清理器验证迁移。
+索引维护失败会阻止启动，应修复数据库权限或连接问题后重试，不得忽略后直接切流。
+
 服务器 B 需要：
 
 - Git

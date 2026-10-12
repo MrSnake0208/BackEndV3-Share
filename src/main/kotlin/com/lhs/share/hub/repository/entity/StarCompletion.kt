@@ -22,8 +22,33 @@ data class StarCompletion(
     val bottleBalances: Map<String, Long?>,
     val inventoryRevision: Long,
     /** Immutable authoritative result at commit time; later state must be read from completion context. */
-    val state: StarStateCurrent,
+    val state: StarCompletionState,
     val createdAt: Instant,
 )
 
 data class StarCompletionChange(val instanceId: String, val from: Int, val to: Int)
+
+/** Embedded receipt snapshot: never inherit the current-state collection's unique owner index. */
+data class StarCompletionState(
+    @Id val id: String? = null,
+    val userId: String,
+    val accountId: String,
+    val generation: Long,
+    val revision: Long,
+    val inventory: List<StarStateEntry>,
+    val planTargets: List<StarStatePlanTarget>,
+    val experience: StarStateExperience,
+    val bag: StarStateBag,
+    val updatedAt: Instant,
+    val loadoutFence: Long = 0,
+) {
+    constructor(state: StarStateCurrent) : this(
+        state.id, state.userId, state.accountId, state.generation, state.revision,
+        state.inventory, state.planTargets, state.experience, state.bag, state.updatedAt, state.loadoutFence,
+    )
+
+    fun toCurrent() = StarStateCurrent(
+        id, userId, accountId, generation, revision,
+        inventory, planTargets, experience, bag, updatedAt, loadoutFence,
+    )
+}
