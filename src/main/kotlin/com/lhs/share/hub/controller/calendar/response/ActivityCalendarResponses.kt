@@ -18,7 +18,7 @@ data class ActivityCalendarItem(
     val title: String,
     val category: ActivityCalendarCategory,
     val startDate: LocalDate,
-    val endDate: LocalDate,
+    val endDate: LocalDate? = null,
     val startTime: String? = null,
     val endTime: String? = null,
     val timeZone: String = "Asia/Shanghai",
@@ -29,7 +29,9 @@ data class ActivityCalendarItem(
     val poolType: String? = null,
 ) {
     val startAt: Instant? get() = startTime?.let { startDate.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }
-    val endAt: Instant? get() = endTime?.let { endDate.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }
+    val endAt: Instant? get() = endDate?.let { date ->
+        endTime?.let { date.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }
+    }
 }
 
 data class ActivityCalendarResponse(val items: List<ActivityCalendarItem>)

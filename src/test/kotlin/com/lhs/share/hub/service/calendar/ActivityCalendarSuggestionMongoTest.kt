@@ -288,4 +288,17 @@ class ActivityCalendarSuggestionMongoTest {
         )
         assertEquals(1L, template.getCollection("activity_calendar_events").countDocuments())
     }
+
+    @Test
+    fun `持续活动建议原资料与采纳快照保留空结束日期`() {
+        val open = event.copy(endDate = null, startTime = "05:00")
+        val submitted = service.submit("owner", ActivityCalendarSuggestionSubmitRequest(open, null, "ongoing-request"))
+        val stored = repository.find(submitted.id)!!
+        assertEquals(null, stored.original.endDate)
+        val accepted = service.accept("editor", submitted.id, ActivityCalendarSuggestionAcceptRequest(0, open, null))
+        val saved = repository.find(accepted.id)!!
+        assertEquals(null, saved.acceptedSnapshot!!.endDate)
+        assertEquals(null, events.find(saved.eventId!!)!!.endTime)
+        assertEquals("05:00", saved.original.startTime)
+    }
 }

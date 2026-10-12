@@ -178,7 +178,7 @@ class ActivityCalendarControllerContractTest {
     @ParameterizedTest
     @ValueSource(
         strings = [
-            """{"start_date":null}""", """{"end_date":null}""", """{"start_date":"2026-02-30"}""",
+            """{"start_date":null}""", """{"end_date":""}""", """{"start_date":"2026-02-30"}""",
             """{"start_date":[2026,10,3]}""", """{"end_date":"2026-10-01"}""", """{"title":null}""", """{"title":""}""",
             """{"title":42}""", """{"game":"other"}""", """{"category":"UNKNOWN"}""",
             """{"category":0}""", """{"category":"RECRUITMENT"}""",
@@ -237,5 +237,23 @@ class ActivityCalendarControllerContractTest {
         node.put("category", "OTHER")
         mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
             .andExpect(status().isUnprocessableEntity)
+    }
+
+    @Test
+    fun `HTTP create accepts omitted or null end date and serializes ongoing facts`() {
+        editor()
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }
+        for (omit in listOf(false, true)) {
+            val node = mapper.readTree(body).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+            if (omit) node.remove("end_date") else node.putNull("end_date")
+            node.put("start_time", "05:00")
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.data.item.end_date").isEmpty)
+                .andExpect(jsonPath("$.data.item.end_at").isEmpty)
+                .andExpect(jsonPath("$.data.item.start_time").value("05:00"))
+                .andExpect(jsonPath("$.data.item.start_at").value("2026-10-02T21:00:00Z"))
+        }
+        verify(exactly = 2) { repository.save(match { it.endDate == null && it.endTime == null }) }
     }
 }

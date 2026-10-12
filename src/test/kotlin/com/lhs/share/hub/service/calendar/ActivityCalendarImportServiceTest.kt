@@ -102,7 +102,7 @@ class ActivityCalendarImportServiceTest {
             node.set<com.fasterxml.jackson.databind.JsonNode>(field, mapper.readTree(value))
             assertEquals("INVALID", importer.preview(batch(node.toString())).rows.single().status, field)
         }
-        for (field in listOf("game", "title", "category", "start_date", "end_date")) {
+        for (field in listOf("game", "title", "category", "start_date")) {
             val node = mapper.readTree(item).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
             node.remove(field)
             assertEquals(field, importer.preview(batch(node.toString())).rows.single().issues.single().field)
@@ -239,5 +239,20 @@ class ActivityCalendarImportServiceTest {
         }
         assertEquals(1, importer.preview(batch(item.dropLast(1) + ",\"subtype\":null,\"subtype_detail\":null}")).ready)
         verify(exactly = 0) { repository.insert(any()) }
+    }
+
+    @Test
+    fun `开放结束日期与省略结束日期按同键判重且可导入持续活动`() {
+        val explicit = item.replace("\"2026-10-20\"", "null")
+        val omitted = explicit.replace(",\"end_date\":null", "")
+        val json = batch(explicit, omitted)
+        val preview = importer.preview(json)
+        assertEquals(1, preview.ready)
+        assertEquals("DUPLICATE", preview.rows[1].status)
+        assertEquals(null, preview.rows[0].data!!.endDate)
+        assertEquals(1, importer.commit("editor", json, preview.previewToken).created)
+        verify(exactly = 1) { repository.insert(match { it.endDate == null && it.endTime == null }) }
+        val invalid = explicit.dropLast(1) + ",\"end_time\":\"05:00\"}"
+        assertEquals("end_time", importer.preview(batch(invalid)).rows.single().issues.single().field)
     }
 }
