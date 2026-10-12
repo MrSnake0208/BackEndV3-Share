@@ -8,7 +8,6 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.ActivityCalendarExceptionHandler
 import com.lhs.share.hub.controller.calendar.ActivityCalendarSubscriptionController
 import com.lhs.share.hub.controller.calendar.response.CalendarSubscriptionResponse
-import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.calendar.ActivityCalendarSubscriptionService
 import io.mockk.every
 import io.mockk.mockk
@@ -27,7 +26,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders
 class ActivityCalendarSubscriptionControllerContractTest {
     private val service = mockk<ActivityCalendarSubscriptionService>()
     private val helper = mockk<AuthenticationHelper>()
-    private val authorization = mockk<AdminAuthorizationService>()
     private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
         .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private lateinit var mvc: MockMvc
@@ -36,8 +34,7 @@ class ActivityCalendarSubscriptionControllerContractTest {
     @BeforeEach
     fun setup() {
         every { helper.requireUserId() } returns "owner"
-        every { authorization.hasAnyAdminCapability("owner") } returns true
-        mvc = MockMvcBuilders.standaloneSetup(ActivityCalendarSubscriptionController(service, helper, authorization))
+        mvc = MockMvcBuilders.standaloneSetup(ActivityCalendarSubscriptionController(service, helper))
             .setControllerAdvice(ActivityCalendarExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
@@ -85,8 +82,9 @@ class ActivityCalendarSubscriptionControllerContractTest {
     }
 
     @Test
-    fun `ordinary user cannot list read subscribe or write progress`() {
-        every { authorization.hasAnyAdminCapability("owner") } returns false
+    fun `anonymous user cannot list read subscribe or write progress`() {
+        every { helper.requireUserId() } throws
+            org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED)
         listOf(
             get(path).param("account_id", "a"),
             get("/v1/activity-calendar/subscriptions").param("account_id", "a"),
@@ -94,7 +92,7 @@ class ActivityCalendarSubscriptionControllerContractTest {
             put(path).contentType(MediaType.APPLICATION_JSON).content("{}"),
             put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{}"),
         )
-            .forEach { mvc.perform(it).andExpect(status().isForbidden) }
+            .forEach { mvc.perform(it).andExpect(status().isUnauthorized) }
         verify { service wasNot io.mockk.Called }
     }
 

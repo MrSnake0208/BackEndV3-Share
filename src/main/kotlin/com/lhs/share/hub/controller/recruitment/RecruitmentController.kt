@@ -7,7 +7,6 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentRequestDecoder
-import com.lhs.share.hub.service.recruitment.RecruitmentAccessService
 import com.lhs.share.hub.service.recruitment.RecruitmentCatalog
 import com.lhs.share.hub.service.recruitment.RecruitmentService
 import org.springframework.http.MediaType
@@ -24,7 +23,6 @@ import java.time.LocalDate
 class RecruitmentController(
     private val service: RecruitmentService,
     private val catalog: RecruitmentCatalog,
-    private val access: RecruitmentAccessService,
     private val helper: AuthenticationHelper,
     mapper: ObjectMapper,
 ) {
@@ -36,7 +34,7 @@ class RecruitmentController(
     @RequireJwt
     @GetMapping("/archive")
     fun archive(@RequestParam(name = "account_id") accountId: String) =
-        requireAccess().let { userId -> success(service.archive(userId, accountId)) }
+        helper.requireUserId().let { userId -> success(service.archive(userId, accountId)) }
 
     @RequireJwt
     @GetMapping("/events")
@@ -48,7 +46,7 @@ class RecruitmentController(
         @RequestParam(name = "date_from", required = false) dateFrom: LocalDate?,
         @RequestParam(name = "date_to", required = false) dateTo: LocalDate?,
         @RequestParam(defaultValue = "desc") order: String,
-    ) = requireAccess().let { userId ->
+    ) = helper.requireUserId().let { userId ->
         success(service.page(userId, accountId, poolId, cursor, limit, dateFrom, dateTo, order))
     }
 
@@ -59,13 +57,11 @@ class RecruitmentController(
         @RequestParam(name = "pool_id", required = false) poolId: String?,
         @RequestParam(required = false) cursor: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ) = requireAccess().let { userId -> success(service.batches(userId, accountId, poolId, cursor, limit)) }
+    ) = helper.requireUserId().let { userId -> success(service.batches(userId, accountId, poolId, cursor, limit)) }
 
     @RequireJwt
     @PostMapping("/commands", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun command(@RequestBody request: JsonNode) = requireAccess().let { userId ->
+    fun command(@RequestBody request: JsonNode) = helper.requireUserId().let { userId ->
         success(service.command(userId, decoder.read(request, RecruitmentCommandRequest::class.java)))
     }
-
-    private fun requireAccess(): String = helper.requireUserId().also(access::requireAccess)
 }

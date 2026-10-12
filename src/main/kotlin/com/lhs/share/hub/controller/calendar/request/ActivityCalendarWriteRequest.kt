@@ -16,7 +16,7 @@ data class ActivityCalendarWriteRequest(
     val title: String,
     val category: ActivityCalendarCategory,
     val startDate: LocalDate,
-    val endDate: LocalDate,
+    val endDate: LocalDate? = null,
     val startTime: String? = null,
     val endTime: String? = null,
     val timeZone: String = "Asia/Shanghai",
@@ -45,7 +45,7 @@ class ActivityCalendarRequestDecoder(mapper: ObjectMapper) {
         node.fieldNames().forEachRemaining { field ->
             if (field !in fields) throw calendarInvalid("不接受字段 $field", field)
         }
-        for (field in listOf("game", "title", "category", "start_date", "end_date")) {
+        for (field in listOf("game", "title", "category", "start_date")) {
             if (!node.hasNonNull(field)) throw calendarInvalid("缺少必填字段 $field", field)
         }
         // Jackson still coerces numbers to strings and accepts ordinal enums despite ALLOW_COERCION_OF_SCALARS.
@@ -69,6 +69,7 @@ class ActivityCalendarRequestDecoder(mapper: ObjectMapper) {
         }
         for (field in listOf("start_date", "end_date")) {
             val value = node.get(field)
+            if (field == "end_date" && (value == null || value.isNull)) continue
             if (value == null || !value.isTextual || !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(value.asText())) {
                 throw calendarInvalid("日期必须为YYYY-MM-DD字符串", field)
             }

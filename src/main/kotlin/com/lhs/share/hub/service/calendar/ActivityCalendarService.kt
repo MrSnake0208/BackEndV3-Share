@@ -125,14 +125,15 @@ class ActivityCalendarService(
         if (request.subtypeDetail != null && request.subtype != ActivityCalendarSubtype.FURNITURE) {
             throw calendarInvalid("神秘洞窟必须属于活动下的家具", "subtype_detail")
         }
-        if (request.endDate < request.startDate) throw calendarInvalid("结束日期不能早于开始日期", "end_date")
-        if ((request.startTime == null) != (request.endTime == null)) {
+        if (request.endDate != null && request.endDate < request.startDate) throw calendarInvalid("结束日期不能早于开始日期", "end_date")
+        if (request.endDate == null && request.endTime != null) throw calendarInvalid("未填写结束日期时不能填写结束时间", "end_time")
+        if (request.endDate != null && (request.startTime == null) != (request.endTime == null)) {
             throw calendarInvalid("开始和结束时间须成对填写", if (request.startTime == null) "start_time" else "end_time")
         }
         for ((field, time) in listOf("start_time" to request.startTime, "end_time" to request.endTime)) {
             if (time != null && !Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]").matches(time)) throw calendarInvalid("时间须为HH:mm", field)
         }
-        if (request.startDate.isEqual(request.endDate) && request.startTime != null && request.endTime!! < request.startTime) {
+        if (request.startDate == request.endDate && request.startTime != null && request.endTime!! < request.startTime) {
             throw calendarInvalid("结束时间不能早于开始时间", "end_time")
         }
         try {

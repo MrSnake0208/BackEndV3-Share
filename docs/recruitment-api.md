@@ -1,6 +1,6 @@
 # 招募档案 API（MVP）
 
-个人路径 `/v1/recruitment`，管理员目录路径 `/v1/admin/recruitment-catalog`。成功沿用 `{status_code:200,data:...}`；错误使用真实 HTTP 状态与 `{error:{code,message}}`。除 GET `/catalog` 外个人接口须 JWT、内测资格及账号所有权。个人读取不创建档案，不播种目录；响应 `Cache-Control: no-store`。卡池定义和 UP 名单仅由管理员维护。
+个人路径 `/v1/recruitment`，管理员目录路径 `/v1/admin/recruitment-catalog`。成功沿用 `{status_code:200,data:...}`；错误使用真实 HTTP 状态与 `{error:{code,message}}`。除 GET `/catalog` 外个人接口须 JWT、全站内测资格及账号所有权，由 `BetaAccessPolicy` 统一校验。独立招募授权/模式已退役，历史数据及遗留管理 API 保留，不再控制当前招募或账号接口准入。个人读取不创建档案，不播种目录；响应 `Cache-Control: no-store`。卡池定义和 UP 名单仅由管理员维护。
 
 ## 读接口
 

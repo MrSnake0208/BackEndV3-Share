@@ -15,7 +15,7 @@ data class ActivityCalendarSuggestionOriginal(
     val title: String,
     val category: ActivityCalendarCategory,
     @field:ValueConverter(ActivityCalendarDateConverter::class) val startDate: LocalDate,
-    @field:ValueConverter(ActivityCalendarDateConverter::class) val endDate: LocalDate,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val endDate: LocalDate? = null,
     val startTime: String? = null,
     val endTime: String? = null,
     val description: String? = null,

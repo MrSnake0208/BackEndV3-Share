@@ -5,12 +5,9 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.calendar.request.CalendarSubscriptionRequestDecoder
-import com.lhs.share.hub.service.admin.AdminAuthorizationService
-import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
 import com.lhs.share.hub.service.calendar.ActivityCalendarSubscriptionService
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.format.annotation.DateTimeFormat
-import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -28,7 +25,6 @@ import java.time.LocalDate
 class ActivityCalendarSubscriptionController(
     private val service: ActivityCalendarSubscriptionService,
     private val helper: AuthenticationHelper,
-    private val authorization: AdminAuthorizationService,
 ) {
     @GetMapping
     fun list(
@@ -53,9 +49,5 @@ class ActivityCalendarSubscriptionController(
     fun progress(@PathVariable eventId: String, @RequestBody body: JsonNode) =
         success(service.progress(actor(), eventId, CalendarSubscriptionRequestDecoder.progress(body)))
 
-    private fun actor(): String = helper.requireUserId().also {
-        if (!authorization.hasAnyAdminCapability(it)) {
-            throw ActivityCalendarApiException(HttpStatus.FORBIDDEN, "admin_testing_only", "活动日历暂仅向管理员开放")
-        }
-    }
+    private fun actor(): String = helper.requireUserId()
 }

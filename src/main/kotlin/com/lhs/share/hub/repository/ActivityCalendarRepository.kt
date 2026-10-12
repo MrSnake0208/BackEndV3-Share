@@ -20,7 +20,9 @@ class ActivityCalendarRepository(@param:Qualifier("hubMongoTemplate") private va
     ): List<ActivityCalendarEvent> {
         val query = Query()
         game?.let { query.addCriteria(Criteria.where("game").`is`(it)) }
-        from?.let { query.addCriteria(Criteria.where("endDate").gte(it)) }
+        from?.let {
+            query.addCriteria(Criteria().orOperator(Criteria.where("endDate").gte(it), Criteria.where("endDate").`is`(null)))
+        }
         to?.let { query.addCriteria(Criteria.where("startDate").lte(it)) }
         if (categories.isNotEmpty()) query.addCriteria(Criteria.where("category").`in`(categories))
         enabled?.let { query.addCriteria(Criteria.where("enabled").`is`(it)) }

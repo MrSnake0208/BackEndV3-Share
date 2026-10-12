@@ -71,8 +71,9 @@
 
 | 字段 | 要求与默认值 |
 | --- | --- |
-| `game/title/category/start_date/end_date` | 必填；游戏仅 `代号鸢/如鸢`；标题 trim 后 1–120 字；类别仅 `ACTIVITY/LOGIN/SHOP/MAINTENANCE/OTHER`；日期严格 `YYYY-MM-DD`，结束不得早于开始 |
-| `start_time/end_time` | 可选或 null，必须成对且为 `HH:mm`；同日结束时间不得早于开始 |
+| `game/title/category/start_date` | 必填；游戏仅 `代号鸢/如鸢`；标题 trim 后 1–120 字；类别仅 `ACTIVITY/LOGIN/SHOP/MAINTENANCE/OTHER`；日期严格 `YYYY-MM-DD`，结束不得早于开始 |
+| `end_date` | 可省略或为 null，表示持续进行；填写时必须为有效 `YYYY-MM-DD` 且不早于开始日期；补齐时应编辑原记录，导入不同结束日期会形成另一条自然键 |
+| `start_time/end_time` | 可选或 null，为 `HH:mm`；有结束日期时须成对，无结束日期时仅可填开始时间；同日结束时间不得早于开始 |
 | `time_zone/enabled` | 缺省分别 `Asia/Shanghai` / `true`，显式 null 不接受；时区遵循单条创建的有效 ZoneId 规则；日期/时间按该时区记录，未填精确时间不补造时刻，推荐统一使用 Asia/Shanghai |
 | `description/source_note` | 可选或 null，各 ≤1000 字；与现有服务器单条创建一致保留文本，`source_note` 仅管理端可见 |
 | `source_url` | 可选或 null；trim 后空值归为 null；非空须 http(s)、有域名且 ≤2048 字，与单条创建共用校验 |
@@ -94,12 +95,12 @@
 
 第二条需要 Docker，由 TestMongo 创建并清理专属容器/随机测试库。
 
-## 管理员测试阶段查询
+## 内测用户查询
 
-`GET /v1/activity-calendar` 需要 JWT 登录及 `AdminAuthorizationService.hasAnyAdminCapability` 管理能力，包含内容维护角色与反馈管理成员。未登录返回 401；普通用户返回 403 `admin_testing_only`，不读取日历业务数据。前端日历读取携带认证并绑定当前身份。管理写入/审核仍独立要求 `activity_calendar:write`。可选参数：
+`GET /v1/activity-calendar` 需要 JWT 与全站内测资格，不要求管理能力。未登录返回 401；无资格/维护返回对应 `beta_*` 403，资格查询失败返回 503，业务服务不执行。前端请求绑定当前身份。管理写入/审核仍独立要求 `activity_calendar:write`。可选参数：
 
 - `game`：`代号鸢` / `如鸢`，省略查询全部。
-- `from` / `to`：ISO 日期，闭区间 overlap（`end_date >= from && start_date <= to`）；可只提供一端，倒置范围返回 422。
+- `from` / `to`：ISO 日期，闭区间 overlap（`(end_date == null || end_date >= from) && start_date <= to`）；可只提供一端，倒置范围返回 422。
 - `category`：可重复或用逗号分隔，取并集。`ACTIVITY`、`RECRUITMENT`、`LOGIN`、`SHOP`、`MAINTENANCE`、`OTHER`。
 
 成功响应沿用 `ApiResult`，列表为 `data.items`。按 `start_date`、`start_time`（未填在前）、`id` 升序。字段采用 snake_case：
@@ -149,16 +150,16 @@
 }
 ```
 
-POST 示例需去掉 expected_version。必填 game/title/category/start_date/end_date；time_zone 默认 Asia/Shanghai，enabled 默认 true。可选 start_time/end_time、description、source_url、source_note；PUT 省略可选内容会清空或恢复默认值。
+POST 示例需去掉 expected_version。必填 game/title/category/start_date；end_date 可省略或为 null，表示持续进行；time_zone 默认 Asia/Shanghai，enabled 默认 true。可选 start_time/end_time、description、source_url、source_note；PUT 省略可选内容会清空或恢复默认值。
 
-校验：标题 trim 后 1..120；description/source_note <=1000；结束日期不早于开始日期；时间须成对为 HH:mm，同日结束时间不早于开始时间；合法 ZoneId；来源链接仅 http/https 且有主机，最长 2048。手工类别不接受 RECRUITMENT。未知字段、错误类型和无效字段返回 422 `schema_validation_failed`；找不到活动返回 404 `activity_calendar_not_found`；expected_version 过期及 Mongo 保存竞争均返回 409 `activity_calendar_version_conflict`。领域错误结构为 `{"error":{"code":"…","message":"…"}}`。
+校验：标题 trim 后 1..120；description/source_note <=1000；已填写的结束日期不早于开始日期；时间为 HH:mm，有结束日期时须成对，无结束日期时仅可填开始时间；同日结束时间不早于开始时间；合法 ZoneId；来源链接仅 http/https 且有主机，最长 2048。手工类别不接受 RECRUITMENT。未知字段、错误类型和无效字段返回 422 `schema_validation_failed`；找不到活动返回 404 `activity_calendar_not_found`；expected_version 过期及 Mongo 保存竞争均返回 409 `activity_calendar_version_conflict`。领域错误结构为 `{"error":{"code":"…","message":"…"}}`。
 
 `SUPER_ADMIN`、`PLATFORM_ADMIN` 均可维护；`ACTIVITY_CALENDAR_EDITOR` 单独绑定时只获本权限，不获得其它平台、反馈或招募管理权限。权限仍要求账号 activated。前端仅同步权限契约及角色标签。
 
 
 ## 用户建议与审核
 
-建议独立保存在 `activity_calendar_suggestions`，不会参与公共日历查询。以下路径显式要求 JWT；普通用户提交与查询本人记录不要求 activated、内测资格、子账号或维护权限。
+建议独立保存在 `activity_calendar_suggestions`，不会参与公共日历查询。以下路径显式要求 JWT；普通用户提交与查询本人记录需要全站内测资格，不额外要求子账号或维护权限。
 
 | 方法与路径 | 授权 | 返回 |
 | --- | --- | --- |
@@ -184,7 +185,7 @@ POST 示例需去掉 expected_version。必填 game/title/category/start_date/en
 }
 ```
 
-活动资料使用现有校验，固定 `Asia/Shanghai` 日期；仅支持五种手工类别。source_url 必填，http/https，最多 2048 字符；可选 start_time/end_time（成对）、description（最多1000字符）、submission_note（trim 后最多1000字符）。client_request_id 为 1..128 位字母、数字、下划线或短横线。同用户同标识同规范化资料复用旧结果；不同资料返回409。同标识在不同用户间互不影响。用户边界拒绝 enabled、time_zone、source_note、身份、状态及审核字段；未知字段和非严格类型返回422。
+活动资料使用现有校验，固定 `Asia/Shanghai` 日期；仅支持五种手工类别。source_url 必填，http/https，最多 2048 字符；可选 start_time/end_time (paired when end_date is set; start_time only when open-ended)、description（最多1000字符）、submission_note（trim 后最多1000字符）。client_request_id 为 1..128 位字母、数字、下划线或短横线。同用户同标识同规范化资料复用旧结果；不同资料返回409。同标识在不同用户间互不影响。用户边界拒绝 enabled、time_zone、source_note、身份、状态及审核字段；未知字段和非严格类型返回422。
 
 分页参数 `page` 默认1且至少1，`page_size` 默认20且范围1..100，越界返回422；列表为 `data.{items,total,page,page_size}`。本人列表可按 `status` 筛选（PENDING/ACCEPTED/REJECTED），按 created_at/id 降序。审核队列另外支持 game，按 created_at/id 升序；未传 status 时包含所有状态。唯一索引 `(submitterId,clientRequestId)` 防并发重复，分页索引覆盖本人、状态、游戏及时间/ID排序。
 
@@ -224,9 +225,9 @@ event 使用既有手工活动写入字段，采纳同样要求来源链接必�
 integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验证唯一重试索引、所有权/分页、事务回滚及并发审核；不接受开发或生产数据库连接。
 
 
-## 管理员测试阶段验证（2026-10-04）
+## 内测准入验证（2026-10-12）
 
-风险 L3；日历读取及建议提交/本人列表/详情统一按现有管理能力限制。未改变日历查询范围、字段、持久化和审核写权限。安全链测试覆盖未登录 401、非管理员 403、管理员无日历写权限时可读取/提交本人建议、管理目录仍拒绝无写权限用户；契约测试继续覆盖原数据契约与资料校验。
+风险 L3；日历读取、建议、订阅及私人事项统一使用 Beta 准入，取消管理员测试门禁。安全链测试覆盖未登录、无内测资格、维护、资格查询失败、普通内测用户可用，以及管理目录/审核写权限保留。账号隔离、字段与持久化语义不变。
 
 回归由用户/CI执行（cwd BackEndV3-Share；此组不使用容器）：
 
@@ -234,12 +235,12 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 ./gradlew test --tests '*ActivityCalendarSecurityTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSuggestionControllerContractTest' --console=plain
 ```
 
-本轮已执行 `./gradlew compileKotlin compileTestKotlin --console=plain` 与 `git diff --check`，均通过。上面的回归测试尚未执行；未启动/重启后端服务。
+本轮回归由用户/CI 执行；未启动或重启后端服务。
 
 
 ## 私人本期订阅（2026-10-05）
 
-所有 `/v1/activity-calendar/subscriptions` 接口要求JWT和任意管理能力（沿用管理员测试范围），通过认证用户校验本人子账号；共享Token、普通用户不能访问。活动必须与账号游戏一致；不存在或不属于本人的账号返回404。公共响应不包含私人进度。
+所有 `/v1/activity-calendar/subscriptions` 接口要求 JWT 与全站内测资格，通过认证用户校验本人子账号；共享 Token 不能访问，普通内测用户可使用。活动必须与账号游戏一致；不存在或不属于本人的账号返回404。公共响应不包含私人进度。
 
 | 方法与路径（以下相对subscriptions） | 契约 |
 | --- | --- |
@@ -315,7 +316,7 @@ Mongo仅允许TestMongo自有临时容器；真实手机软键盘与Safari仍须
 
 独立集合 `activity_calendar_private_items` 存储随机 `pci_UUID`、服务端定义的 user/account/game、title/date/endDate/time/note、`@Version`、createdAt/updatedAt（毫秒精度）。不写入公共事件/订阅集合，不进入导入、建议审核、公开聚合、RSS或分享URL，无迁移。索引 `(userId, accountId, game, date, _id)` 支持本人账号日期查询，`_id` 自带唯一约束。`date` 继续存开始日，`endDate` 存结束日；旧文档缺失/null时有效结束日等于date，读取不回写。保留原索引，无全量迁移；重叠查询使用owner/game索引前缀和date上界，再过滤endDate，不新增索引（超长历史积累时按实际explain评估）。
 
-所有接口在 `/v1/activity-calendar/private-items` 下，使用既有 snake_case ApiResult、JWT及管理员测试门禁。每次重新验证JWT用户拥有 `account_id`，游戏从账号推导，所有文档查询包含 user/account/game。不存在和非本人记录一致404；非本人账号使用同一 `account_not_found` 响应。管理员不能因此读取其他用户私人事项。
+所有接口在 `/v1/activity-calendar/private-items` 下，使用既有 snake_case ApiResult、JWT 及全站内测门禁。每次重新验证JWT用户拥有 `account_id`，游戏从账号推导，所有文档查询包含 user/account/game。不存在和非本人记录一致404；非本人账号使用同一 `account_not_found` 响应。管理员不能因此读取其他用户私人事项。
 
 | 方法 | 参数 / 行为 |
 | --- | --- |

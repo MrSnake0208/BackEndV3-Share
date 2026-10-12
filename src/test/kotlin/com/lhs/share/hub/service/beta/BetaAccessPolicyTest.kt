@@ -14,6 +14,12 @@ class BetaAccessPolicyTest {
     fun `all supported cloud families protected and explicit public examples remain public`() {
         listOf(
             "/v1/accounts",
+            "/v1/activity-calendar",
+            "/v1/activity-calendar/suggestions/mine",
+            "/v1/activity-calendar/subscriptions/summary",
+            "/v1/activity-calendar/private-items",
+            "/v1/recruitment/archive",
+            "/v1/recruitment/import/preview",
             "/v1/accounts/{id}/events",
             "/v1/inventory/current",
             "/v1/operator/training-workspace",
@@ -27,8 +33,7 @@ class BetaAccessPolicyTest {
         }
         listOf(
             "/v1/inventory/catalog",
-            "/v1/recruitment/archive",
-            "/v1/recruitment/import/preview",
+            "/v1/recruitment/catalog",
             "/v1/operator/catalog",
             "/v1/operator/share/view/{token}",
             "/v1/works",
@@ -45,6 +50,12 @@ class BetaAccessPolicyTest {
         assertTrue(BetaAccessPolicy.requiresBeta("PATCH", "/user/open-api/tokens/{id}/scopes"))
         assertFalse(BetaAccessPolicy.requiresBeta("DELETE", "/user/open-api/tokens/{id}"))
         assertTrue(BetaAccessPolicy.requiresBeta("POST", "/v1/operator/catalog"))
+        assertTrue(BetaAccessPolicy.requiresBeta("POST", "/v1/recruitment/commands"))
+        assertTrue(BetaAccessPolicy.requiresBeta("POST", "/v1/recruitment/import/commit"))
+        assertTrue(BetaAccessPolicy.requiresBeta("PUT", "/v1/activity-calendar/subscriptions/{id}/progress"))
+        assertTrue(BetaAccessPolicy.requiresBeta("DELETE", "/v1/activity-calendar/private-items/{id}"))
+        assertFalse(BetaAccessPolicy.requiresBeta("GET", "/v1/activity-calendar-other"))
+        assertFalse(BetaAccessPolicy.requiresBeta("GET", "/v1/recruitment-other"))
         assertFalse(BetaAccessPolicy.requiresBeta("GET", "/v1/accounts-other"))
     }
 

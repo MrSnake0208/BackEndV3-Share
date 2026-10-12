@@ -33,6 +33,9 @@ import com.lhs.share.service.DataTransferService
 import com.lhs.share.service.jwt.JwtAuthToken
 import com.lhs.share.service.jwt.JwtService
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.doThrow
+import org.mockito.Mockito.reset
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
@@ -40,6 +43,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.context.annotation.Import
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -69,6 +73,8 @@ import java.time.LocalDate
     AuthenticationEntryPointImpl::class,
     AccessDeniedHandlerImpl::class,
     DataTransferService::class,
+    com.lhs.share.config.BetaWebMvcConfiguration::class,
+    com.lhs.share.config.security.BetaAccessInterceptor::class,
 )
 class ActivityCalendarSecurityTest {
     @Autowired lateinit var mvc: MockMvc
@@ -110,22 +116,24 @@ class ActivityCalendarSecurityTest {
     }
 
     @Test
-    fun `ordinary users cannot read calendar and administrators can read without calendar write permission`() {
+    fun `beta eligibility replaces admin testing while management still requires calendar write permission`() {
         val now = Instant.now()
         val token = JwtAuthToken("tester", "testing-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
         token.isAuthenticated = true
         `when`(jwtService.verifyAndParseAuthToken("testing-token")).thenReturn(token)
-        `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(false)
+        doThrow(com.lhs.share.hub.service.beta.BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("tester")
         mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
             .andExpect(status().isForbidden)
         verifyNoInteractions(service, importer)
-        `when`(authorization.hasAnyAdminCapability("tester")).thenReturn(true)
+        reset(betaService)
         `when`(service.publicItems(null, null, null, null)).thenReturn(ActivityCalendarResponse(emptyList()))
         mvc.perform(get("/v1/activity-calendar").header("Authorization", "Bearer testing-token"))
             .andExpect(status().isOk)
         `when`(authorization.hasPermission("tester", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(false)
         mvc.perform(get("/v1/admin/activity-calendar").header("Authorization", "Bearer testing-token"))
             .andExpect(status().isForbidden)
+        verify(betaService, org.mockito.Mockito.atLeastOnce()).requireAccess("tester")
         verifyNoInteractions(stringRedisTemplate)
     }
 
@@ -155,7 +163,7 @@ class ActivityCalendarSecurityTest {
     }
 
     @Test
-    fun `suggestion methods require JWT and admin capability while calendar write permission remains independent`() {
+    fun `suggestion methods require JWT and beta while calendar write permission remains independent`() {
         val path = "/v1/activity-calendar/suggestions"
         val admin = "/v1/admin/activity-calendar/suggestions"
         listOf(
@@ -174,12 +182,13 @@ class ActivityCalendarSecurityTest {
         token.isAuthenticated = true
         `when`(jwtService.verifyAndParseAuthToken("suggestion-token")).thenReturn(token)
         `when`(suggestions.mine("ordinary", null, 1, 20)).thenReturn(ActivityCalendarSuggestionPage(emptyList(), 0, 1, 20))
-        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(false)
+        doThrow(com.lhs.share.hub.service.beta.BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("ordinary")
         listOf(get("$path/mine"), get("$path/sug_one")).forEach {
             mvc.perform(it.header("Authorization", "Bearer suggestion-token")).andExpect(status().isForbidden)
         }
         verifyNoInteractions(suggestions)
-        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(true)
+        reset(betaService)
         mvc.perform(get("$path/mine").header("Authorization", "Bearer suggestion-token")).andExpect(status().isOk)
         val day = LocalDate.parse("2026-10-03")
         val event =
@@ -196,13 +205,14 @@ class ActivityCalendarSecurityTest {
             "start_date":"2026-10-03","end_date":"2026-10-03","source_url":"https://example.com/source",
             "client_request_id":"request-one"}
         """.trimIndent()
-        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(false)
+        doThrow(com.lhs.share.hub.service.beta.BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("ordinary")
         mvc.perform(post(path).header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isForbidden)
-        `when`(authorization.hasAnyAdminCapability("ordinary")).thenReturn(true)
+        reset(betaService)
         mvc.perform(post(path).header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk)
-        verifyNoInteractions(betaService, stringRedisTemplate)
+        verifyNoInteractions(stringRedisTemplate)
         `when`(authorization.hasPermission("ordinary", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(false)
         listOf(get(admin), post("$admin/sug_one/accept"), post("$admin/sug_one/reject")).forEach {
             mvc.perform(it.header("Authorization", "Bearer suggestion-token").contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -211,7 +221,7 @@ class ActivityCalendarSecurityTest {
     }
 
     @Test
-    fun `subscription paths require real JWT and admin capability without beta or calendar write permission`() {
+    fun `subscription paths require real JWT and beta without calendar write permission`() {
         val path = "/v1/activity-calendar/subscriptions"
         listOf(
             get(path).param("account_id", "a"),
@@ -227,21 +237,22 @@ class ActivityCalendarSecurityTest {
         val token = JwtAuthToken("owner", "subscription-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
         token.isAuthenticated = true
         `when`(jwtService.verifyAndParseAuthToken("subscription-token")).thenReturn(token)
-        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(false)
+        doThrow(com.lhs.share.hub.service.beta.BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("owner")
         mvc.perform(
             get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
         ).andExpect(status().isForbidden)
         verifyNoInteractions(subscriptions)
-        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(true)
+        reset(betaService)
         `when`(subscriptions.summary("owner", "a")).thenReturn(CalendarSubscriptionSummaryResponse(emptyList(), 0, 0))
         mvc.perform(
             get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
         ).andExpect(status().isOk)
-        verifyNoInteractions(betaService, stringRedisTemplate)
+        verifyNoInteractions(stringRedisTemplate)
     }
 
     @Test
-    fun `private item CRUD requires real JWT and admin gate before any data access`() {
+    fun `private item CRUD requires real JWT and beta before any data access`() {
         val path = "/v1/activity-calendar/private-items"
         val id = "pci_00000000-0000-0000-0000-000000000001"
         fun requests() = listOf(
@@ -258,16 +269,17 @@ class ActivityCalendarSecurityTest {
         val token = JwtAuthToken("owner", "private-token", now, now.plusSeconds(3600), now, emptyList(), ByteArray(32) { 1 })
         token.isAuthenticated = true
         `when`(jwtService.verifyAndParseAuthToken("private-token")).thenReturn(token)
-        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(false)
+        doThrow(com.lhs.share.hub.service.beta.BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
+            .`when`(betaService).requireAccess("owner")
         requests().forEach {
             mvc.perform(it.header("Authorization", "Bearer private-token").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isForbidden)
         }
         verifyNoInteractions(privateItems, service, subscriptions, suggestions)
-        `when`(authorization.hasAnyAdminCapability("owner")).thenReturn(true)
+        reset(betaService)
         `when`(privateItems.list("owner", "a", LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-31")))
             .thenReturn(com.lhs.share.hub.controller.calendar.response.CalendarPrivateItemsResponse(emptyList()))
         mvc.perform(requests().first().header("Authorization", "Bearer private-token")).andExpect(status().isOk)
-        verifyNoInteractions(betaService, stringRedisTemplate, service, subscriptions, suggestions)
+        verifyNoInteractions(stringRedisTemplate, service, subscriptions, suggestions)
     }
 }
