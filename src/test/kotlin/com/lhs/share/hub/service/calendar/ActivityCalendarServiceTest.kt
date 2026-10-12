@@ -9,6 +9,7 @@ import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
 import com.lhs.share.hub.repository.entity.ActivityCalendarSubtype
 import com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -60,6 +61,61 @@ class ActivityCalendarServiceTest {
         assertEquals(ActivityCalendarCategory.RECRUITMENT, items[0].category)
         assertEquals("https://example.com/pool", items[0].sourceUrl)
         assertEquals(items, service.publicItems(null, null, null, null).items)
+        verify(exactly = 0) {
+            repository.save(any())
+            recruitment.save(any())
+        }
+    }
+
+    @Test
+    fun `日历仅投影公开目录已确认绑定的有效UP名称且不改标题来源或日期`() {
+        every { repository.list(null, null, null, emptySet(), true) } returns listOf(event)
+        val confirmed = pool("confirmed", date, date.plusDays(7)).copy(
+            poolType = "LIMITED",
+            upStatus = "verified",
+            upAgents = listOf(
+                RecruitmentUpAgent("a", " 甲 ", "operator-a"),
+                RecruitmentUpAgent("b", "乙", "operator-b"),
+                RecruitmentUpAgent("duplicate", "甲", "operator-a"),
+                RecruitmentUpAgent("inactive", "退役", "operator-c", active = false),
+                RecruitmentUpAgent("placeholder", "占位候选"),
+                RecruitmentUpAgent("blank-id", "未绑定", " "),
+                RecruitmentUpAgent("blank-name", " ", "operator-d"),
+            ),
+            sourceUpAgentNames = listOf("来源候选"),
+        )
+        every { recruitment.all() } returns listOf(
+            confirmed,
+            confirmed.copy(poolId = "partial", upStatus = "partial"),
+            confirmed.copy(poolId = "single", upAgents = listOf(RecruitmentUpAgent("a", "甲", "operator-a"))),
+            confirmed.copy(poolId = "unmapped", upAgents = listOf(RecruitmentUpAgent("a", "占位候选"))),
+            confirmed.copy(poolId = "inactive", upAgents = confirmed.upAgents.map { it.copy(active = false) }),
+            confirmed.copy(poolId = "unknown", upStatus = "unknown"),
+            confirmed.copy(poolId = "selection", upStatus = "selection"),
+            pool("legacy", date, date),
+            confirmed.copy(poolId = "hidden", hidden = true),
+            confirmed.copy(poolId = "disabled", enabled = false),
+            confirmed.copy(poolId = "other-game", game = "代号鸢"),
+        )
+        val items = service.publicItems(null, null, null, null).items.associateBy { it.id }
+        for (id in listOf("confirmed", "partial", "other-game")) {
+            assertEquals(listOf("甲", "乙"), items.getValue("recruitment:$id").upAgentNames)
+        }
+        assertEquals(listOf("甲"), items.getValue("recruitment:single").upAgentNames)
+        for (id in listOf("unmapped", "inactive", "unknown", "selection", "legacy")) {
+            assertTrue(items.getValue("recruitment:$id").upAgentNames.isEmpty())
+        }
+        assertTrue(items.getValue(event.id).upAgentNames.isEmpty())
+        assertFalse(items.containsKey("recruitment:hidden"))
+        assertFalse(items.containsKey("recruitment:disabled"))
+        val item = items.getValue("recruitment:confirmed")
+        assertEquals(confirmed.name, item.title)
+        assertEquals(confirmed.poolId, item.sourceRef)
+        assertEquals(confirmed.poolType, item.poolType)
+        assertEquals(confirmed.startDate, item.startDate)
+        assertEquals(confirmed.endDate, item.endDate)
+        assertEquals(confirmed.sourceUrl, item.sourceUrl)
+        assertEquals(items.values.toSet(), service.publicItems(null, null, null, null).items.toSet())
         verify(exactly = 0) {
             repository.save(any())
             recruitment.save(any())
