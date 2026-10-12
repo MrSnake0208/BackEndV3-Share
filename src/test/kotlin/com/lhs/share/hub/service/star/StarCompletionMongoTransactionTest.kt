@@ -250,6 +250,10 @@ class StarCompletionMongoTransactionTest {
             Index().on("state.userId", Sort.Direction.ASC).on("state.accountId", Sort.Direction.ASC)
                 .named("state.idx_star_state_owner").unique(),
         )
+        val stateIndexes = template.indexOps(StarStateCurrent::class.java)
+        MongoPersistentEntityIndexResolver(template.converter.mappingContext).resolveIndexFor(StarStateCurrent::class.java).forEach {
+            stateIndexes.ensureIndex(it)
+        }
         val original = request().copy(
             operationId = "op2",
             expectedStarRevision = 4,
@@ -273,6 +277,7 @@ class StarCompletionMongoTransactionTest {
         StarCompletionIndexCleanup(template).run(DefaultApplicationArguments()) // Safe on subsequent starts.
         assertTrue(indexes.indexInfo.none { it.name == "state.idx_star_state_owner" })
         assertTrue(indexes.indexInfo.any { it.name == "idx_star_completion_operation_unique" && it.isUnique })
+        assertTrue(stateIndexes.indexInfo.any { it.name == "idx_star_state_owner" && it.isUnique })
         assertEquals(first, service().receipt("u", "a", "op1"))
         val second = service().complete("u", original)
         assertEquals(second, service().complete("u", original))
@@ -281,6 +286,27 @@ class StarCompletionMongoTransactionTest {
         assertEquals(5, state().revision)
         assertEquals(9, revisions.findByUserIdAndAccountId("u", "a")?.revision)
         assertEquals(StarStateExperience(8, 16, 24), state().experience)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["different-name", "different-fields", "non-unique", "extra-field"])
+    fun `cleanup preserves indexes that do not exactly match the legacy definition`(variant: String) {
+        val name = if (variant == "different-name") "another_owner_index" else "state.idx_star_state_owner"
+        val candidate = Index().on("state.userId", Sort.Direction.ASC)
+            .on(if (variant == "different-fields") "state.generation" else "state.accountId", Sort.Direction.ASC)
+            .named(name)
+        if (variant != "non-unique") candidate.unique()
+        if (variant == "extra-field") candidate.on("operationId", Sort.Direction.ASC)
+        val indexes = template.indexOps(StarCompletion::class.java)
+        indexes.ensureIndex(candidate)
+        val before = indexes.indexInfo
+        val beforeState = state()
+
+        StarCompletionIndexCleanup(template).run(DefaultApplicationArguments())
+
+        assertEquals(before, indexes.indexInfo)
+        assertEquals(beforeState, state())
+        assertEquals(0, receipts.count())
     }
 
     @Test fun `failure at final receipt insert rolls back revisions stock state history and account fence`() {
