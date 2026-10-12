@@ -111,6 +111,47 @@ class RecruitmentServiceTest {
         """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":31},{"event_id":"C","agent_id":"catalog_p:up:C","pull_span":17}]}""",
     )
 
+    @Test fun `four star records keep true rarity and do not require or reset current pity while SP counts as five star`() {
+        state = state.copy(pools = listOf(state.pools.single().copy(progress = 9)))
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"current","entries":[{"event_id":"four","agent_id":"char_043_xiaoqiao","pull_span":null}]}""",
+        )
+        assertEquals(9L, state.pools.single().progress)
+        assertEquals(4, events.getValue("four").agentSnapshot.rarity)
+        assertNull(events.getValue("four").pullSpan)
+        assertEquals(9L, count())
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "event_create",
+                """{"pool_id":"p","mode":"historical","entries":[{"agent_id":"char_043_xiaoqiao","pull_span":4}]}""",
+            )
+        }
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"current","tail_progress":3,"entries":[{"event_id":"sp","agent_id":"char_084_chendengsp","pull_span":17}]}""",
+        )
+        assertEquals(3L, state.pools.single().progress)
+        assertEquals(5, events.getValue("sp").agentSnapshot.rarity)
+        assertEquals(20L, count())
+    }
+
+    @Test fun `four star pool dialog saves with unknown pity while five star still requires explicit remaining pulls`() {
+        state = state.copy(pools = listOf(state.pools.single().copy(progress = null)))
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"four","agent_id":"char_043_xiaoqiao","pull_span":null}]}""",
+        )
+        assertNull(state.pools.single().progress)
+        assertEquals(4, events.getValue("four").agentSnapshot.rarity)
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"five","agent_id":"char_084_chendengsp","pull_span":17}]}""",
+            )
+        }
+    }
+
     @Test fun `pool dialog updates existing spans adds repeated agents removes one result and replaces progress`() {
         historical()
         command("progress_set", """{"pool_id":"p","progress":21}""")

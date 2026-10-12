@@ -52,6 +52,7 @@ class RecruitmentService(
                     current.baseline + totals.recordedPulls + totals.batchPulls + progress, totals.recordedPulls, totals.batchPulls,
                     progress, totals.eventCount, totals.exactCount, totals.unknownCount, unknownProgress,
                     totals.unknownCount > 0 || unknownProgress > 0,
+                    fourStarCount = totals.fourStarCount,
                 ),
                 current.gameSnapshot != account.game,
                 pools.associate { pool ->
@@ -74,6 +75,7 @@ class RecruitmentService(
                                 agentCounts[pool.poolId]?.get(agentId) ?: 0L
                             }
                         },
+                        count?.fourStarCount ?: 0,
                     )
                 },
                 mutation.poolStates(pools),

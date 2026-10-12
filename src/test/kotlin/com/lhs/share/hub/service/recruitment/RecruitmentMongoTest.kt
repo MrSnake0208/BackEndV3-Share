@@ -117,6 +117,24 @@ class RecruitmentMongoTest {
     private fun initialize() {
         command("pool_create", """{"pool_id":"p","catalog_pool_id":"catalog_p","progress":0}""")
     }
+
+    @Test fun `four star summary counts acquisitions without unknown interval or pity changes and isolates accounts`() {
+        initialize()
+        command("progress_set", """{"pool_id":"p","progress":9}""")
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"current","entries":[{"agent_id":"char_043_xiaoqiao","pull_span":null}]}""",
+        )
+        val archive = service.archive("u", "a")
+        assertEquals(9L, archive.summary.knownTotalPulls)
+        assertEquals(1L, archive.summary.eventCount)
+        assertEquals(1L, archive.summary.fourStarCount)
+        assertEquals(0L, archive.summary.unknownEventCount)
+        assertEquals(0L, archive.summary.exactEventCount)
+        assertFalse(archive.summary.hasUnknown)
+        assertEquals(1L, archive.poolSummaries.getValue("p").fourStarCount)
+        assertEquals(0L, service.archive("u", "b").summary.fourStarCount)
+    }
     private fun lifecycle(repository: SubAccountRepository) = SubAccountService(
         repository, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),

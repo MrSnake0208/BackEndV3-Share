@@ -247,7 +247,10 @@
           ]
         },
         "rarity": {
-          "const": 5
+          "enum": [
+            4,
+            5
+          ]
         }
       },
       "required": [
@@ -487,6 +490,34 @@
         "source",
         "created_at",
         "updated_at"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "agent_snapshot": {
+                "properties": {
+                  "rarity": {
+                    "const": 4
+                  }
+                },
+                "required": [
+                  "rarity"
+                ]
+              }
+            },
+            "required": [
+              "agent_snapshot"
+            ]
+          },
+          "then": {
+            "properties": {
+              "pull_span": {
+                "type": "null"
+              }
+            }
+          }
+        }
       ]
     },
     "batch": {

@@ -3,8 +3,6 @@ package com.lhs.share.hub.repository.entity
 import org.springframework.data.annotation.Id
 import org.springframework.data.annotation.Version
 import org.springframework.data.convert.ValueConverter
-import org.springframework.data.mongodb.core.convert.MongoConversionContext
-import org.springframework.data.mongodb.core.convert.MongoValueConverter
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 import java.time.LocalDate
@@ -56,9 +54,3 @@ data class ActivityCalendarEvent(
     val subtype: ActivityCalendarSubtype? = null,
     val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
 )
-
-/** Property-scoped conversion avoids the default LocalDate -> BSON Date/time-zone conversion. */
-class ActivityCalendarDateConverter : MongoValueConverter<LocalDate, String> {
-    override fun read(value: String, context: MongoConversionContext): LocalDate = LocalDate.parse(value)
-    override fun write(value: LocalDate, context: MongoConversionContext): String = value.toString()
-}

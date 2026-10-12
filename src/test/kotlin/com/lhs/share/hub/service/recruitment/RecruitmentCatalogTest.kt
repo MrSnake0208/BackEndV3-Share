@@ -49,8 +49,28 @@ class RecruitmentCatalogTest {
     }
 
     @Test
-    fun `movie seed is not an eligible ordinary top-rarity recruit`() {
-        assertThrows(RecruitmentApiException::class.java) { catalog.operator("如鸢", "char_084_chendengsp") }
+    fun `four star and movie recruits retain catalog rarity and game eligibility`() {
+        assertEquals(5, catalog.operator("如鸢", "char_084_chendengsp").rarity)
+        assertEquals(4, catalog.operator("代号鸢", "char_043_xiaoqiao").rarity)
+        assertThrows(RecruitmentApiException::class.java) { catalog.operator("other", "char_043_xiaoqiao") }
+        assertThrows(RecruitmentApiException::class.java) { catalog.operator("如鸢", "char_006_eshi") }
+    }
+
+    @Test
+    fun `spreadsheet placeholders bind unique catalog names including four star and SP without replacing slot identities`() {
+        val document = mapper.readTree(
+            """{"pools":[{"pool_id":"sheet","game":"如鸢","name":"表格池","up_status":"partial","up_agents":[
+            {"id":"sheet:up:1","name":"杨修","operator_id":null},
+            {"id":"sheet:up:2","name":"小乔","operator_id":null},
+            {"id":"sheet:up:3","name":"陈登·黍王","operator_id":null},
+            {"id":"sheet:up:4","name":"待收录密探","operator_id":null}]}]}""",
+        )
+        catalog.importCatalog("admin", document)
+        val slots = saved.getValue("sheet").upAgents
+        assertEquals(listOf("sheet:up:1", "sheet:up:2", "sheet:up:3", "sheet:up:4"), slots.map { it.id })
+        assertEquals(listOf("char_001_yangxiu", "char_043_xiaoqiao", "char_084_chendengsp", null), slots.map { it.operatorId })
+        assertEquals(1, catalog.importCatalog("admin", document).skippedCount)
+        assertEquals(slots, saved.getValue("sheet").upAgents)
     }
 
     @Test fun `catalog reads persisted pools only scopes by game and keeps pool owned identities`() {

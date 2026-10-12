@@ -229,7 +229,23 @@ class RecruitmentExchangeServiceTest {
         assertEquals("add", preview.items.single { it.entityType == "event" }.status)
         assertEquals(124L, preview.candidateKnownTotal)
         assertTrue(preview.canCommit)
-        verify(exactly = 0) { fixture.catalog.operator(any(), any()) }
+        verify(exactly = 1) { fixture.catalog.operator("如鸢", "official_A") }
+    }
+
+    @Test fun `four star backup round trips count only records and rejects fake rarity or pull spans`() {
+        val fixture = fixture()
+        every { fixture.catalog.operator("如鸢", "four") } returns RecruitmentAgentSnapshot("four", "4星", rarity = 4)
+        val incoming = record().copy(agentSnapshot = RecruitmentAgentSnapshot("four", "4星", rarity = 4), pullSpan = null)
+        val options = RecruitmentImportOptions(confirmCountChange = true)
+        val node = mapper.valueToTree<JsonNode>(document(incoming))
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", node, options))
+        assertTrue(preview.canCommit)
+        assertEquals(107L, preview.candidateKnownTotal)
+        for (invalid in listOf(incoming.copy(pullSpan = 4), incoming.copy(agentSnapshot = incoming.agentSnapshot.copy(rarity = 5)))) {
+            assertThrows(RecruitmentApiException::class.java) {
+                fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(document(invalid)), options))
+            }
+        }
     }
 
     @Test fun `import validates each distinct pool and official agent once and commit rechecks directory references`() {
