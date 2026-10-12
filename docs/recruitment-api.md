@@ -63,6 +63,18 @@ set_current_pool、progress_set、event_create、batch_create 可直接使用 ar
 
 entry=`{agent_id,pull_span,event_id?,up_status?,acquired_date?,note?}`，每次1–120条。新增密探须是该启用池的有效 UP 槽，或同游戏绝密图鉴密探；其他池的占位不可串用。`temporary_agent_create/pool_map/agent_map` 均拒绝422；旧临时池和密探保持可读、可导出以及已存在记录的维护、删除/撤销，不作为新增入口。事件ID为1–128位字母数字/`._:-`，名称1–128字符，备注≤1000字符。未知字段/小数/类型错拒绝422。
 
+### 原子历史插入与顺序维护
+
+`pool_records_save.data` 可选 `ordered_event_ids`，表示**本次新增/修改/删除之后**同池全部有效事件ID，方向为最早→最新；省略时完全保留原有追加行为。该字段最多20000条、不可重复、不可遗漏其他页或包含其它池/已删除ID；服务端读取20001条进行上限校验，集合不一致或实际超限返回409，重复或请求超限返回422。不能把搜索结果或单页ID当作完整顺序。
+
+```json
+{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"lu","agent_id":"char_038_luxun","pull_span":null}],"deleted_event_ids":[],"ordered_event_ids":["A","lu","B"]}
+```
+
+顺序意图与出货字段、删除、保底、revision CAS、账号写入fence和requestId回执处于同一个Hub事务；任何失败整体回滚。只分配本池保存后有效记录原有及新增的全局sort_order槽，不改其他池或tombstone的槽，不重新计算pull_span、日期、UP/稀有度、基准、批次成员或总量。纯排序可提供`remaining_pulls:null`以保留原保底（含未知）；维护5星字段或新增5星仍需明确真实保底。已有`event_reorder`完整集契约保持不变。
+
+客户端须以同revision完整分页核对预期ID顺序，不能把HTTP200当作已确认；回读失败沿原回执重读，网络提交结果未知沿原request_id/expected_revision及相同内容重试，409保留草稿并重新核对。JSON v1保持sort_order及null，CSV沿导出事件顺序输出；本次不改变备份格式。
+
 `mode=current` 的独立精确事件要求旧进度已知、首条span大于旧进度、全部span已知、tail_progress显式提供（非负或null未知），提交同事务消费旧进度并设置尾抽；已知累计增量=sum(spans)-old_progress+已知tail。`mode=historical` 不改变进度；extract_from_baseline=true时同事务按本次明确计入量从基准扣除，余额不足拒绝。未知独立span不计入已知总数，不能单独从基准提取。
 
 `batch_create` 保存已知总量、最多120个绝密节点；span可部分未知，但已知span之和不得超出total_pull_count。批次总量不包括tail_progress。current模式要求旧进度已知、total大于旧进度，tail可为null表示未知；historical不改进度。更新批次内某个span不能导致已知span之和超出批次总量；累计仍只计批次total一次。删除批次中的单个节点只移除该结果，批次计数不变；只有整批删除才移除total。整批撤销只恢复此次批量删除的节点，不复活此前已删除节点。

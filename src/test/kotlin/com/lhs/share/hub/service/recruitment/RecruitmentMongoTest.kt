@@ -245,7 +245,7 @@ class RecruitmentMongoTest {
                 request(
                     archive.archiveRevision,
                     "pool_records_save",
-                    """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":12}],"deleted_event_ids":["B"]}""",
+                    """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":12}],"deleted_event_ids":["B"],"ordered_event_ids":["C","A"]}""",
                     "failed-dialog",
                 ),
             )
@@ -594,6 +594,93 @@ class RecruitmentMongoTest {
         accountService.update("u", "a", null, "如鸢")
         assertFalse(service.archive("u", "a").gameMismatch)
         assertEquals(0L, service.archive("u", "a").archiveRevision)
+    }
+
+    @Test fun `atomic historical insertion persists across 100 item pages retries conflicts and isolated pools`() {
+        initialize()
+        val entries = (0..104).map { index ->
+            mapper.createObjectNode().put("event_id", "e$index").put("agent_id", "catalog_p:up:A").put("pull_span", 1)
+        }
+        command("event_create", mapper.writeValueAsString(mapOf("pool_id" to "p", "mode" to "historical", "entries" to entries)))
+        command("pool_create", """{"pool_id":"q","catalog_pool_id":"catalog_p","progress":9}""")
+        command(
+            "event_create",
+            """{"pool_id":"q","mode":"historical","entries":[{"event_id":"other","agent_id":"catalog_p:up:A","pull_span":7}]}""",
+        )
+        val other = store.event("u", "a", "other")
+        val old = service.page("u", "a", "p", null, 100, null, null, "asc")
+        val before = service.archive("u", "a")
+        val ids = (0..104).map { "e$it" }.toMutableList().also { it.add(50, "lu") }
+        val data = mapper.writeValueAsString(
+            mapOf(
+                "pool_id" to "p",
+                "remaining_pulls" to 40,
+                "entries" to listOf(mapOf("event_id" to "lu", "agent_id" to "catalog_p:up:A", "pull_span" to null)),
+                "ordered_event_ids" to ids,
+            ),
+        )
+        val input = request(before.archiveRevision, "pool_records_save", data, "insert-middle")
+        val receipt = service.command("u", input)
+        assertEquals(receipt, service.command("u", input))
+        val first = service.page("u", "a", "p", null, 100, null, null, "asc")
+        val last = service.page("u", "a", "p", first.nextCursor, 100, null, null, "asc")
+        assertEquals(ids, (first.items + last.items).map { it.eventId })
+        assertNull(last.nextCursor)
+        assertEquals(before.summary.knownTotalPulls, service.archive("u", "a").summary.knownTotalPulls)
+        assertEquals(other, store.event("u", "a", "other"))
+        assertTrue(store.poolEvents("u", "b", "p", 200).isEmpty())
+        assertThrows(RecruitmentApiException::class.java) { service.page("u", "a", "p", old.nextCursor, 100, null, null, "asc") }
+        assertThrows(RecruitmentApiException::class.java) { service.command("u", input.copy(requestId = "stale")) }
+        assertThrows(InventoryApiException::class.java) { service.command("other", input) }
+        assertEquals(106, store.poolEvents("u", "a", "p", 200).size)
+    }
+
+    @Test fun `concurrent dialog order changes allow exactly one revision winner`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"C","agent_id":"catalog_p:up:A","pull_span":20}]}""",
+        )
+        val revision = store.archive("u", "a")!!.archiveRevision
+        val before = service.archive("u", "a").summary
+        val orders = listOf(listOf("C", "A", "B"), listOf("B", "C", "A"))
+        val executor = Executors.newFixedThreadPool(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        try {
+            val futures = orders.mapIndexed { index, ids ->
+                executor.submit(
+                    Callable {
+                        ready.countDown()
+                        check(start.await(10, TimeUnit.SECONDS))
+                        runCatching {
+                            service.command(
+                                "u",
+                                request(
+                                    revision,
+                                    "pool_records_save",
+                                    """{"pool_id":"p","remaining_pulls":null,"entries":[],"ordered_event_ids":${mapper.writeValueAsString(
+                                        ids,
+                                    )}}""",
+                                    "order-$index",
+                                ),
+                            )
+                        }
+                    },
+                )
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            val results = futures.map { it.get(20, TimeUnit.SECONDS) }
+            assertEquals(1, results.count { it.isSuccess })
+            assertEquals(409, (results.single { it.isFailure }.exceptionOrNull() as RecruitmentApiException).status.value())
+            assertEquals(orders[results.indexOfFirst { it.isSuccess }], store.poolEvents("u", "a", "p", 10).map { it.eventId })
+            assertEquals(before, service.archive("u", "a").summary)
+            assertEquals(revision + 1, store.archive("u", "a")!!.archiveRevision)
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
     }
 
     @Test fun `keyset pages are complete scoped and reject stale cursor after reorder`() {
