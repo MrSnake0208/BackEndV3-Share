@@ -25,7 +25,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         validate(document)
         node.path("pools").forEach { if (!it.has("progress")) fail("卡池进度必须显式填写，未知时为null") }
         node.path("events").forEach {
-            if (!it.path("agent_snapshot").has("rarity")) fail("密探快照必须记录绝密稀有度")
+            if (!it.path("agent_snapshot").has("rarity")) fail("密探快照必须记录稀有度")
         }
         return document
     }
@@ -80,7 +80,8 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
             snapshot(it.poolSnapshot, document.game)
             id(it.agentSnapshot.agentId)
             text(it.agentSnapshot.name, 128)
-            if (it.agentSnapshot.rarity != 5) fail("备份记录只能包含绝密密探")
+            if (it.agentSnapshot.rarity !in 4..5) fail("备份记录只能包含4星或5星密探")
+            if (it.agentSnapshot.rarity == 4 && it.pullSpan != null) fail("4星记录不能包含绝密出货抽数")
             if (it.agentSnapshot.temporary) {
                 if (it.agentSnapshot.agentId !in agents) fail("记录引用的临时密探不存在")
             } else if (it.agentSnapshot.agentId.startsWith("tmp_")) {
@@ -122,7 +123,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         val pools = document.pools.associateBy { it.poolId }
         val definitions = document.pools.flatMap { listOfNotNull(it.snapshot.catalogPoolId, it.mappedSnapshot?.catalogPoolId) }.distinct()
             .associateWith { catalog.findPool(document.game, it) }
-        val checkedOperators = mutableSetOf<String>()
+        val checkedOperators = mutableMapOf<String, com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot>()
         document.pools.forEach { pool ->
             val old = existingPools[pool.poolId]
             val reference = pool.mappedSnapshot ?: pool.snapshot
@@ -170,8 +171,13 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
             val definition = definitions[catalogId] ?: fail("备份引用的管理员卡池不存在")
             if (definition.hidden) fail("隐藏卡池只能读取或恢复已有出货，不能通过备份新增结果")
             if (event.agentSnapshot.temporary) fail("不能通过备份新增用户临时密探结果")
-            if (definition.upAgents.none { it.id == event.agentSnapshot.agentId } && checkedOperators.add(event.agentSnapshot.agentId)) {
-                catalog.operator(document.game, event.agentSnapshot.agentId)
+            val slot = definition.upAgents.firstOrNull { it.id == event.agentSnapshot.agentId }
+            val operatorId = slot?.operatorId ?: event.agentSnapshot.agentId.takeIf { slot == null }
+            if (operatorId != null) {
+                val operator = checkedOperators.getOrPut(operatorId) { catalog.operator(document.game, operatorId) }
+                if (operator.rarity != event.agentSnapshot.rarity) fail("密探快照稀有度与图鉴不一致")
+            } else if (event.agentSnapshot.rarity != 5) {
+                fail("未绑定图鉴的占位密探不能声明为4星")
             }
         }
     }

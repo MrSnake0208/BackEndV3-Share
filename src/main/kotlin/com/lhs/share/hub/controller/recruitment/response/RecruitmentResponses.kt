@@ -17,6 +17,7 @@ data class RecruitmentSummary(
     val unknownProgressCount: Int,
     val hasUnknown: Boolean,
     val upAgentCounts: Map<String, Long>? = null,
+    val fourStarCount: Long = 0,
 )
 
 data class RecruitmentArchiveResponse(

@@ -145,8 +145,7 @@ class RecruitmentCatalog(
             )
         }
         if (value == null) throw recruitmentInvalid("图鉴中没有该密探，请刷新图鉴或联系管理员配置占位UP")
-        val movie = persisted?.spOf != null || seed?.get("spOf")?.isTextual == true
-        if (movie || value.rarity != 5 || game !in games) throw recruitmentInvalid("请选择当前游戏可用的绝密密探")
+        if (value.rarity !in 4..5 || game !in games) throw recruitmentInvalid("请选择当前游戏可用的4星或5星密探（含照影SP）")
         return value
     }
 
@@ -265,7 +264,7 @@ class RecruitmentCatalog(
         if (poolType != null && poolType.length > 64) throw recruitmentInvalid("第${position}个卡池类型不能超过64字")
         val enabled = optionalBoolean(node, "enabled", position, true)
         val slots = if (node.has("up_agents") && !node.get("up_agents").isNull) {
-            importSlots(node.get("up_agents"), poolId, game, position)
+            importSlots(node.get("up_agents"), poolId, game, position, knownNames)
         } else {
             legacySlots(node, poolId, game, position, knownNames)
         }
@@ -299,7 +298,13 @@ class RecruitmentCatalog(
         )
     }
 
-    private fun importSlots(node: JsonNode, poolId: String, game: String, position: Int): List<RecruitmentUpAgent> {
+    private fun importSlots(
+        node: JsonNode,
+        poolId: String,
+        game: String,
+        position: Int,
+        knownNames: Map<String, String>,
+    ): List<RecruitmentUpAgent> {
         if (!node.isArray) throw recruitmentInvalid("第${position}个卡池up_agents必须是数组")
         val slots = node.mapIndexed { index, slot ->
             if (!slot.isObject) throw recruitmentInvalid("第${position}个卡池第${index + 1}个UP必须是JSON对象")
@@ -310,7 +315,7 @@ class RecruitmentCatalog(
                 active = optionalBoolean(slot, "active", position, true),
             )
         }
-        return normalizeImportedSlots(poolId, game, position, slots)
+        return normalizeImportedSlots(poolId, game, position, slots, knownNames)
     }
 
     private fun legacySlots(
@@ -331,7 +336,7 @@ class RecruitmentCatalog(
             }
             RecruitmentUpAgent("$poolId:up:${index + 1}", name, operatorId)
         }
-        return normalizeImportedSlots(poolId, game, position, slots)
+        return normalizeImportedSlots(poolId, game, position, slots, knownNames)
     }
 
     private fun normalizeImportedSlots(
@@ -339,6 +344,7 @@ class RecruitmentCatalog(
         game: String,
         position: Int,
         slots: List<RecruitmentUpAgent>,
+        knownNames: Map<String, String>,
     ): List<RecruitmentUpAgent> {
         if (slots.size > 500 || slots.count { it.active } > 120 || slots.map { it.id }.toSet().size != slots.size) {
             throw recruitmentInvalid("第${position}个卡池UP名单最多120个有效项、500个保留项，槽ID不能重复")
@@ -347,8 +353,15 @@ class RecruitmentCatalog(
             if (!SLOT_ID.matches(slot.id) || !slot.id.startsWith("$poolId:up:")) {
                 throw recruitmentInvalid("第${position}个卡池UP槽ID必须属于当前卡池且不超过128字")
             }
-            val operator = slot.operatorId?.let { operator(game, it) }
-            slot.copy(name = operator?.name ?: validName(slot.name))
+            val operator = slot.operatorId?.let { operator(game, it) } ?: knownNames.entries
+                .filter { it.value == slot.name.trim() }.mapNotNull { (id, _) ->
+                    try {
+                        operator(game, id)
+                    } catch (_: RecruitmentApiException) {
+                        null
+                    }
+                }.singleOrNull()
+            slot.copy(name = operator?.name ?: validName(slot.name), operatorId = operator?.agentId)
         }
         val bound = normalized.filter { it.active }.mapNotNull { it.operatorId }
         if (bound.toSet().size != bound.size) throw recruitmentInvalid("第${position}个卡池有效UP不能重复选择同一密探")

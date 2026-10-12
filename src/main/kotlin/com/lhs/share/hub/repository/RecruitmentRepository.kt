@@ -185,12 +185,14 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
         fun sum(expression: Any) = Document("\$sum", expression)
         val exact = Document("\$ne", listOf(Document("\$ifNull", listOf("\$pullSpan", null)), null))
         val standalone = Document("\$eq", listOf(Document("\$ifNull", listOf("\$batchId", null)), null))
+        val fourStar = Document("\$eq", listOf("\$agentSnapshot.rarity", 4))
         fun whenTrue(test: Any, yes: Any, no: Any) = Document("\$cond", listOf(test, yes, no))
         return Document("_id", id)
-            .append("recordedPulls", sum(whenTrue(standalone, Document("\$ifNull", listOf("\$pullSpan", 0)), 0)))
+            .append("recordedPulls", sum(whenTrue(fourStar, 0, whenTrue(standalone, Document("\$ifNull", listOf("\$pullSpan", 0)), 0))))
             .append("eventCount", sum(1))
-            .append("exactCount", sum(whenTrue(exact, 1, 0)))
-            .append("unknownCount", sum(whenTrue(exact, 0, 1)))
+            .append("fourStarCount", sum(whenTrue(fourStar, 1, 0)))
+            .append("exactCount", sum(whenTrue(fourStar, 0, whenTrue(exact, 1, 0))))
+            .append("unknownCount", sum(whenTrue(fourStar, 0, whenTrue(exact, 0, 1))))
     }
 
     private fun batchGroup(id: String?) = Document("_id", id).append("pulls", Document("\$sum", "\$totalPullCount"))
@@ -203,6 +205,7 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
             events.long("eventCount"),
             events.long("exactCount"),
             events.long("unknownCount"),
+            events.long("fourStarCount"),
         )
     }
 
@@ -254,4 +257,5 @@ data class RecruitmentTotals(
     val eventCount: Long,
     val exactCount: Long,
     val unknownCount: Long,
+    val fourStarCount: Long = 0,
 )

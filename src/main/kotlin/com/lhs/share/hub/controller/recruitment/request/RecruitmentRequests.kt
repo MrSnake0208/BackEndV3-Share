@@ -52,7 +52,7 @@ data class RecruitmentPoolRecordsSave(
     val poolId: String,
     val entries: List<RecruitmentEventInput>,
     val deletedEventIds: List<String> = emptyList(),
-    @param:JsonProperty(required = true) val remainingPulls: Int,
+    @param:JsonProperty(required = true) val remainingPulls: Int?,
 )
 
 data class RecruitmentEventUpdate(val eventId: String, val entry: RecruitmentEventInput)
