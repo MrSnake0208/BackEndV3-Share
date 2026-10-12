@@ -113,7 +113,27 @@ class RecruitmentMutation(
                 val newEntries = input.entries.filter { it.eventId !in oldEvents }
                 val added = if (newEntries.isEmpty()) emptyList() else newEvents(current, input.poolId, newEntries, now)
                 val modifiedEvents = changed + added + removed
-                if (input.remainingPulls == null && (modifiedEvents.isEmpty() || modifiedEvents.any { it.agentSnapshot.rarity != 4 })) {
+                val ordered = input.orderedEventIds?.let { ids ->
+                    if (ids.size > 20_000 || ids.toSet().size != ids.size) {
+                        throw recruitmentInvalid("排序ID不能重复，最多20000条")
+                    }
+                    ids.forEach(::validId)
+                    val existing = store.poolEvents(current.userId, current.accountId, input.poolId, 20_001)
+                    val removedIds = removed.map { it.eventId }.toSet()
+                    val replacements = changed.associateBy { it.eventId }
+                    val live = existing.filter { it.eventId !in removedIds }.map { replacements[it.eventId] ?: it } + added
+                    if (existing.size > 20_000 || live.size > 20_000 || live.map { it.eventId }.toSet() != ids.toSet()) {
+                        throw recruitmentConflict("排序需要保存后本池完整有效记录（最多20000条），请重新核对")
+                    }
+                    val byId = live.associateBy { it.eventId }
+                    val slots = live.map { it.sortOrder }.sorted()
+                    ids.mapIndexedNotNull { index, id ->
+                        byId.getValue(id).takeIf { it.sortOrder != slots[index] }?.copy(sortOrder = slots[index], updatedAt = now)
+                    }
+                }
+                if (input.remainingPulls == null &&
+                    (modifiedEvents.any { it.agentSnapshot.rarity != 4 } || modifiedEvents.isEmpty() && ordered == null)
+                ) {
                     throw recruitmentInvalid("维护5星记录时须提供真实保底；仅4星计次可留空保底")
                 }
                 val touchedBatches = (changed + removed).mapNotNull { it.batchId }.toSet()
@@ -131,6 +151,8 @@ class RecruitmentMutation(
                 removed.forEach {
                     store.saveEvent(it.copy(deletedAt = now, deletedRevision = current.archiveRevision + 1, updatedAt = now))
                 }
+                // The full set was checked before any writes; slot changes share the same account-fenced transaction.
+                ordered?.forEach(store::saveEvent)
                 val currentPool = pool(current, input.poolId)
                 val progress = input.remainingPulls?.let { 40L - it } ?: currentPool.progress
                 next = replacePool(current, currentPool.copy(progress = progress))
