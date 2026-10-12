@@ -57,7 +57,7 @@ import java.util.concurrent.TimeUnit
 /** Only owned TestMongo replica-set connections; no application context or development data. */
 @Tag("integration")
 class RecruitmentExchangeMongoTest {
-    private val database = TestMongo.database("recruitment_exchange")
+    private val database = TestMongo.database("recruit_exch")
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val accounts = MongoRepositoryFactory(template).getRepository(
@@ -150,6 +150,30 @@ class RecruitmentExchangeMongoTest {
             preview.targetRevision,
             UUID.randomUUID().toString(),
         )
+    }
+
+    @Test fun `dialog reordered history roundtrips with sort slots unknown values and batch totals`() {
+        initialize()
+        historical(id = "A")
+        command(
+            "a",
+            "batch_create",
+            """{"pool_id":"p","mode":"historical","batch_id":"batch","total_pull_count":70,"entries":[{"event_id":"B","agent_id":"test_pool:up:A","pull_span":null}]}""",
+        )
+        command(
+            "a",
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":40,"entries":[{"event_id":"lu","agent_id":"test_pool:up:A","pull_span":null}],"ordered_event_ids":["B","lu","A"]}""",
+        )
+        val source = service.export("u", "a")
+        service.commit("u", prepared(backup()))
+        val restored = service.export("u", "b")
+        assertEquals(listOf("B", "lu", "A"), restored.events.map { it.eventId })
+        assertEquals(source.events.map { it.sortOrder }, restored.events.map { it.sortOrder })
+        assertEquals(source.events.map { it.pullSpan }, restored.events.map { it.pullSpan })
+        assertEquals(source.events.map { it.acquiredDate }, restored.events.map { it.acquiredDate })
+        assertEquals(source.batches.map { it.totalPullCount }, restored.batches.map { it.totalPullCount })
+        assertEquals(core.archive("u", "a").summary, core.archive("u", "b").summary)
     }
 
     @Test fun `roundtrip preserves all logic and original provenance while repeated file and durable retries do not duplicate`() {

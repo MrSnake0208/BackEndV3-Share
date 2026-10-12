@@ -517,6 +517,80 @@ class RecruitmentServiceTest {
         assertNull(events.getValue("B").deletedAt)
     }
 
+    @Test fun `dialog inserts historical results in middle earliest and latest without rewriting intervals`() {
+        historical()
+        val before = events.toMap()
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":40,"entries":[{"event_id":"lu","agent_id":"catalog_p:up:A","pull_span":null}],"ordered_event_ids":["A","lu","B","C"]}""",
+        )
+        assertEquals(listOf("A", "lu", "B", "C"), events.values.sortedBy { it.sortOrder }.map { it.eventId })
+        assertNull(events.getValue("lu").pullSpan)
+        assertEquals(65L, count())
+        for (ids in listOf(listOf("lu", "A", "B", "C"), listOf("A", "B", "C", "lu"), listOf("B", "A", "lu", "C"))) {
+            val slots = events.values.map { it.sortOrder }.sorted()
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":null,"entries":[],"ordered_event_ids":${mapper.writeValueAsString(ids)}}""",
+            )
+            assertEquals(ids, events.values.sortedBy { it.sortOrder }.map { it.eventId })
+            assertEquals(slots, events.values.map { it.sortOrder }.sorted())
+            assertEquals(65L, count())
+        }
+        before.forEach { (id, old) -> assertEquals(old, events.getValue(id).copy(sortOrder = old.sortOrder, updatedAt = old.updatedAt)) }
+        assertEquals(5L, state.nextEventOrder)
+    }
+
+    @Test fun `dialog validates complete final order before writes including duplicates foreign deleted and missing IDs`() {
+        historical()
+        command("event_delete", """{"event_id":"C"}""")
+        val before = events.toMap()
+        val archive = state
+        for (ids in listOf(
+            listOf("A", "lu"),
+            listOf("A", "B", "lu", "foreign"),
+            listOf("A", "B", "lu", "C"),
+            listOf("A", "A", "B", "lu"),
+        )) {
+            assertThrows(RecruitmentApiException::class.java) {
+                command(
+                    "pool_records_save",
+                    """{"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"lu","agent_id":"catalog_p:up:A","pull_span":null}],"ordered_event_ids":${mapper.writeValueAsString(
+                        ids,
+                    )}}""",
+                )
+            }
+            assertEquals(before, events)
+            assertEquals(archive, state)
+        }
+        every { store.poolEvents("u", "a", "p", 20_001) } returns List(20_001) { before.getValue("A").copy(eventId = "event_$it") }
+        assertThrows(RecruitmentApiException::class.java) {
+            command("pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"ordered_event_ids":[]}""")
+        }
+        assertEquals(before, events)
+    }
+
+    @Test fun `dialog pure sorting preserves batch totals unknown pity four stars SP and tombstones`() {
+        command(
+            "batch_create",
+            """{"pool_id":"p","mode":"historical","batch_id":"batch","total_pull_count":70,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":20}]}""",
+        )
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"four","agent_id":"char_043_xiaoqiao","pull_span":null},{"event_id":"sp","agent_id":"char_084_chendengsp","pull_span":12}]}""",
+        )
+        command("event_delete", """{"event_id":"B"}""")
+        state = state.copy(pools = listOf(state.pools.single().copy(progress = null)))
+        val before = events.toMap()
+        val batch = batches.toMap()
+        val total = count()
+        command("pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"ordered_event_ids":["sp","A","four"]}""")
+        assertEquals(total, count())
+        assertNull(state.pools.single().progress)
+        assertEquals(batch, batches)
+        before.forEach { (id, old) -> assertEquals(old, events.getValue(id).copy(sortOrder = old.sortOrder, updatedAt = old.updatedAt)) }
+    }
+
     @Test fun `reordering changes only ordering and unknown historical span remains unknown`() {
         historical()
         command("event_reorder", """{"pool_id":"p","event_ids":["C","A","B"]}""")
