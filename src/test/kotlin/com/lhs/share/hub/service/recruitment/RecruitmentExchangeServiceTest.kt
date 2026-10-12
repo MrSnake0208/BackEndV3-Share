@@ -229,7 +229,23 @@ class RecruitmentExchangeServiceTest {
         assertEquals("add", preview.items.single { it.entityType == "event" }.status)
         assertEquals(124L, preview.candidateKnownTotal)
         assertTrue(preview.canCommit)
-        verify(exactly = 1) { fixture.catalog.operator("如鸢", "official_A") }
+        verify(exactly = 0) { fixture.catalog.operator(any(), any()) }
+    }
+
+    @Test fun `old five star placeholder backups remain restorable after binding the slot to a four star catalog entry`() {
+        val fixture = fixture()
+        every { fixture.catalog.findPool("如鸢", "catalog") } returns mockk(relaxed = true) {
+            every { upAgents } returns listOf(slot.copy(operatorId = "four"))
+        }
+        every { fixture.catalog.operator("如鸢", "four") } returns RecruitmentAgentSnapshot("four", "4星", rarity = 4)
+        val incoming = mapper.valueToTree<JsonNode>(document(record()))
+        val preview = fixture.service.preview(
+            "u",
+            RecruitmentImportPreviewRequest("a", incoming, RecruitmentImportOptions(confirmCountChange = true)),
+        )
+        assertTrue(preview.canCommit)
+        assertEquals(124L, preview.candidateKnownTotal)
+        verify(exactly = 0) { fixture.catalog.operator(any(), any()) }
     }
 
     @Test fun `four star backup round trips count only records and rejects fake rarity or pull spans`() {

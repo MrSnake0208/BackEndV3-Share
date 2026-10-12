@@ -172,6 +172,8 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
             if (definition.hidden) fail("隐藏卡池只能读取或恢复已有出货，不能通过备份新增结果")
             if (event.agentSnapshot.temporary) fail("不能通过备份新增用户临时密探结果")
             val slot = definition.upAgents.firstOrNull { it.id == event.agentSnapshot.agentId }
+            // Legacy placeholders stored rarity 5 before binding, including slots now mapped to four-star operators.
+            if (slot != null && event.agentSnapshot.rarity == 5) return@forEach
             val operatorId = slot?.operatorId ?: event.agentSnapshot.agentId.takeIf { slot == null }
             if (operatorId != null) {
                 val operator = checkedOperators.getOrPut(operatorId) { catalog.operator(document.game, operatorId) }
