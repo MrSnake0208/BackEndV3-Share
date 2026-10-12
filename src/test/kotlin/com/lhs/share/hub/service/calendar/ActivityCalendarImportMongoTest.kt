@@ -98,4 +98,19 @@ class ActivityCalendarImportMongoTest {
         assertEquals(3L, template.getCollection("activity_calendar_events").countDocuments())
         assertEquals(2, calendar.publicItems(null, null, null, null).items.size)
     }
+
+    @Test
+    fun `real Mongo ongoing imports round trip and repeated omitted end dates skip existing`() {
+        val open = json.replace("\"2026-10-20\"", "null")
+        val preview = importer.preview(open)
+        assertEquals(1, importer.commit("editor", open, preview.previewToken).created)
+        val omitted = open.replace(",\"end_date\":null", "")
+        val repeat = importer.preview(omitted)
+        assertEquals(1, repeat.existing)
+        assertEquals(0, importer.commit("editor", omitted, repeat.previewToken).created)
+        val item = calendar.publicItems("如鸢", java.time.LocalDate.parse("2027-01-01"), null, null).items.single()
+        assertEquals(null, item.endDate)
+        assertEquals(null, item.endAt)
+        assertEquals(1L, template.getCollection("activity_calendar_events").countDocuments())
+    }
 }

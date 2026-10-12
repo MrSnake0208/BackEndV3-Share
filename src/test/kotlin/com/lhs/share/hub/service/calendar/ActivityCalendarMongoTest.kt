@@ -122,4 +122,27 @@ class ActivityCalendarMongoTest {
         assertEquals(manualBefore, template.getCollection("activity_calendar_events").find().into(mutableListOf()))
         assertEquals(catalogBefore, template.getCollection("recruitment_catalog").find().into(mutableListOf()))
     }
+
+    @Test
+    fun `Mongo持续活动空或缺失结束日期可读且跨期重叠查询不返回未来停用或其他游戏`() {
+        val open = service.create("editor", request.copy(endDate = null))
+        val absent = service.create("editor", request.copy(title = "缺失字段", endDate = null))
+        service.create("editor", request.copy(title = "未来", startDate = date.plusYears(2), endDate = null))
+        service.create("editor", request.copy(title = "停用", endDate = null, enabled = false))
+        service.create("editor", request.copy(title = "其他游戏", game = "代号鸢", endDate = null))
+        service.create("editor", request.copy(title = "已截止"))
+        val collection = template.getCollection("activity_calendar_events")
+        collection.updateOne(org.bson.Document("_id", open.item.id), org.bson.Document("\$set", org.bson.Document("endDate", null)))
+        collection.updateOne(org.bson.Document("_id", absent.item.id), org.bson.Document("\$unset", org.bson.Document("endDate", "")))
+        assertNull(repository.find(open.item.id)!!.endDate)
+        assertNull(repository.find(absent.item.id)!!.endDate)
+        val before = collection.find().into(mutableListOf())
+        val later = date.plusYears(1)
+        val items = service.publicItems("如鸢", later, later.plusDays(1), listOf("ACTIVITY")).items
+        assertEquals(setOf(open.item.id, absent.item.id), items.map { it.id }.toSet())
+        assertTrue(service.publicItems("如鸢", null, date.minusDays(1), listOf("ACTIVITY")).items.isEmpty())
+        assertEquals(before, collection.find().into(mutableListOf()))
+        service.update("editor", open.item.id, request.copy(expectedVersion = 0))
+        assertEquals(listOf(absent.item.id), service.publicItems("如鸢", later, later, listOf("ACTIVITY")).items.map { it.id })
+    }
 }
