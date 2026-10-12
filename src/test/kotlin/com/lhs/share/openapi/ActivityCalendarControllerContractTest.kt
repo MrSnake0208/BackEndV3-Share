@@ -13,6 +13,7 @@ import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.entity.ActivityCalendarCategory
 import com.lhs.share.hub.repository.entity.ActivityCalendarEvent
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
+import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
@@ -78,6 +79,44 @@ class ActivityCalendarControllerContractTest {
     private fun editor() {
         every { helper.requireUserId() } returns "editor"
         every { authorization.hasPermission("editor", AdminPermission.ACTIVITY_CALENDAR_WRITE) } returns true
+    }
+
+    @Test
+    fun `calendar exposes only confirmed UP names in snake case and defaults manual and legacy lists to empty`() {
+        every { recruitment.all() } returns listOf(
+            RecruitmentCatalogPool(
+                "pool",
+                "如鸢",
+                "卡池",
+                date,
+                date.plusDays(1),
+                upStatus = "verified",
+                upAgents = listOf(
+                    RecruitmentUpAgent("pool:up:a", "甲", "operator-a"),
+                    RecruitmentUpAgent("pool:up:b", "乙", "operator-b"),
+                    RecruitmentUpAgent("pool:up:c", "占位候选"),
+                    RecruitmentUpAgent("pool:up:d", "退役", "operator-d", active = false),
+                ),
+                sourceUpAgentNames = listOf("来源候选"),
+            ),
+            RecruitmentCatalogPool("z-legacy", "如鸢", "旧池", date, date.plusDays(1)),
+        )
+        mvc.perform(get("/v1/activity-calendar"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[0].up_agent_names").isEmpty)
+            .andExpect(jsonPath("$.data.items[1].up_agent_names.length()").value(2))
+            .andExpect(jsonPath("$.data.items[1].up_agent_names[0]").value("甲"))
+            .andExpect(jsonPath("$.data.items[1].up_agent_names[1]").value("乙"))
+            .andExpect(jsonPath("$.data.items[1].title").value("卡池"))
+            .andExpect(jsonPath("$.data.items[1].upAgentNames").doesNotExist())
+            .andExpect(jsonPath("$.data.items[1].up_agents").doesNotExist())
+            .andExpect(jsonPath("$.data.items[1].up_agent_ids").doesNotExist())
+            .andExpect(jsonPath("$.data.items[1].source_up_agent_names").doesNotExist())
+            .andExpect(jsonPath("$.data.items[2].up_agent_names").isEmpty)
+        verify(exactly = 0) {
+            repository.save(any())
+            recruitment.save(any())
+        }
     }
 
     @Test

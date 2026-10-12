@@ -27,6 +27,7 @@ data class ActivityCalendarItem(
     val subtype: ActivityCalendarSubtype? = null,
     val subtypeDetail: ActivityCalendarSubtypeDetail? = null,
     val poolType: String? = null,
+    val upAgentNames: List<String> = emptyList(),
 ) {
     val startAt: Instant? get() = startTime?.let { startDate.atTime(LocalTime.parse(it)).atZone(ZoneId.of(timeZone)).toInstant() }
     val endAt: Instant? get() = endDate?.let { date ->

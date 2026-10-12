@@ -2,6 +2,14 @@
 
 提供手工目录、招募卡池聚合、管理员 JSON 批量导入，以及独立的用户建议和维护成员审核；不提供物理删除。
 
+## 招募 UP 名称（2026-10-12）
+
+公开及管理日历项新增只读 `up_agent_names: string[]`，手工项和缺少有效名单的旧目录返回 `[]`。仅从公共 `recruitment_catalog` 读取：池 `up_status=verified/partial`，槽 `active=true`、`operator_id` 非空且名称非空时返回修剪后的名称，保序去重。`partial` 只返回其中已正式绑定的槽；未映射占位、停用槽、`unknown/selection` 池不表示已确认 UP，不填入名单。`source_up_agent_names` 是独立来源资料，不作为正式名单回退，也不输出候选名称。
+
+例如 `{"title":"卡池名","source_type":"RECRUITMENT_POOL","up_agent_names":["甲","乙"]}`；标题、ID、来源、游戏、类型和日期保持原义，hidden/enabled 过滤不变。不读取个人档案、账号或出货记录，不增加持久化字段，不接受手工/建议/导入写入。旧客户端可忽略新增字段，新客户端应兼容旧接口缺字段。
+
+最小验证（仓库根）：`./gradlew test --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSubscriptionServiceTest' --console=plain`。
+
 ## 可选细分类别（2026-10-09）
 
 持久化 `category` 及查询值继续使用 `ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER`，不为展示分组迁移旧记录。手工事件、写请求、公开/管理响应、建议原始资料与采纳快照新增 `subtype`、`subtype_detail`，均可省略或为 null，历史 Mongo 文档缺字段时默认为 null。PUT 仍为完整替换：省略或 null 会清除细类/细目。
