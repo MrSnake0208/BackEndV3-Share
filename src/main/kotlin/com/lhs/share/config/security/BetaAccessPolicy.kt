@@ -4,6 +4,8 @@ package com.lhs.share.config.security
 object BetaAccessPolicy {
     private val privateRoots = listOf(
         "/v1/accounts",
+        "/v1/activity-calendar",
+        "/v1/recruitment",
         "/v1/inventory",
         "/v1/operator",
         "/v1/star-state",
