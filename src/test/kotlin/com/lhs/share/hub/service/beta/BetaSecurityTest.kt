@@ -17,8 +17,10 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpStatus
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -86,7 +88,7 @@ class BetaSecurityTest {
     }
 
     @Test
-    fun `recruitment access can use shared account endpoints without beta`() {
+    fun `legacy recruitment grants cannot bypass beta on shared account endpoints`() {
         val token = jwt.issueAuthToken("recruitment-fixture", null, emptyList()).value
         doThrow(BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"))
             .`when`(betaService).requireAccess("recruitment-fixture")
@@ -94,8 +96,47 @@ class BetaSecurityTest {
         `when`(accounts.list("recruitment-fixture")).thenReturn(emptyList<SubAccountResponse>())
 
         mvc.perform(get("/v1/accounts").header("Authorization", "Bearer $token"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data").isArray)
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.error.code").value("beta_access_required"))
+        org.mockito.Mockito.verifyNoInteractions(accounts)
+    }
+
+    @Test
+    fun `calendar and recruitment private requests fail closed for missing beta maintenance and lookup failures`() {
+        val token = jwt.issueAuthToken("beta-boundary", null, emptyList()).value
+        val errors = listOf(
+            BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "join first"),
+            BetaApiException(HttpStatus.FORBIDDEN, "beta_service_closed", "maintenance"),
+            BetaApiException(HttpStatus.SERVICE_UNAVAILABLE, "beta_temporarily_unavailable", "retry"),
+        )
+        errors.forEach { error ->
+            doThrow(error).`when`(betaService).requireAccess("beta-boundary")
+            listOf(
+                get("/v1/accounts"),
+                get("/v1/activity-calendar"),
+                get("/v1/activity-calendar/suggestions/mine"),
+                post("/v1/activity-calendar/suggestions"),
+                get("/v1/activity-calendar/subscriptions/summary").param("account_id", "a"),
+                put("/v1/activity-calendar/subscriptions/evt_test"),
+                put("/v1/activity-calendar/subscriptions/evt_test/progress"),
+                get("/v1/activity-calendar/private-items").param("account_id", "a").param("from", "2026-10-01").param("to", "2026-10-31"),
+                post("/v1/activity-calendar/private-items"),
+                put("/v1/activity-calendar/private-items/pci_test"),
+                delete("/v1/activity-calendar/private-items/pci_test").param("account_id", "a").param("expected_version", "0"),
+                get("/v1/recruitment/archive").param("account_id", "a"),
+                get("/v1/recruitment/events").param("account_id", "a"),
+                post("/v1/recruitment/commands"),
+                get("/v1/recruitment/export").param("account_id", "a"),
+                post("/v1/recruitment/import/preview"),
+                post("/v1/recruitment/import/commit"),
+            ).forEach { request ->
+                mvc.perform(request.header("Authorization", "Bearer $token").contentType("application/json").content("{}"))
+                    .andExpect(status().`is`(error.status.value()))
+                    .andExpect(jsonPath("$.error.code").value(error.code))
+                    .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
+            }
+        }
+        org.mockito.Mockito.verifyNoInteractions(accounts, recruitmentAccess)
     }
 
     @Test

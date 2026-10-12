@@ -8,7 +8,6 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.ActivityCalendarExceptionHandler
 import com.lhs.share.hub.controller.calendar.CalendarPrivateItemController
 import com.lhs.share.hub.controller.calendar.response.CalendarPrivateItemResponse
-import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
 import com.lhs.share.hub.service.calendar.CalendarPrivateItemService
 import io.mockk.every
@@ -33,7 +32,6 @@ import java.time.LocalDate
 class CalendarPrivateItemControllerContractTest {
     private val service = mockk<CalendarPrivateItemService>()
     private val helper = mockk<AuthenticationHelper>()
-    private val authorization = mockk<AdminAuthorizationService>()
     private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
         .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private val path = "/v1/activity-calendar/private-items"
@@ -44,8 +42,7 @@ class CalendarPrivateItemControllerContractTest {
     @BeforeEach
     fun setup() {
         every { helper.requireUserId() } returns "owner"
-        every { authorization.hasAnyAdminCapability("owner") } returns true
-        mvc = MockMvcBuilders.standaloneSetup(CalendarPrivateItemController(service, helper, authorization))
+        mvc = MockMvcBuilders.standaloneSetup(CalendarPrivateItemController(service, helper))
             .setControllerAdvice(ActivityCalendarExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
@@ -140,17 +137,18 @@ class CalendarPrivateItemControllerContractTest {
     }
 
     @Test
-    fun `ordinary user rejected before every service operation and conflicts use standard envelope`() {
-        every { authorization.hasAnyAdminCapability("owner") } returns false
+    fun `anonymous user rejected before every service operation and conflicts use standard envelope`() {
+        every { helper.requireUserId() } throws
+            org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED)
         listOf(
             get(path).param("account_id", "a").param("from", "2026-10-01").param("to", "2026-10-31"),
             get("$path/$id").param("account_id", "a"),
             post(path).content(body),
             put("$path/$id").content(body),
             delete("$path/$id").param("account_id", "a").param("expected_version", "0"),
-        ).forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON)).andExpect(status().isForbidden) }
+        ).forEach { mvc.perform(it.contentType(MediaType.APPLICATION_JSON)).andExpect(status().isUnauthorized) }
         verify { service wasNot io.mockk.Called }
-        every { authorization.hasAnyAdminCapability("owner") } returns true
+        every { helper.requireUserId() } returns "owner"
         every { service.delete("owner", "a", id, 0) } throws
             ActivityCalendarApiException(HttpStatus.CONFLICT, "private_item_conflict", "changed")
         mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "0"))

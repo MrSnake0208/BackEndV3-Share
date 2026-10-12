@@ -250,4 +250,19 @@ class ActivityCalendarServiceTest {
         assertEquals(listOf("typed", "unknown"), result.map { it.item.sourceRef })
         verify(exactly = 0) { repository.save(any()) }
     }
+
+    @Test
+    fun `持续活动保留空结束日期允许开始时刻并可补齐结束日期`() {
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }
+        val open = service.create("editor", request.copy(endDate = null, startTime = "05:00"))
+        assertNull(open.item.endDate)
+        assertNull(open.item.endAt)
+        assertEquals(Instant.parse("2026-10-02T21:00:00Z"), open.item.startAt)
+        assertEquals("end_time", failure { service.create("editor", request.copy(endDate = null, endTime = "04:59")) }.field)
+        assertEquals("start_time", failure { service.create("editor", request.copy(endDate = null, startTime = "25:00")) }.field)
+        every { repository.find(open.item.id) } returns event.copy(id = open.item.id, endDate = null, startTime = "05:00")
+        val closed = service.update("editor", open.item.id, request.copy(expectedVersion = 0, startTime = "05:00", endTime = "04:59"))
+        assertEquals(date.plusDays(7), closed.item.endDate)
+        assertEquals(Instant.parse("2026-10-09T20:59:00Z"), closed.item.endAt)
+    }
 }

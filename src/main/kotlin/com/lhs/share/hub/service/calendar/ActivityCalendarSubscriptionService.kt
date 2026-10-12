@@ -47,7 +47,7 @@ class ActivityCalendarSubscriptionService(
         val records = resolved(userId, account)
         return CalendarSubscriptionsResponse(
             records.filter {
-                it.item != null && it.item.endDate >= start && it.item.startDate <= end &&
+                it.item != null && (it.item.endDate == null || it.item.endDate >= start) && it.item.startDate <= end &&
                     (selected == null || it.item.category == selected)
             },
             records.filter { it.item == null },
@@ -61,11 +61,11 @@ class ActivityCalendarSubscriptionService(
         val day = today()
         val pending = records.filter { record ->
             val item = record.item
-            item != null && !record.completed && started(item, now, day) && !ended(item, now, day) &&
+            item != null && item.endDate != null && !record.completed && started(item, now, day) && !ended(item, now, day) &&
                 (item.endAt?.let { it <= now.plus(7, ChronoUnit.DAYS) } ?: (item.endDate <= day.plusDays(7)))
         }.sortedWith(
             compareBy<CalendarSubscriptionResponse> {
-                it.item!!.endAt ?: it.item.endDate.plusDays(1).atStartOfDay(zone).toInstant()
+                it.item!!.endAt ?: checkNotNull(it.item.endDate).plusDays(1).atStartOfDay(zone).toInstant()
             }.thenBy { it.eventId },
         )
         return CalendarSubscriptionSummaryResponse(pending.take(3), pending.size, records.size)
@@ -194,5 +194,5 @@ class ActivityCalendarSubscriptionService(
         item.startAt?.let { it <= now } ?: (item.startDate <= day)
 
     private fun ended(item: ActivityCalendarItem, now: Instant, day: LocalDate): Boolean =
-        item.endAt?.let { it <= now } ?: (item.endDate < day)
+        item.endAt?.let { it <= now } ?: (item.endDate?.let { it < day } ?: false)
 }

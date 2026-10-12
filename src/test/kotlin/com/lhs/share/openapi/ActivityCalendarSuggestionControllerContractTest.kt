@@ -86,7 +86,6 @@ class ActivityCalendarSuggestionControllerContractTest {
             AdminActivityCalendarSuggestionController(service, helper, authorization, mapper),
         ).setControllerAdvice(ActivityCalendarExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
         every { helper.requireUserId() } returns "owner"
-        every { authorization.hasAnyAdminCapability("owner") } returns true
         every { authorization.hasPermission("owner", AdminPermission.ACTIVITY_CALENDAR_WRITE) } returns false
     }
 
@@ -106,7 +105,6 @@ class ActivityCalendarSuggestionControllerContractTest {
             .andExpect(jsonPath("$.data.page").value(1)).andExpect(jsonPath("$.data.page_size").value(20))
             .andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.items[0].submission_note").value("私人"))
         verify {
-            authorization.hasAnyAdminCapability("owner")
             events wasNot io.mockk.Called
             transactions wasNot io.mockk.Called
         }

@@ -5,12 +5,9 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.calendar.request.CalendarPrivateItemRequestDecoder
-import com.lhs.share.hub.service.admin.AdminAuthorizationService
-import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
 import com.lhs.share.hub.service.calendar.CalendarPrivateItemService
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.format.annotation.DateTimeFormat
-import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -30,7 +27,6 @@ import java.time.LocalDate
 class CalendarPrivateItemController(
     private val service: CalendarPrivateItemService,
     private val helper: AuthenticationHelper,
-    private val authorization: AdminAuthorizationService,
 ) {
     @GetMapping
     fun list(
@@ -56,9 +52,5 @@ class CalendarPrivateItemController(
         @RequestParam(name = "expected_version") expectedVersion: Long,
     ) = success(service.delete(actor(), accountId, id, expectedVersion))
 
-    private fun actor(): String = helper.requireUserId().also {
-        if (!authorization.hasAnyAdminCapability(it)) {
-            throw ActivityCalendarApiException(HttpStatus.FORBIDDEN, "admin_testing_only", "活动日历暂仅向管理员开放")
-        }
-    }
+    private fun actor(): String = helper.requireUserId()
 }

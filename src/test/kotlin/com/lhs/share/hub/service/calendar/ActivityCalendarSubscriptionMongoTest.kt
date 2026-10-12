@@ -386,4 +386,20 @@ class ActivityCalendarSubscriptionMongoTest {
             assertEquals(manual, empty.manualCompleted)
         }
     }
+
+    @Test
+    fun `持续活动可订阅并跨期查询但不进入截止摘要`() {
+        val day = LocalDate.parse("2026-10-05")
+        val open = calendar.create(
+            "editor",
+            ActivityCalendarWriteRequest("如鸢", "持续活动", ActivityCalendarCategory.ACTIVITY, day.minusDays(1), null),
+        ).item.id
+        service.subscribe("owner", open, CalendarSubscribeRequest("account", null, true))
+        val later = service.list("owner", "account", day.plusYears(1), day.plusYears(1).plusDays(1), null)
+        assertEquals(listOf(open), later.items.map { it.eventId })
+        assertEquals(1, later.subscribedCount)
+        assertEquals(0, service.summary("owner", "account").totalPending)
+        assertEquals(1, service.summary("owner", "account").subscribedCount)
+        assertTrue(service.summary("owner", "account").items.isEmpty())
+    }
 }
