@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.calendar
 
+import com.lhs.share.hub.controller.calendar.request.CalendarCompletionRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarProgressRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarSubscribeRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarItem
@@ -74,6 +75,73 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
+    fun `completion is independent idempotent versioned and preserves unavailable history`() {
+        var stored = record().copy(
+            checklist = listOf(CalendarChecklistEntry("stable", " 未完成的清单 ", false)),
+            memoTitle = "本期目标",
+            memoNote = "保留\n备注",
+        )
+        every { repository.find("user", "account", "event") } answers { stored }
+        every { repository.save(any()) } answers {
+            firstArg<ActivityCalendarSubscription>().copy(version = stored.version!! + 1).also { stored = it }
+        }
+        val completed = service.completion("user", "event", CalendarCompletionRequest("account", 0, true))
+        assertTrue(completed.completed)
+        assertFalse(completed.checklist.single().completed)
+        assertEquals("保留\n备注", completed.memoNote)
+        assertEquals(" 未完成的清单 ", completed.checklist.single().title)
+        val repeated = service.completion("user", "event", CalendarCompletionRequest("account", 1, true))
+        assertEquals(completed.version, repeated.version)
+        verify(exactly = 1) { repository.save(any()) }
+        failure(409) { service.completion("user", "event", CalendarCompletionRequest("account", 0, false)) }
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(emptyList())
+        val restored = service.completion("user", "event", CalendarCompletionRequest("account", 1, false))
+        assertFalse(restored.completed)
+        assertEquals(completed.checklist, restored.checklist)
+        assertEquals(null, restored.item)
+        stored = stored.copy(subscribed = false)
+        failure(422) { service.completion("user", "event", CalendarCompletionRequest("account", 2, true)) }
+        every { accounts.findByUserIdAndAccountId("other", "account") } returns null
+        failure(404) { service.completion("other", "event", CalendarCompletionRequest("account", 2, true)) }
+    }
+
+    @Test
+    fun `summary includes long running activities counts expired and never infers checklist completion`() {
+        val events = listOf(
+            item("expired", day.minusDays(1)).copy(startDate = day.minusDays(5)),
+            item("long").copy(endDate = null),
+            item("soon"),
+            item("next").copy(startDate = day.plusDays(1)),
+            item("done"),
+        )
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(events)
+        every { repository.list("user", "account") } returns events.map {
+            record(it.id).copy(
+                manualCompleted = if (it.id == "done") true else null,
+                checklist = listOf(CalendarChecklistEntry("one", "全部子项完成", true)),
+            )
+        } + record("gone")
+        val summary = service.summary("user", "account")
+        assertEquals(5, summary.totalPending)
+        assertEquals(listOf("next", "soon", "long"), summary.items.map { it.eventId })
+        assertTrue(summary.items.none { it.completed })
+    }
+
+    @Test
+    fun `future reminder window uses the same 72 hour exclusive date end as calendar filtering`() {
+        val future = item("future", day.plusDays(3)).copy(startDate = day.plusDays(1))
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(future))
+        every { repository.list("user", "account") } returns listOf(record("future"))
+        assertTrue(service.summary("user", "account").items.isEmpty())
+        assertEquals(1, service.summary("user", "account").totalPending)
+        val boundary = future.copy(endTime = "12:00")
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(boundary))
+        assertEquals(listOf("future"), service.summary("user", "account").items.map { it.eventId })
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(boundary.copy(endTime = "12:01")))
+        assertTrue(service.summary("user", "account").items.isEmpty())
+    }
+
+    @Test
     fun `create cancellation and restoration preserve progress and use account fence`() {
         val created = service.subscribe("user", "event", CalendarSubscribeRequest("account", null, true))
         assertEquals(0L, created.version)
@@ -105,10 +173,10 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
-    fun `checklist computes completion normalizes names and preserves final deletion result`() {
+    fun `checklist normalizes names without inferring activity completion`() {
         val entries = listOf(CalendarChecklistEntry("one", "第一关", true))
         every { repository.find("user", "account", "event") } returns record().copy(checklist = entries)
-        assertTrue(service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries)).completed)
+        assertFalse(service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries)).completed)
         val added = service.progress(
             "user",
             "event",
@@ -125,7 +193,7 @@ class ActivityCalendarSubscriptionServiceTest {
         assertFalse(service.progress("user", "event", CalendarProgressRequest("account", 0, false, emptyList())).completed)
         failure(422) { service.progress("user", "event", CalendarProgressRequest("account", 0, true, entries)) }
         failure(422) { service.progress("user", "event", CalendarProgressRequest("account", 0, false, entries + entries)) }
-        assertTrue(
+        assertFalse(
             service.progress(
                 "user",
                 "event",
@@ -183,7 +251,7 @@ class ActivityCalendarSubscriptionServiceTest {
         every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(events)
         every { repository.list("user", "account") } returns events.map { record(it.id) } + record("gone")
         val result = service.summary("user", "account")
-        assertEquals(5, result.totalPending)
+        assertEquals(6, result.totalPending)
         assertEquals(listOf("event1", "event2", "event3"), result.items.map { it.eventId })
         assertEquals(6, result.subscribedCount)
     }
@@ -193,7 +261,8 @@ class ActivityCalendarSubscriptionServiceTest {
         val exact = item().copy(startTime = "10:00", endTime = "12:00", endDate = day)
         every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(exact))
         every { repository.list("user", "account") } returns listOf(record())
-        assertEquals(0, service.summary("user", "account").totalPending)
+        assertEquals(1, service.summary("user", "account").totalPending)
+        assertTrue(service.summary("user", "account").items.isEmpty())
         failure(422) { service.subscribe("user", "event", CalendarSubscribeRequest("account", null, true)) }
         val before =
             ActivityCalendarSubscriptionService(
@@ -214,7 +283,8 @@ class ActivityCalendarSubscriptionServiceTest {
                 transaction,
                 Clock.fixed(Instant.parse("2026-10-05T16:00:00Z"), ZoneOffset.UTC),
             )
-        assertEquals(0, nextDay.summary("user", "account").totalPending)
+        assertEquals(1, nextDay.summary("user", "account").totalPending)
+        assertTrue(nextDay.summary("user", "account").items.isEmpty())
     }
 
     @Test
@@ -224,10 +294,13 @@ class ActivityCalendarSubscriptionServiceTest {
         every { repository.list("user", "account") } returns
             listOf(
                 record("future"),
-                record("done").copy(completed = true, checklist = listOf(CalendarChecklistEntry("done", "完成", true))),
+                record(
+                    "done",
+                ).copy(completed = true, manualCompleted = true, checklist = listOf(CalendarChecklistEntry("done", "完成", true))),
                 record("gone"),
             )
-        assertEquals(0, service.summary("user", "account").totalPending)
+        assertEquals(2, service.summary("user", "account").totalPending)
+        assertEquals(listOf("future"), service.summary("user", "account").items.map { it.eventId })
         every { repository.find("user", "account", "gone") } returns record("gone")
         assertFalse(service.subscribe("user", "gone", CalendarSubscribeRequest("account", 0, false)).subscribed)
         failure(422) { service.progress("user", "gone", CalendarProgressRequest("account", 0, true, emptyList())) }
@@ -317,7 +390,7 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
-    fun `manual true and false are historical across new and old client writes`() {
+    fun `manual true and false govern activity completion across new and old checklist writes`() {
         val pending = listOf(CalendarChecklistEntry("old-id", "待办", false))
         listOf(true, false).forEach { manual ->
             var stored = record().copy(checklist = pending)
@@ -327,21 +400,21 @@ class ActivityCalendarSubscriptionServiceTest {
                 firstArg<ActivityCalendarSubscription>().copy(version = stored.version!! + 1).also { stored = it }
             }
             val saved = service.progress("user", "event", CalendarProgressRequest("account", 0, manual, pending, manualCompleted = manual))
-            assertFalse(saved.completed)
+            assertEquals(manual, saved.completed)
             assertEquals(manual, saved.manualCompleted)
             val allDone = pending.map { it.copy(completed = true) }
             val oldClient = service.progress("user", "event", CalendarProgressRequest("account", saved.version, false, allDone))
-            assertTrue(oldClient.completed)
+            assertEquals(manual, oldClient.completed)
             assertEquals(manual, stored.manualCompleted)
-            assertEquals(0, service.summary("user", "account").totalPending)
-            assertTrue(service.list("user", "account", day, day.plusDays(7), null).items.single().completed)
+            assertEquals(if (manual) 0 else 1, service.summary("user", "account").totalPending)
+            assertEquals(manual, service.list("user", "account", day, day.plusDays(7), null).items.single().completed)
             val cancelled = service.subscribe("user", "event", CalendarSubscribeRequest("account", oldClient.version, false))
             val restored = service.subscribe("user", "event", CalendarSubscribeRequest("account", cancelled.version, true))
             assertEquals(manual, restored.manualCompleted)
             val deleted = service.progress("user", "event", CalendarProgressRequest("account", restored.version, false, emptyList()))
             val added = service.progress("user", "event", CalendarProgressRequest("account", deleted.version, false, pending))
-            assertFalse(deleted.completed)
-            assertFalse(added.completed)
+            assertEquals(manual, deleted.completed)
+            assertEquals(manual, added.completed)
             failure(409) {
                 service.progress("user", "event", CalendarProgressRequest("account", 0, false, pending, manualCompleted = !manual))
             }
@@ -350,7 +423,7 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
-    fun `legacy completion never overrides checklist on reads or legacy memo writes`() {
+    fun `ambiguous legacy checklist and completion never become manual activity evidence`() {
         val done = listOf(CalendarChecklistEntry("stable-id", "旧待办", true))
         val cases = listOf(
             record().copy(completed = true),
@@ -360,7 +433,7 @@ class ActivityCalendarSubscriptionServiceTest {
         )
         cases.forEach { legacy ->
             every { repository.find("user", "account", "event") } returns legacy
-            val expected = legacy.checklist.isNotEmpty() && legacy.checklist.all { it.completed }
+            val expected = false
             val read = service.get("user", "account", "event")
             assertEquals(expected, read.completed)
             assertEquals(null, read.manualCompleted)
@@ -382,13 +455,13 @@ class ActivityCalendarSubscriptionServiceTest {
                     manualCompleted = expected,
                 ),
             )
-            assertEquals(!expected, frozen.completed)
+            assertEquals(expected, frozen.completed)
             assertEquals(expected, frozen.manualCompleted)
         }
     }
 
     @Test
-    fun `checklist mode preserves every historical field while all entry states drive reminders`() {
+    fun `checklist mode preserves manual activity state and history across all entry states`() {
         listOf(true, false).forEach { manual ->
             var stored = record().copy(completed = true, manualCompleted = manual, memoTitle = "旧标题", memoNote = "备注\n原样")
             every { repository.find("user", "account", "event") } answers { stored }
@@ -404,7 +477,7 @@ class ActivityCalendarSubscriptionServiceTest {
                     CalendarProgressRequest("account", stored.version!!, false, entries, progressMode = "checklist"),
                 )
                 assertEquals(entries, saved.checklist)
-                assertEquals(entries.isNotEmpty() && entries.all { it.completed }, saved.completed)
+                assertEquals(manual, saved.completed)
                 assertEquals("旧标题", stored.memoTitle)
                 assertEquals("备注\n原样", stored.memoNote)
                 assertTrue(stored.completed)

@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.calendar
 
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteRequest
+import com.lhs.share.hub.controller.calendar.request.CalendarCompletionRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarProgressRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarSubscribeRequest
 import com.lhs.share.hub.repository.ActivityCalendarRepository
@@ -130,6 +131,56 @@ class ActivityCalendarSubscriptionMongoTest {
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `manual completion Mongo CAS preserves drafts history and competing device updates`() {
+        val subscribed = service.subscribe("owner", eventId, CalendarSubscribeRequest("account", null, true))
+        val entries = listOf(CalendarChecklistEntry("stable", " 未勾选子项 ", false))
+        val original = repository.find("owner", "account", eventId)!!
+        val saved = repository.save(original.copy(checklist = entries, memoTitle = "本期目标", memoNote = "原样\n保留"))
+        val version = saved.version!!
+        val results = concurrent(
+            listOf(
+                { service.completion("owner", eventId, CalendarCompletionRequest("account", version, true)) },
+                {
+                    service.progress(
+                        "owner",
+                        eventId,
+                        CalendarProgressRequest(
+                            "account",
+                            version,
+                            false,
+                            entries.map {
+                                it.copy(completed = true)
+                            },
+                            progressMode = "checklist",
+                        ),
+                    )
+                },
+            ),
+        )
+        assertEquals(1, results.count { it.isSuccess })
+        val winner = repository.find("owner", "account", eventId)!!
+        assertEquals(version + 1, winner.version)
+        assertEquals("原样\n保留", winner.memoNote)
+        assertEquals(" 未勾选子项 ", winner.checklist.single().title)
+        assertEquals(!winner.isCompleted(), winner.checklist.single().completed)
+        val completed = service.completion("owner", eventId, CalendarCompletionRequest("account", winner.version!!, true))
+        assertTrue(completed.completed)
+        assertEquals(
+            completed.version,
+            service.completion("owner", eventId, CalendarCompletionRequest("account", completed.version, true)).version,
+        )
+        assertThrows(ActivityCalendarApiException::class.java) {
+            service.completion("owner", eventId, CalendarCompletionRequest("account", subscribed.version, false))
+        }
+        assertThrows(ActivityCalendarApiException::class.java) {
+            service.completion("other", eventId, CalendarCompletionRequest("account", completed.version, false))
+        }
+        val restored = service.completion("owner", eventId, CalendarCompletionRequest("account", completed.version, false))
+        assertFalse(restored.completed)
+        assertEquals(winner.checklist, restored.checklist)
     }
 
     @Test
@@ -281,7 +332,7 @@ class ActivityCalendarSubscriptionMongoTest {
         assertEquals(winner.memoTitle, saved.memoTitle)
         assertEquals(winner.memoNote, saved.memoNote)
         assertEquals(winner.manualCompleted, saved.manualCompleted)
-        assertFalse(saved.completed)
+        assertEquals(winner.manualCompleted == true, saved.completed)
         assertEquals(1L, saved.version)
         assertEquals("本期备忘", service.get("owner", "account", otherEvent).memoTitle)
         assertEquals("", service.get("owner", "account-b", eventId).memoNote)
@@ -312,7 +363,7 @@ class ActivityCalendarSubscriptionMongoTest {
             collection.updateOne(filter, Document("$" + "unset", Document("manualCompleted", "")))
             val before = collection.find(filter).first()!!
             val legacy = service.get("owner", "account", eventId)
-            val effective = entries.isNotEmpty() && entries.all { it.completed }
+            val effective = false
             assertEquals(effective, legacy.completed)
             assertNull(legacy.manualCompleted)
             assertEquals(before, collection.find(filter).first())
@@ -336,9 +387,9 @@ class ActivityCalendarSubscriptionMongoTest {
                     manualCompleted = effective,
                 ),
             )
-            assertEquals(!effective, frozen.completed)
+            assertEquals(effective, frozen.completed)
             assertEquals(effective, collection.find(filter).first()!!.getBoolean("manualCompleted"))
-            assertEquals(!effective, service.get("owner", "account", eventId).completed)
+            assertEquals(effective, service.get("owner", "account", eventId).completed)
             val oldClient = service.progress("owner", eventId, CalendarProgressRequest("account", frozen.version, !effective, emptyList()))
             assertFalse(oldClient.completed)
             assertEquals(effective, repository.find("owner", "account", eventId)!!.manualCompleted)
@@ -359,7 +410,7 @@ class ActivityCalendarSubscriptionMongoTest {
                 eventId,
                 CalendarProgressRequest("account", saved.version!!, false, entries, progressMode = "checklist"),
             )
-            assertEquals(!manual, result.completed)
+            assertEquals(manual, result.completed)
             val stored = repository.find("owner", "account", eventId)!!
             assertTrue(stored.completed)
             assertEquals(manual, stored.manualCompleted)
@@ -381,14 +432,14 @@ class ActivityCalendarSubscriptionMongoTest {
                 eventId,
                 CalendarProgressRequest("account", result.version, false, emptyList(), progressMode = "checklist"),
             )
-            assertFalse(empty.completed)
+            assertEquals(manual, empty.completed)
             assertTrue(empty.legacyCompleted)
             assertEquals(manual, empty.manualCompleted)
         }
     }
 
     @Test
-    fun `持续活动可订阅并跨期查询但不进入截止摘要`() {
+    fun `持续活动可订阅跨期查询并进入今日待办摘要`() {
         val day = LocalDate.parse("2026-10-05")
         val open = calendar.create(
             "editor",
@@ -398,8 +449,8 @@ class ActivityCalendarSubscriptionMongoTest {
         val later = service.list("owner", "account", day.plusYears(1), day.plusYears(1).plusDays(1), null)
         assertEquals(listOf(open), later.items.map { it.eventId })
         assertEquals(1, later.subscribedCount)
-        assertEquals(0, service.summary("owner", "account").totalPending)
+        assertEquals(1, service.summary("owner", "account").totalPending)
         assertEquals(1, service.summary("owner", "account").subscribedCount)
-        assertTrue(service.summary("owner", "account").items.isEmpty())
+        assertEquals(listOf(open), service.summary("owner", "account").items.map { it.eventId })
     }
 }
