@@ -18,6 +18,7 @@ import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.StarCompletion
 import com.lhs.share.hub.repository.entity.StarCompletionChange
+import com.lhs.share.hub.repository.entity.StarCompletionState
 import com.lhs.share.hub.repository.entity.StarStateCurrent
 import com.lhs.share.hub.repository.entity.StarStateExperience
 import com.lhs.share.hub.repository.entity.snapshot
@@ -192,7 +193,7 @@ class StarCompletionService(
                             changes = request.stars.map { StarCompletionChange(it.instanceId, it.currentLevel!!, it.targetLevel!!) },
                             experienceConsumed = StarStateExperience(used.orange, used.purple, used.white),
                             bottlesConsumed = required, bottleBalances = balances, inventoryRevision = nextRevision.revision,
-                            state = saved, createdAt = now,
+                            state = StarCompletionState(saved), createdAt = now,
                         ),
                     )
                 },
