@@ -142,6 +142,26 @@ class ActivityCalendarSubscriptionServiceTest {
     }
 
     @Test
+    fun `subscribed recruitment joins current public UP names without reading personal recruitment or writing`() {
+        val id = "recruitment:pool"
+        val pool = item(id).copy(
+            sourceType = ActivityCalendarSourceType.RECRUITMENT_POOL,
+            sourceRef = "pool",
+            category = ActivityCalendarCategory.RECRUITMENT,
+            upAgentNames = listOf("甲", "乙"),
+        )
+        every { repository.list("user", "account") } returns listOf(record(id))
+        every { calendar.publicItems("如鸢", null, null, null) } returns ActivityCalendarResponse(listOf(pool))
+        val result = service.list("user", "account", day, day.plusDays(7), null)
+        assertEquals(pool, result.items.single().item)
+        assertEquals(listOf("甲", "乙"), result.items.single().item!!.upAgentNames)
+        verify(exactly = 0) {
+            repository.save(any())
+            accounts.fenceRecruitmentWrite(any(), any(), any())
+        }
+    }
+
+    @Test
     fun `list joins current public data and isolates unavailable sources without writes`() {
         every { repository.list("user", "account") } returns listOf(record(), record("gone"), record("wrong").copy(game = "代号鸢"))
         every { calendar.publicItems("如鸢", null, null, null) } returns

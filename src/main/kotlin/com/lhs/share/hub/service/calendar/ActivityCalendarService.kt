@@ -71,6 +71,12 @@ class ActivityCalendarService(
                         "recruitment:${pool.poolId}", ActivityCalendarSourceType.RECRUITMENT_POOL, pool.poolId,
                         pool.game, pool.name, ActivityCalendarCategory.RECRUITMENT, start, end, sourceUrl = pool.sourceUrl,
                         poolType = pool.poolType,
+                        upAgentNames = if (pool.upStatus in setOf("verified", "partial")) {
+                            pool.upAgents.filter { it.active && !it.operatorId.isNullOrBlank() }
+                                .map { it.name.trim() }.filter { it.isNotEmpty() }.distinct()
+                        } else {
+                            emptyList()
+                        },
                     ),
                     readOnly = true, enabled = true, version = null, sourceNote = pool.sourceNote,
                     createdBy = null, createdAt = null, updatedBy = pool.updatedBy, updatedAt = pool.updatedAt,
