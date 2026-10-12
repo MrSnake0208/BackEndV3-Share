@@ -40,6 +40,31 @@ class ActivityCalendarSubscriptionControllerContractTest {
     }
 
     @Test
+    fun `completion command rejects coercion and changes only authenticated account state`() {
+        listOf(
+            """{"account_id":"a","expected_version":0,"completed":"true"}""",
+            """{"account_id":"a","expected_version":null,"completed":false}""",
+            """{"account_id":"a","expected_version":0,"completed":true,"checklist":[]}""",
+            """{"account_id":"a","expected_version":0,"completed":null}""",
+            """{"account_id":"a","expected_version":0,"completed":true,"user_id":"other"}""",
+        ).forEach { body ->
+            mvc.perform(put("$path/completion").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify { service wasNot io.mockk.Called }
+        every { service.completion("owner", "recruitment:pool-one", any()) } returns
+            CalendarSubscriptionResponse("recruitment:pool-one", 1, true, true, emptyList(), null, manualCompleted = true)
+        mvc.perform(
+            put("$path/completion").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"account_id":"a","expected_version":0,"completed":true}"""),
+        ).andExpect(status().isOk).andExpect(jsonPath("$.data.completed").value(true))
+            .andExpect(jsonPath("$.data.manual_completed").value(true))
+        verify {
+            service.completion("owner", "recruitment:pool-one", match { it.accountId == "a" && it.completed && it.expectedVersion == 0L })
+        }
+    }
+
+    @Test
     fun `strict request rejects server identity unknown fields missing version and coercion`() {
         listOf(
             """{"account_id":"a","subscribed":true}""",
@@ -91,6 +116,7 @@ class ActivityCalendarSubscriptionControllerContractTest {
             get("/v1/activity-calendar/subscriptions/summary").param("account_id", "a"),
             put(path).contentType(MediaType.APPLICATION_JSON).content("{}"),
             put("$path/progress").contentType(MediaType.APPLICATION_JSON).content("{}"),
+            put("$path/completion").contentType(MediaType.APPLICATION_JSON).content("{}"),
         )
             .forEach { mvc.perform(it).andExpect(status().isUnauthorized) }
         verify { service wasNot io.mockk.Called }

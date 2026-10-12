@@ -45,6 +45,10 @@ class ActivityCalendarSubscriptionController(
     fun subscribe(@PathVariable eventId: String, @RequestBody body: JsonNode) =
         success(service.subscribe(actor(), eventId, CalendarSubscriptionRequestDecoder.subscribe(body)))
 
+    @PutMapping("/{eventId}/completion", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun completion(@PathVariable eventId: String, @RequestBody body: JsonNode) =
+        success(service.completion(actor(), eventId, CalendarSubscriptionRequestDecoder.completion(body)))
+
     @PutMapping("/{eventId}/progress", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun progress(@PathVariable eventId: String, @RequestBody body: JsonNode) =
         success(service.progress(actor(), eventId, CalendarSubscriptionRequestDecoder.progress(body)))

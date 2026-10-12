@@ -229,6 +229,7 @@ class ActivityCalendarSecurityTest {
             get("$path/event").param("account_id", "a"),
             put("$path/event"),
             put("$path/event/progress"),
+            put("$path/event/completion"),
         ).forEach {
             mvc.perform(it.contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized)
         }
@@ -241,6 +242,10 @@ class ActivityCalendarSecurityTest {
             .`when`(betaService).requireAccess("owner")
         mvc.perform(
             get("$path/summary").param("account_id", "a").header("Authorization", "Bearer subscription-token"),
+        ).andExpect(status().isForbidden)
+        mvc.perform(
+            put("$path/event/completion").header("Authorization", "Bearer subscription-token")
+                .contentType(MediaType.APPLICATION_JSON).content("""{"account_id":"a","expected_version":0,"completed":true}"""),
         ).andExpect(status().isForbidden)
         verifyNoInteractions(subscriptions)
         reset(betaService)

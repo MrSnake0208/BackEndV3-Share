@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.calendar
 
+import com.lhs.share.hub.controller.calendar.request.CalendarCompletionRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarProgressRequest
 import com.lhs.share.hub.controller.calendar.request.CalendarSubscribeRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarItem
@@ -59,16 +60,17 @@ class ActivityCalendarSubscriptionService(
         val records = resolved(userId, account(userId, accountId))
         val now = clock.instant()
         val day = today()
-        val pending = records.filter { record ->
+        val pending = records.filter { !it.completed }
+        val reminders = pending.filter { record ->
             val item = record.item
-            item != null && item.endDate != null && !record.completed && started(item, now, day) && !ended(item, now, day) &&
-                (item.endAt?.let { it <= now.plus(7, ChronoUnit.DAYS) } ?: (item.endDate <= day.plusDays(7)))
+            item != null && !ended(item, now, day) &&
+                (started(item, now, day) || deadline(item) <= now.plus(3, ChronoUnit.DAYS))
         }.sortedWith(
             compareBy<CalendarSubscriptionResponse> {
-                it.item!!.endAt ?: checkNotNull(it.item.endDate).plusDays(1).atStartOfDay(zone).toInstant()
+                deadline(checkNotNull(it.item))
             }.thenBy { it.eventId },
         )
-        return CalendarSubscriptionSummaryResponse(pending.take(3), pending.size, records.size)
+        return CalendarSubscriptionSummaryResponse(reminders.take(3), pending.size, records.size)
     }
 
     fun get(userId: String, accountId: String, eventId: String): CalendarSubscriptionResponse {
@@ -98,6 +100,23 @@ class ActivityCalendarSubscriptionService(
             updatedAt = now,
         )
         response(repository.save(next), item)
+    }
+
+    fun completion(userId: String, eventId: String, request: CalendarCompletionRequest): CalendarSubscriptionResponse = write {
+        val owner = account(userId, request.accountId)
+        fence(owner)
+        val current = find(userId, owner.accountId, eventId)
+        if (current.version != request.expectedVersion) throw calendarConflict()
+        if (!current.subscribed || current.game != owner.game) throw calendarInvalid("该订阅当前不可编辑")
+        val item = sources(owner)[eventId]
+        val next = if (current.manualCompleted == request.completed) {
+            current
+        } else {
+            repository.save(
+                current.copy(manualCompleted = request.completed, updatedAt = clock.instant()),
+            )
+        }
+        response(next, item)
     }
 
     fun progress(userId: String, eventId: String, request: CalendarProgressRequest): CalendarSubscriptionResponse = write {
@@ -192,6 +211,9 @@ class ActivityCalendarSubscriptionService(
 
     private fun started(item: ActivityCalendarItem, now: Instant, day: LocalDate): Boolean =
         item.startAt?.let { it <= now } ?: (item.startDate <= day)
+
+    private fun deadline(item: ActivityCalendarItem): Instant =
+        item.endAt ?: item.endDate?.plusDays(1)?.atStartOfDay(zone)?.toInstant() ?: Instant.MAX
 
     private fun ended(item: ActivityCalendarItem, now: Instant, day: LocalDate): Boolean =
         item.endAt?.let { it <= now } ?: (item.endDate?.let { it < day } ?: false)

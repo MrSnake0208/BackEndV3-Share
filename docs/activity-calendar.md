@@ -253,18 +253,19 @@ integrationTest 只使用 TestMongo 自有、可销毁的副本集容器，验�
 | 方法与路径（以下相对subscriptions） | 契约 |
 | --- | --- |
 | GET 根路径 | account_id必填；可选from/to/category；默认今天到90天后，范围差不超过100天。返回items、unavailable_items、subscribed_count |
-| GET /summary | account_id必填；完整集合中筛选已开始、未结束、未完成且7天内截止，再排序取3项；返回items、total_pending、subscribed_count |
+| GET /summary | account_id必填；返回全部未完成订阅数，及今日进行中/近72小时截止（与“近3天结束”同一时间边界）优先的最多3项（详见下文）；返回items、total_pending、subscribed_count |
 | GET /{eventId} | account_id必填；包括已取消历史；无记录404 subscription_not_found |
 | PUT /{eventId} | account_id、expected_version、subscribed；首次创建expected_version=null，后续使用读取的版本 |
+| PUT /{eventId}/completion | account_id、expected_version、completed；只更新本账号整期完成，保留清单/备忘，旧版本409，相同版本同状态不写入 |
 | PUT /{eventId}/progress | account_id、expected_version、completed、checklist；可选progress_mode、memo_title、memo_note、manual_completed；新checklist模式仅替换清单，旧请求保留兼容（见文末） |
 
-请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。未传manual_completed的旧协议：非空清单要求completed=false；覆盖字段缺失时响应整体完成由所有项目计算，空清单响应completed=false，旧completed仅保留为历史。历史覆盖字段仅保留，响应完成态统一取非空清单全部勾选（见文末待办契约）。新项目默认未完成是UI默认值，接口允许用户主动勾选的新项目。
+请求严格拒绝缺失/未知字段、错误类型、负数/溢出版本；缺失必需查询参数与输入不合法返回422。checklist最多50项，每项id/title/completed必填；id为1–80位字母数字下划线或连字符且不重复，title去首尾空白后1–80字。未传manual_completed的旧协议仍要求非空清单completed=false，响应活动级完成统一按manualCompleted明确true判断。Checklist与旧completed不再推导整期完成；详见下文兼容契约。新项目默认未勾选，允许主动勾选。
 
 私人备忘字段（2026-10-09）：响应使用snake_case `memo_title`（默认“本期备忘”）及 `memo_note`（默认空串），Mongo沿用camelCase `memoTitle`/`memoNote`，实体默认值兼容历史缺字段记录；读取不触发写入或迁移。PUT省略任一新字段时保留服务器现值；显式null/错误类型拒绝422，memo_title空白拒绝422、原始文本最多60字、保存时trim；memo_note原样多行纯文本最多1000字，空字符串表示清空。旧客户端继续保存checklist/completed，不会抹掉新客户端备忘。标题与备注不参与isCompleted、仅未完成筛选或首页摘要；所有字段同一次@Version/CAS写入。取消/恢复保留整份备忘，权属仍为(userId,accountId,eventId)。先升级后端再启用发送备忘字段的前端，旧后端严格decoder会拒绝新字段。
 
 存储集合 `activity_calendar_subscriptions`，唯一键(userId,accountId,eventId)，使用@Version和expected_version防覆盖；重复创建、旧版本和事务写冲突返回409。取消只切换subscribed，保留进度；列表只包含活跃订阅，详情可读取已取消记录用于恢复。来源只保存稳定eventId，手工活动与 `recruitment:<poolId>` 通过既有公开投影批量解析，读请求不写库，无活动资料复制或管理备注泄露。
 
-有效来源截止后可编辑已订阅进度及取消，不可新增/恢复；停用/消失/变更游戏后item=null，进入unavailable_items，不提醒、不修改清单，但可取消。公开投影增加可空的start_at/end_at，精确截止采用instant排他边界；日期模式按Asia/Shanghai日历日截止，保留原公开日期统计。
+有效来源截止后可编辑已订阅进度及取消，不可新增/恢复；停用/消失/变更游戏后item=null，进入unavailable_items，不进入今日提醒、不修改清单，但可取消或管理活动完成。公开投影增加可空的start_at/end_at，精确截止采用instant排他边界；日期模式按Asia/Shanghai日历日截止，保留原公开日期统计。
 
 订阅及进度写入复用Hub事务和子账号fence。账号删除在同一事务中清理全部订阅（包括取消记录），并发写入不能留下孤儿。存在订阅历史时更换游戏返回409 activity_calendar_game_locked，重命名不受影响。无历史账号保持原行为。
 
@@ -286,40 +287,27 @@ Mongo测试必须使用项目TestMongo管理的自有临时容器，不连接已
 
 第二条要求 Docker，由测试独占临时容器，绝不能改用开发/生产 Mongo。新增测试覆盖字段缺失的旧文档、枚举 BSON 往返、原始建议/采纳快照及公开响应、独立记录计数；既有导入隔离测试覆盖重复、并发与预览过期。不会因为 Docker 未运行而跳过有效断言。
 
-## 一个活动、一份待办清单（2026-10-09）
+## 活动级完成与Checklist兼容（2026-10-12）
 
-活动待办是唯一新录入内容，三视图复用 CalendarSubscriptionControls。取消独立整期完成开关与标题/文字备注输入；添加待办即聚焦，最多50条、标题1–80字、稳定唯一ID。空清单显示“暂无待办”，非空全部勾选才显示“待办全部完成”，其余显示X/Y。订阅不要求待办。修改前后的卡片摘要与编辑进度一致；筛选在保存或确认放弃后更新，避免隐藏草稿。
+`completed` 响应只取 `manualCompleted == true`，与Checklist完全独立。Mongo字段/JSON字段仍为manualCompleted/manual_completed，不新增集合、唯一索引或批量迁移；缺失/null/false均未完成，旧completed与全勾选清单不构成整期完成证据。保留明确历史manualCompleted=true、全部旧备注、清单ID/标题/顺序/勾选。新订阅默认未完成。
 
-| 数据或请求 | 完成态 / 保存语义 |
-| --- | --- |
-| 空checklist，旧completed/manual任意值 | completed=false；全部订阅保留；不进入“有未完成待办”；满足原日期条件则首页提醒 |
-| 部分勾选，旧manual=true | completed=false；待办筛选与首页提醒纳入 |
-| 全部勾选，旧manual=false | completed=true；待办筛选与首页提醒排除 |
-| 新请求progress_mode="checklist" | completed必须false，memo_title/memo_note/manual_completed不得同时提供；仅更新checklist和版本/时间，不修改旧字段 |
-| 旧请求省略progress_mode | 继续按旧规则验证/保存已提供字段；省略的备忘/manual保留；返回completed一律按清单衍生 |
-| 未识别、null或错误类型progress_mode | 422，不静默忽略、不降级重试 |
+`PUT /v1/activity-calendar/subscriptions/{eventId}/completion` 严格接受 `{account_id, expected_version, completed}`；completed必须Boolean，拒绝null、未知字段、用户ID、缺失/溢出版本。JWT/Beta门禁与账号归属、Hub事务、账号fence和@Version CAS沿用。只有活跃订阅、相同账号游戏可修改；有效/过期/不可用来源都允许管理完成历史。只改manualCompleted与更新时间/版本，不覆盖Checklist或备忘。相同版本、相同已保存状态为无写入no-op；旧版本包括旧版本重试一律409，须重新读取后确认，避免盲目覆盖其它设备更新。
 
-响应completed是非空checklist全勾选的衍生结果；Mongo completed保留为历史字段，新增响应legacy_completed用于只读历史说明；manual_completed仍原样返回，但不影响新状态。加载不写库、不批量迁移、不删除字段或改唯一索引。清单模式保留未改动项目的原始title/id/顺序/勾选；新编辑标题仍按原规则去首尾空白。旧客户端的显式历史字段编辑继续兼容，不会因省略字段误删内容。
+旧 `/progress` 协议继续校验并保存显式历史字段；省略manual_completed保持现值。`progress_mode="checklist"` 时completed必须false，禁止同时提供memo_title/memo_note/manual_completed，仅替换清单，保留其它历史字段。未改动子项标题原样保留，新/改名子项trim；最多50项，稳定唯一ID、名称边界不变。清单全勾选/清空/删除不改变活动级完成。
 
-旧自定义标题（默认“本期备忘”不展示）、非空备注和旧完成标记在“查看旧备忘内容（历史数据）”内折叠只读；无历史内容不显示。纯文本插值，保留换行、不执行HTML。新编辑器不透传旧字段，避免旧客户端覆盖值影响TODO保存；completed/manual字段只能作为历史信息读取。
+`GET /summary` 一次读取活跃订阅并批量join公共目录。total_pending是所有未完成订阅数，包含过期或不可用；subscribed_count是全部活跃订阅数。items最多3项，仅可用未结束且（已开始或近72小时截止（与“近3天结束”同一时间边界））的未完成活动，按精确截止/上海日期截止排序，长期活动最后；item数不代表总待办数。精确时间采用instant排他边界，日期模式保留上海日历日结束语义。只读，不发通知、不写库。
 
-“有未完成待办”仅收录非空且存在未勾选项，包括不可用来源的只读订阅；全部视图保留空订阅。首页“我的订阅 · 即将截止”使用原已开始、未截止、7天内截止条件，纳入空清单与部分清单，先计算total_pending再取3项；计数单位为活动。来源不可用不提醒，截止后已订阅的有效来源仍可编辑，不能新增/恢复已截止订阅。
+完成不改变公共目录、订阅关系或其它账号。取消后历史不删，恢复保留完成/清单/备忘；新档期须使用新eventId（手工ID或recruitment:poolId），同ID日期修正不会重置状态。账号删除仍事务级清理订阅并防孤儿；不可用item=null时不泄露非公共数据，仅返回当前用户历史。
 
-用户×游戏账号×活动期次隔离、权限、CAS/expected_version/409、账号fence、迟到响应隔离、dirty阻断后台刷新和午夜更新均沿用。新增空行即dirty；保存中禁重复提交；删除确认仅影响当前活动草稿；收起/切视图筛选/账号/路由/取消订阅均保留已有确认。409、5xx、网络结果不明保留草稿并阻断继续保存，安全读取最新状态后还须确认替换；拒绝替换保留草稿。普通422可修正后重试。
+升级先后端再前端。回退前端保留存储，回退旧后端可能重新按清单解释completed；不建议只回退后端语义。无数据库迁移或回填。
 
-升级顺序：先升级兼容后端，再前端。旧后端严格decoder会拒绝progress_mode，显示失败并保留草稿，不绕过协议。此任务不部署、不重启服务。
-
-最小定向验证（分别在前/后端仓库）：
+最小验证（cwd BackEndV3-Share；integrationTest仅使用TestMongo独占临时容器）：
 
 ```bash
-node --test test/activityCalendarSubscriptions.test.js
-npx --no-install vitest run behavior/activityCalendarSubscriptions.spec.js behavior/activityCalendarSubscriptionApi.spec.js behavior/activityCalendarSubscriptionIdentity.spec.js behavior/todayCalendarSubscriptions.spec.js behavior/activityCalendarViews.spec.js behavior/activityCalendarFilters.spec.js
-npm run test:static
 ./gradlew test --tests '*ActivityCalendarSubscriptionServiceTest' --tests '*ActivityCalendarSubscriptionControllerContractTest' --tests '*ActivityCalendarSecurityTest' --console=plain
 ./gradlew integrationTest --tests '*ActivityCalendarSubscriptionMongoTest' --console=plain
 ```
 
-Mongo仅允许TestMongo自有临时容器；真实手机软键盘与Safari仍须人工检查。测试结果以本任务verification.md为准。
 ## 私人日历事项 API（2026-10-10）
 
 独立集合 `activity_calendar_private_items` 存储随机 `pci_UUID`、服务端定义的 user/account/game、title/date/endDate/time/note、`@Version`、createdAt/updatedAt（毫秒精度）。不写入公共事件/订阅集合，不进入导入、建议审核、公开聚合、RSS或分享URL，无迁移。索引 `(userId, accountId, game, date, _id)` 支持本人账号日期查询，`_id` 自带唯一约束。`date` 继续存开始日，`endDate` 存结束日；旧文档缺失/null时有效结束日等于date，读取不回写。保留原索引，无全量迁移；重叠查询使用owner/game索引前缀和date上界，再过滤endDate，不新增索引（超长历史积累时按实际explain评估）。

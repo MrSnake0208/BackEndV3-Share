@@ -5,6 +5,7 @@ import com.lhs.share.hub.repository.entity.CalendarChecklistEntry
 import com.lhs.share.hub.service.calendar.calendarInvalid
 
 data class CalendarSubscribeRequest(val accountId: String, val expectedVersion: Long?, val subscribed: Boolean)
+data class CalendarCompletionRequest(val accountId: String, val expectedVersion: Long, val completed: Boolean)
 data class CalendarProgressRequest(
     val accountId: String,
     val expectedVersion: Long,
@@ -17,6 +18,11 @@ data class CalendarProgressRequest(
 )
 
 object CalendarSubscriptionRequestDecoder {
+    fun completion(node: JsonNode): CalendarCompletionRequest {
+        fields(node, setOf("account_id", "expected_version", "completed"))
+        return CalendarCompletionRequest(string(node, "account_id"), checkNotNull(version(node, false)), boolean(node, "completed"))
+    }
+
     fun subscribe(node: JsonNode): CalendarSubscribeRequest {
         fields(node, setOf("account_id", "expected_version", "subscribed"))
         return CalendarSubscribeRequest(string(node, "account_id"), version(node, true), boolean(node, "subscribed"))
