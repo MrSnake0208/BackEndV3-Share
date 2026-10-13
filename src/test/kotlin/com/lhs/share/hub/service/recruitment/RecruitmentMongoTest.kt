@@ -46,6 +46,8 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 import org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Date
 import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -101,6 +103,7 @@ class RecruitmentMongoTest {
                 upAgents = listOf(RecruitmentUpAgent("catalog_p:up:A", "A")),
             ),
         )
+        template.insert(RecruitmentCatalogPool("catalog_d", "代号鸢", "合成代号鸢卡池", revision = 1))
         accounts.insert(SubAccount(userId = "u", accountId = "a", name = "A", game = "如鸢"))
         accounts.insert(SubAccount(userId = "u", accountId = "b", name = "B", game = "如鸢"))
     }
@@ -826,6 +829,7 @@ class RecruitmentMongoTest {
         val date = LocalDate.parse("2026-10-01")
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Kiritimati"))
+            template.save(catalogStore.find("catalog_p")!!.copy(startDate = date.minusDays(2), endDate = date.plusDays(2)))
             initialize()
             command(
                 "event_create",
@@ -848,6 +852,9 @@ class RecruitmentMongoTest {
             val rawSnapshot = rawEvent.get("poolSnapshot", org.bson.Document::class.java)
             assertEquals("2026-09-29", rawSnapshot["startDate"])
             assertEquals("2026-10-03", rawSnapshot["endDate"])
+            val rawCatalog = template.getCollection("recruitment_catalog").find(org.bson.Document("_id", "catalog_p")).first()!!
+            assertEquals("2026-09-29", rawCatalog["startDate"])
+            assertEquals("2026-10-03", rawCatalog["endDate"])
             val rawArchive = template.getCollection("recruitment_archives").find(org.bson.Document("accountId", "a")).first()!!
             assertEquals(
                 "2026-09-29",
@@ -859,11 +866,34 @@ class RecruitmentMongoTest {
             TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"))
             assertEquals(date, store.event("u", "a", "dated")!!.acquiredDate)
             assertEquals(date.minusDays(2), store.archive("u", "a")!!.pools.single().snapshot.startDate)
+            assertEquals(date.minusDays(2), catalogStore.find("catalog_p")!!.startDate)
             assertEquals(listOf("dated"), service.page("u", "a", "p", null, 10, date, date).items.map { it.eventId })
             assertTrue(service.page("u", "a", "p", null, 10, date.plusDays(1), date.plusDays(2)).items.isEmpty())
         } finally {
             TimeZone.setDefault(originalZone)
         }
+    }
+
+    @Test fun `date filtering pages mixed ISO and legacy BSON dates without rewriting unknown dates`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"old","agent_id":"catalog_p:up:A","pull_span":17,"acquired_date":"2026-10-01"},{"event_id":"iso","agent_id":"catalog_p:up:A","pull_span":17,"acquired_date":"2026-10-02"},{"event_id":"unknown","agent_id":"catalog_p:up:A","pull_span":17}]}""",
+        )
+        val date = LocalDate.of(2026, 10, 1)
+        val legacyDate = Date.from(date.atStartOfDay(ZoneId.systemDefault()).toInstant())
+        val events = template.getCollection("recruitment_events")
+        events.updateOne(org.bson.Document("eventId", "old"), org.bson.Document("\$set", org.bson.Document("acquiredDate", legacyDate)))
+        assertEquals(date, store.event("u", "a", "old")!!.acquiredDate)
+        assertEquals(listOf("old"), service.page("u", "a", "p", null, 10, date, date).items.map { it.eventId })
+        assertEquals(listOf("iso", "old"), service.page("u", "a", "p", null, 10, date, null).items.map { it.eventId })
+        assertEquals(listOf("old"), service.page("u", "a", "p", null, 10, null, date).items.map { it.eventId })
+        val first = service.page("u", "a", "p", null, 1, date, date.plusDays(1))
+        val second = service.page("u", "a", "p", first.nextCursor, 1, date, date.plusDays(1))
+        assertEquals(listOf("iso", "old"), (first.items + second.items).map { it.eventId })
+        assertNull(second.nextCursor)
+        assertEquals(legacyDate, events.find(org.bson.Document("eventId", "old")).first()!!["acquiredDate"])
+        assertNull(store.event("u", "a", "unknown")!!.acquiredDate)
     }
 
     @Test fun `account lifecycle SSE is emitted after commit and not after enclosing rollback`() {
