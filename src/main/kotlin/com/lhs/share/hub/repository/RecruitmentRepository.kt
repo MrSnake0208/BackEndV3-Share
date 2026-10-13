@@ -6,6 +6,7 @@ import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
 import org.bson.Document
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.data.convert.Jsr310Converters.LocalDateToDateConverter
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.aggregation.Aggregation
@@ -130,13 +131,16 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
         limit: Int,
         direction: Sort.Direction = Sort.Direction.DESC,
     ): List<RecruitmentEvent> {
-        val query = owner(userId, accountId).addCriteria(Criteria.where("deletedAt").`is`(null))
-        poolId?.let { query.addCriteria(Criteria.where("poolId").`is`(it)) }
+        val filters = mutableListOf(Criteria.where("deletedAt").`is`(null))
+        poolId?.let { filters += Criteria.where("poolId").`is`(it) }
         if (dateFrom != null || dateTo != null) {
             val date = Criteria.where("acquiredDate").ne(null)
             dateFrom?.let(date::gte)
             dateTo?.let(date::lte)
-            query.addCriteria(date)
+            val legacy = mutableListOf(Document("\$eq", listOf(Document("\$type", "\$acquiredDate"), "date")))
+            dateFrom?.let { legacy += Document("\$gte", listOf("\$acquiredDate", LocalDateToDateConverter.INSTANCE.convert(it))) }
+            dateTo?.let { legacy += Document("\$lt", listOf("\$acquiredDate", LocalDateToDateConverter.INSTANCE.convert(it.plusDays(1)))) }
+            filters += Criteria().orOperator(date, Criteria.where("\$expr").`is`(Document("\$and", legacy)))
         }
         if (afterOrder != null && afterId != null) {
             val orderBoundary = Criteria.where("sortOrder")
@@ -148,8 +152,9 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
                 orderBoundary.lt(afterOrder)
                 idBoundary.lt(afterId)
             }
-            query.addCriteria(Criteria().orOperator(orderBoundary, idBoundary))
+            filters += Criteria().orOperator(orderBoundary, idBoundary)
         }
+        val query = owner(userId, accountId).addCriteria(Criteria().andOperator(filters))
         return template.find(query.with(Sort.by(direction, "sortOrder", "eventId")).limit(limit), RecruitmentEvent::class.java)
     }
 

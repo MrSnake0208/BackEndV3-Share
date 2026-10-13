@@ -2,11 +2,10 @@ package com.lhs.share.hub.repository.entity
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import org.springframework.data.annotation.Id
+import org.springframework.data.convert.ValueConverter
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.CompoundIndexes
 import org.springframework.data.mongodb.core.mapping.Document
-import org.springframework.data.mongodb.core.mapping.Field
-import org.springframework.data.mongodb.core.mapping.FieldType
 import java.time.Instant
 import java.time.LocalDate
 
@@ -31,7 +30,7 @@ data class RecruitmentEvent(
     val pullSpan: Long?,
     val sortOrder: Long,
     val upStatus: String = "unknown",
-    @field:Field(targetType = FieldType.STRING) val acquiredDate: LocalDate? = null,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val acquiredDate: LocalDate? = null,
     val note: String? = null,
     val source: String = "manual",
     val batchId: String? = null,

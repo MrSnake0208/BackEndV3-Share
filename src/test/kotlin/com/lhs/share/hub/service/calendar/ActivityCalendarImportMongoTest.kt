@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 @Tag("integration")
 class ActivityCalendarImportMongoTest {
-    private val database = TestMongo.database("calendar_import")
+    private val database = TestMongo.database("cal_import")
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val repository = ActivityCalendarRepository(template)
