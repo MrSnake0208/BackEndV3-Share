@@ -384,13 +384,14 @@ class FeedbackPersistenceMongoTest {
 
     @Test
     fun `公开反馈结案一次写入完成状态时间且保留公开内容和消息`() {
-        val initial = mongo.insert(
+        mongo.insert(
             ticket("public-close").copy(
                 visibility = FeedbackVisibility.PUBLIC,
                 publicTitle = "公开标题",
                 publicStatus = PublicFeedbackStatus.CONFIRMED,
             ),
         )
+        val initial = mongo.findById("public-close", FeedbackTicket::class.java)!!
         service.updateStatus("admin", "public-close", FeedbackStatusUpdateRequest("RESOLVED", "ADMIN"))
         val saved = mongo.findById("public-close", FeedbackTicket::class.java)!!
         assertEquals("RESOLVED", saved.status)
