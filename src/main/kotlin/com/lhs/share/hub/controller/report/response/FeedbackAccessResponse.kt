@@ -5,6 +5,7 @@ import java.time.Instant
 data class FeedbackAreaOptionResponse(
     val key: String,
     val label: String,
+    val builtinKey: String? = null,
 )
 
 data class FeedbackAssigneeResponse(

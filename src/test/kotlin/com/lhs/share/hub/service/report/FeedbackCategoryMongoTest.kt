@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.report
 
 import com.lhs.share.hub.repository.FeedbackCategoryCatalogRepository
 import com.lhs.share.hub.repository.entity.FeedbackCategory
+import com.lhs.share.hub.repository.entity.FeedbackCategoryCatalog
 import com.lhs.share.testinfra.TestMongo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -25,6 +26,33 @@ class FeedbackCategoryMongoTest {
     fun cleanup() {
         TestMongo.dropDatabase(client, database)
         client.close()
+    }
+
+    @Test
+    fun `历史目录补齐日历读取不写库后续编辑持久化且重载不重复`() {
+        val historical = FeedbackArea.labels.filterKeys { it != FeedbackArea.CALENDAR }.map { (key, label) -> FeedbackCategory(key, label) }
+        val saved = repository.save(FeedbackCategoryCatalog(categories = historical))
+        val service = FeedbackCategoryService(repository)
+        repeat(2) { assertEquals(1, service.list().count { it.key == FeedbackArea.CALENDAR }) }
+        assertEquals(saved, repository.findById("feedback").orElseThrow())
+        service.create("额外板块")
+        val reloaded = FeedbackCategoryService(repository).list()
+        assertEquals(1, reloaded.count { it.key == FeedbackArea.CALENDAR })
+        assertEquals(historical, reloaded.filter { it.key != FeedbackArea.CALENDAR && !it.key.startsWith("CUSTOM_") })
+        assertEquals(1, repository.findById("feedback").orElseThrow().categories.count { it.key == FeedbackArea.CALENDAR })
+    }
+
+    @Test
+    fun `已有自定义日历改名后重载保留内置标识且不创建同义分类`() {
+        val saved = repository.save(FeedbackCategoryCatalog(categories = listOf(FeedbackCategory("CUSTOM_CAL", "活动日历"))))
+        val service = FeedbackCategoryService(repository)
+        assertEquals(setOf("CUSTOM_CAL"), service.keys())
+        assertEquals(saved, repository.findById("feedback").orElseThrow())
+        service.rename("CUSTOM_CAL", "活动与招募日程")
+        assertEquals(
+            listOf(FeedbackCategory("CUSTOM_CAL", "活动与招募日程", FeedbackArea.CALENDAR)),
+            FeedbackCategoryService(repository).list(),
+        )
     }
 
     @Test

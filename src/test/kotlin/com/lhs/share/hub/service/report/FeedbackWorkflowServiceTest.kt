@@ -55,6 +55,35 @@ class FeedbackWorkflowServiceTest {
     )
 
     @Test
+    fun `日历转程序要求负责人日历授权且流转保留归属消息和未读边界`() {
+        val old = ticket().copy(
+            type = FeedbackType.EXPERIENCE,
+            category = FeedbackArea.CALENDAR,
+            area = FeedbackArea.CALENDAR,
+            workArea = FeedbackArea.CALENDAR,
+            workflowStage = FeedbackWorkflow.PROCESSING,
+            operatorAssigneeUserId = "alice",
+            teamReadReporterIndex = 0,
+        )
+        every { tickets.findById("rpt_1") } returns Optional.of(old)
+        every { access.canControlTicket("alice", old) } returns true
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.OPERATOR)
+        assertEquals(400, assertThrows(ApiResultException::class.java) { service.handoff("alice", "rpt_1", "CALENDAR", "测试交接") }.statusCode)
+        verify(exactly = 0) { query.saveIfUnchanged(any(), any()) }
+
+        every { access.operatorAreas("alice") } returns setOf(FeedbackArea.CALENDAR)
+        every { access.developerUserIds(FeedbackArea.CALENDAR) } returns setOf("developer")
+        every { query.saveIfUnchanged(old, any()) } answers { secondArg<FeedbackTicket>() }
+        val updated = service.handoff("alice", "rpt_1", "CALENDAR", "测试交接")
+        assertEquals(FeedbackWorkflow.DEV_HANDOFF, updated.workflowStage)
+        assertEquals(FeedbackArea.CALENDAR, updated.category)
+        assertEquals(old.reporterUserId, updated.reporterUserId)
+        assertEquals(old.messages, updated.messages)
+        assertEquals(old.teamReadReporterIndex, updated.teamReadReporterIndex)
+        verify(exactly = 1) { events.save(match { it.action == "HANDOFF" }) }
+    }
+
+    @Test
     fun `旧开放工单未接单且历史消息不制造团队未读`() {
         val old = ticket()
         assertEquals(FeedbackWorkflow.UNASSIGNED, FeedbackWorkflow.stage(old))
