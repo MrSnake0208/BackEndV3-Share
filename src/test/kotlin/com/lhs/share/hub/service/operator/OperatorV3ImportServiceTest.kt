@@ -43,6 +43,7 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Instant
 
 class OperatorV3ImportServiceTest {
     private val mapper = jacksonObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
@@ -433,6 +434,13 @@ class OperatorV3ImportServiceTest {
 
         val partial = oddityDocument("partial", "0.6")
         (partial.path("document").path("records").get(0) as com.fasterxml.jackson.databind.node.ObjectNode).put("record_id", "scan:2")
+        val oldRevision = current.entries.getValue("op1").revision
+        val staleScan = realImportService.commitBrowser("u1", partial)
+        assertEquals(1, staleScan.review)
+        assertEquals(oldRevision, current.entries.getValue("op1").revision)
+        assertEquals(0.5, current.entries.getValue("op1").combatStats?.oddities?.get("special")?.current)
+        val freshRecord = partial.path("document").path("records").get(0) as com.fasterxml.jackson.databind.node.ObjectNode
+        freshRecord.put("record_id", "scan:3").put("effective_at", Instant.now().plusSeconds(1).toString())
         assertEquals(0, realImportService.commitBrowser("u1", partial).rejected)
         val merged = current.entries.getValue("op1").combatStats!!.oddities
         assertEquals(0.6, merged.getValue("special").current)

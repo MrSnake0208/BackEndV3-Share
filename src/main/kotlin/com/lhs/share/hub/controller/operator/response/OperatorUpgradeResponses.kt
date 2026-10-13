@@ -36,6 +36,7 @@ data class OperatorUpgradeCurrentResponse(
     val elite: Int,
     val starLevel: Int,
     val revision: Long,
+    val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
 )
 
 data class OperatorUpgradeExecuteResponse(
@@ -54,6 +55,7 @@ data class OperatorUpgradeExecuteResponse(
                 value.operatorElite,
                 value.operatorStarLevel,
                 value.operatorRevision,
+                value.operatorHuaji,
             ),
             value.consumed,
             value.inventoryRevision,

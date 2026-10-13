@@ -34,6 +34,7 @@ data class OperatorGrowthTargetResponse(
     val heartPaper: Int?,
     val revision: Long,
     val updatedAt: Instant,
+    val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
 ) {
     companion object {
         fun of(value: OperatorGrowthTarget) = OperatorGrowthTargetResponse(
@@ -44,6 +45,7 @@ data class OperatorGrowthTargetResponse(
             value.targetHeartPaper,
             value.revision,
             value.updatedAt,
+            value.targetHuaji,
         )
     }
 }

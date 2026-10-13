@@ -24,6 +24,7 @@ data class OperatorRecord(
     val producer: ProducerInfo,
     val entries: List<OperatorRecordEntry>,
     val snapshotEffect: String = "applied",
+    val effectiveAtPrecision: String? = null,
 )
 
 data class OperatorRecordEntry(

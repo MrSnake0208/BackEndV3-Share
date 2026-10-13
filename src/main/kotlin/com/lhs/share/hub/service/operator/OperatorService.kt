@@ -234,6 +234,9 @@ class OperatorService(
             )
         }
         validateStarLevel(entry.starLevel, catalog, record.recordId, entry.id)
+        if (OperatorHuajiRules.anomalous(entry.starLevel, catalog)) {
+            warnings += "${entry.id}: legacy_huaji_requires_review raw=${entry.starLevel}; original value retained"
+        }
         if (record.game !in catalog.games) {
             throw apiError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
@@ -324,7 +327,11 @@ class OperatorService(
     }
 
     private fun mergeV2Entry(existingRaw: OperatorEntry?, request: OperatorEntryRequest, listedAt: Instant?, now: Instant): OperatorEntry {
-        val existing = existingRaw?.normalized()
+        val catalog = catalogService.getOperator(request.id)
+        val existing = existingRaw?.normalized()?.let { entry ->
+            if (catalog == null) entry else entry.copy(huaji = OperatorHuajiRules.read(entry, catalog))
+        }
+        val huaji = catalog?.let { OperatorHuajiRules.legacy(request.starLevel, it, existing?.huaji) }
         val discs = request.discs.map { OperatorDisc(it.otName, it.abbreviation, it.color, it.desp) }
         val stones = request.starStones.map { OperatorStarStone(it.name, normalizeStoneType(it.type), it.level) }
         val loadouts = replaceFirstLoadout(existing?.discLoadouts.orEmpty(), discs)
@@ -336,10 +343,28 @@ class OperatorService(
             starStones = stones,
             discLoadouts = loadouts,
             combatStats = existing?.combatStats,
+            huaji = huaji,
+            huajiLegacy =
+            existing?.huajiLegacy
+                ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(
+                    existing?.starLevel ?: request.starLevel,
+                    if (existing ==
+                        null
+                    ) {
+                        "v2_import"
+                    } else {
+                        "legacy_current"
+                    },
+                ),
             revision = (existing?.revision ?: -1L) + 1L,
             listedBaselineAt = listedAt,
             updatedAt = now,
         )
+        if (existing != null && !combatInputsChanged(existing, next) && existing.discLoadouts == next.discLoadouts &&
+            existing.starStones == next.starStones
+        ) {
+            next = next.copy(starLevel = existing.starLevel, revision = existing.revision, updatedAt = existing.updatedAt)
+        }
         if (existing != null && combatInputsChanged(existing, next)) next = next.markObservationStale()
         return next
     }
@@ -357,18 +382,39 @@ class OperatorService(
         }
     }
 
+    private fun normalizedCurrent(current: OperatorCurrent): OperatorCurrentResponse = OperatorCurrentResponse.of(
+        current.copy(
+            entries = current.entries.mapValues { (id, entry) ->
+                entry.copy(
+                    huaji = OperatorHuajiRules.read(entry, catalogService.getOperator(id)),
+                    huajiLegacy =
+                    entry.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(entry.starLevel, "legacy_current"),
+                    combatStats = entry.combatStats?.let { stats ->
+                        if (stats.observedStatus == "valid" &&
+                            stats.observedInputs?.huaji == null
+                        ) {
+                            stats.copy(observedStatus = "stale")
+                        } else {
+                            stats
+                        }
+                    },
+                )
+            },
+        ),
+    )
+
     fun current(userId: String, accountId: String, game: String?): List<OperatorCurrentResponse> {
         val all = currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId)
-        if (game == null) return all.map(OperatorCurrentResponse::of)
+        if (game == null) return all.map(::normalizedCurrent)
         val specific = all.firstOrNull { it.game == game }
         val genericSources = all.filter { it.game in GENERIC_GAME_KEYS }
         val legacyGeneric = genericSources.firstOrNull { it.game == GENERIC_GAME }
         val universalGeneric = genericSources.firstOrNull { it.game == UNIVERSAL_GAME }
         val genericEntries = (legacyGeneric?.entries.orEmpty() + universalGeneric?.entries.orEmpty())
         val generic = (universalGeneric ?: legacyGeneric)?.copy(entries = genericEntries)
-        if (specific == null) return listOfNotNull(generic).map(OperatorCurrentResponse::of)
-        if (genericEntries.isEmpty()) return listOf(OperatorCurrentResponse.of(specific))
-        return listOf(OperatorCurrentResponse.of(specific.copy(entries = genericEntries + specific.entries)))
+        if (specific == null) return listOfNotNull(generic).map(::normalizedCurrent)
+        if (genericEntries.isEmpty()) return listOf(normalizedCurrent(specific))
+        return listOf(normalizedCurrent(specific.copy(entries = genericEntries + specific.entries)))
     }
 
     /** 清理公共图鉴已删除的密探，保留导入历史并记录清理事件供重放使用。 */
@@ -414,7 +460,10 @@ class OperatorService(
     ): OperatorCurrentPatchPreview {
         val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
         return OperatorCurrentPatchPreview(
-            before = prepared.existing.takeIf { prepared.entryExisted }?.let(OperatorCurrentEntryDto::of),
+            before = prepared.existing.takeIf { prepared.entryExisted }?.let { entry ->
+                val catalog = checkNotNull(catalogService.getOperator(operatorId))
+                OperatorCurrentEntryDto.of(entry.copy(huaji = OperatorHuajiRules.read(entry, catalog)))
+            },
             after = OperatorCurrentEntryDto.of(prepared.merged),
             stale = prepared.stale,
         )
@@ -424,6 +473,10 @@ class OperatorService(
         var saved: OperatorCurrent? = null
         transactionTemplate.executeWithoutResult {
             val prepared = prepareCurrentPatch(userId, accountId, game, operatorId, request)
+            if (prepared.entryExisted && prepared.merged.revision == prepared.expectedRevision) {
+                saved = prepared.sourceCurrent.copy(entries = prepared.sourceCurrent.entries + (operatorId to prepared.merged))
+                return@executeWithoutResult
+            }
             if (prepared.materializingEntry) {
                 currentRepository.save(
                     prepared.sourceCurrent.copy(
@@ -451,7 +504,9 @@ class OperatorService(
                     fields = prepared.fields,
                     level = prepared.merged.level.takeIf { "level" in prepared.fields },
                     elite = prepared.merged.elite.takeIf { "elite" in prepared.fields },
-                    starLevel = prepared.merged.starLevel.takeIf { "star_level" in prepared.fields },
+                    starLevel = prepared.merged.starLevel.takeIf { "star_level" in prepared.fields || "huaji" in prepared.fields },
+                    huaji = prepared.merged.huaji.takeIf { "star_level" in prepared.fields || "huaji" in prepared.fields },
+                    huajiLegacy = prepared.merged.huajiLegacy.takeIf { "star_level" in prepared.fields || "huaji" in prepared.fields },
                     discLoadouts = prepared.merged.discLoadouts.takeIf { "disc_loadouts" in prepared.fields },
                     starStones = prepared.merged.starStones.takeIf { "star_stones" in prepared.fields },
                     combatStats = prepared.merged.combatStats.takeIf { "combat_stats" in prepared.fields },
@@ -485,7 +540,10 @@ class OperatorService(
     ): PreparedCurrentPatch {
         rejectUnknown(
             request,
-            setOf("level", "elite", "star_level", "disc_loadouts", "star_stones", "combat_stats", "expected_revision", "reason"),
+            setOf(
+                "level", "elite", "star_level", "huaji", "huaji_legacy", "disc_loadouts", "star_stones", "combat_stats",
+                "expected_revision", "reason",
+            ),
             "schema_validation_failed",
             operatorId,
             "",
@@ -560,7 +618,7 @@ class OperatorService(
 
         val now = Instant.now()
         val fields = mutableSetOf<String>()
-        var merged = existing
+        var merged = existing.copy(huaji = OperatorHuajiRules.read(existing, catalog))
         if (request.has("level")) {
             fields += "level"
             val level = requiredInt(request, "level", operatorId)
@@ -577,7 +635,51 @@ class OperatorService(
             fields += "star_level"
             val starLevel = requiredInt(request, "star_level", operatorId)
             validateStarLevel(starLevel, catalog)
-            merged = merged.copy(starLevel = starLevel)
+            if (OperatorHuajiRules.anomalous(
+                    starLevel,
+                    catalog,
+                )
+            ) {
+                invalid("Hidden rarity progress requires review", operatorId, "star_level", "invalid_star_level")
+            }
+            merged = merged.copy(
+                starLevel = starLevel,
+                huaji = OperatorHuajiRules.legacy(starLevel, catalog, merged.huaji),
+                huajiLegacy =
+                existing.huajiLegacy
+                    ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(
+                        if (entryExisted) existing.starLevel else starLevel,
+                        if (entryExisted) "legacy_current" else reason,
+                    ),
+            )
+        }
+        if (request.has("huaji")) {
+            fields += "huaji"
+            val huaji = OperatorHuajiRules.patch(request.get("huaji"), catalog, checkNotNull(merged.huaji))
+            if (request.has("star_level")) {
+                val legacy = checkNotNull(merged.huaji)
+                if (huaji.owned != legacy.owned ||
+                    (request.path("star_level").asInt() != 31 && legacy.stage != null && huaji.stage != legacy.stage) ||
+                    (request.path("star_level").asInt() == 31 && huaji.awakened != true)
+                ) {
+                    invalid("Conflicting legacy and normalized huaji", operatorId, "huaji", "huaji_conflict")
+                }
+            }
+            merged = merged.copy(
+                huaji = huaji,
+                starLevel = OperatorHuajiRules.compatible(huaji, catalog, merged.starLevel),
+                huajiLegacy =
+                merged.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(existing.starLevel, "legacy_current"),
+            )
+        }
+        if (request.has("huaji_legacy")) {
+            if (!request.has("huaji")) invalid("Legacy trace requires independent facts", operatorId, "huaji_legacy")
+            val trace = request.get("huaji_legacy") as? ObjectNode ?: invalid("Invalid legacy trace", operatorId, "huaji_legacy")
+            rejectUnknown(trace, setOf("raw", "source"), "schema_validation_failed", operatorId, "huaji_legacy")
+            val raw = requiredInt(trace, "raw", operatorId, "huaji_legacy.raw")
+            val source = requiredText(trace, "source", operatorId)
+            if (raw !in 0..31 || source.length > 128) invalid("Invalid legacy trace", operatorId, "huaji_legacy")
+            merged = merged.copy(huajiLegacy = com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(raw, source))
         }
         if (request.has("disc_loadouts")) {
             fields += "disc_loadouts"
@@ -601,13 +703,27 @@ class OperatorService(
         if (fields.isEmpty()) invalid("At least one patch field is required", operatorId, "")
         merged = merged.normalized()
         val freshObservation = hasFreshObservation(request.get("combat_stats"), merged)
-        val stale = !freshObservation && combatInputsChanged(existing, merged)
+        val legacySignedObservation = request.path("combat_stats").hasNonNull("combat_input_signature") &&
+            !request.path("combat_stats").path("observed_inputs").has("huaji")
+        val stale =
+            !freshObservation &&
+                (combatInputsChanged(existing.copy(huaji = OperatorHuajiRules.read(existing, catalog)), merged) || legacySignedObservation)
         merged = when {
             freshObservation -> merged.withFreshObservationMetadata(request.path("combat_stats"))
+            legacySignedObservation &&
+                (request.path("combat_stats").hasNonNull("observed_attack") || request.path("combat_stats").hasNonNull("observed_hp")) ->
+                merged.withFreshObservationMetadata(request.path("combat_stats"), verified = false)
             stale -> merged.markObservationStale()
             else -> merged
         }
-        merged = merged.copy(revision = expectedRevision + 1, updatedAt = now).normalized()
+        val sameFacts = entryExisted && existing.level == merged.level && existing.elite == merged.elite &&
+            OperatorHuajiRules.read(existing, catalog) == merged.huaji && existing.discLoadouts == merged.discLoadouts &&
+            existing.starStones == merged.starStones && existing.combatStats == merged.combatStats
+        if (sameFacts) merged = merged.copy(starLevel = existing.starLevel, huajiLegacy = existing.huajiLegacy)
+        merged = merged.copy(
+            revision = if (sameFacts) expectedRevision else expectedRevision + 1,
+            updatedAt = if (sameFacts) existing.updatedAt else now,
+        ).normalized()
 
         val next = sourceCurrent.entries.toMutableMap().also { it[operatorId] = merged }
         val inheritedIds = OperatorSharedGrowth.members(operatorId, catalogService).filter {
@@ -893,7 +1009,7 @@ class OperatorService(
         }
         if (node.has("observed_inputs")) {
             val inputs = node.get("observed_inputs")
-            result = result.copy(observedInputs = if (inputs.isNull) null else parseObservedInputs(inputs, operatorId))
+            result = result.copy(observedInputs = if (inputs.isNull) null else parseObservedInputs(inputs, operatorId, catalog))
         }
         if (node.has("display_mode")) {
             val displayMode = node.get("display_mode")
@@ -982,14 +1098,14 @@ class OperatorService(
         return merged
     }
 
-    private fun parseObservedInputs(node: JsonNode, operatorId: String): OperatorObservedInputs {
+    private fun parseObservedInputs(node: JsonNode, operatorId: String, catalog: OperatorCatalogEntity): OperatorObservedInputs {
         if (!node.isObject) {
             invalid("observed_inputs must be an object", operatorId, "combat_stats.observed_inputs", "invalid_combat_stats")
         }
         val item = node as ObjectNode
         rejectUnknown(
             item,
-            setOf("level", "elite", "star_level", "oddities_signature", "equipped_star_stones_signature"),
+            setOf("level", "elite", "star_level", "huaji", "oddities_signature", "equipped_star_stones_signature"),
             "invalid_combat_stats",
             operatorId,
             "combat_stats.observed_inputs",
@@ -1017,12 +1133,28 @@ class OperatorService(
             starLevel,
             optionalText(item, "oddities_signature", operatorId),
             optionalText(item, "equipped_star_stones_signature", operatorId),
+            if (item.has(
+                    "huaji",
+                )
+            ) {
+                OperatorHuajiRules.patch(
+                    item.get("huaji"),
+                    catalog,
+                    com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null),
+                )
+            } else {
+                null
+            },
         )
     }
 
     private fun hasFreshObservation(raw: JsonNode?, merged: OperatorEntry): Boolean = raw?.isObject == true &&
         (raw.hasNonNull("observed_attack") || raw.hasNonNull("observed_hp")) &&
-        merged.combatStats?.source?.let { it in OBSERVATION_SOURCES } == true
+        merged.combatStats?.source?.let { it in OBSERVATION_SOURCES } == true &&
+        (
+            !raw.hasNonNull("combat_input_signature") ||
+                (raw.path("observed_inputs").has("huaji") && merged.combatStats?.observedInputs?.huaji == merged.huaji)
+            )
 
     fun listRecords(
         userId: String,
@@ -1123,17 +1255,30 @@ class OperatorService(
         val shared = OperatorSharedGrowth.members(correction.operatorId, catalogService).firstNotNullOfOrNull { current.entries[it] }
         val existing = current.entries[correction.operatorId]?.normalized()
             ?: OperatorEntry(shared?.elite ?: 0, 0, shared?.level ?: 0)
+        val catalog = checkNotNull(catalogService.getOperator(correction.operatorId))
         var merged = existing
         if ("level" in correction.fields) merged = merged.copy(level = checkNotNull(correction.level))
         if ("elite" in correction.fields) merged = merged.copy(elite = checkNotNull(correction.elite))
-        if ("star_level" in correction.fields) merged = merged.copy(starLevel = checkNotNull(correction.starLevel))
+        if ("star_level" in correction.fields || "huaji" in correction.fields) {
+            val catalog = checkNotNull(catalogService.getOperator(correction.operatorId))
+            val raw = correction.starLevel ?: existing.starLevel
+            merged = merged.copy(
+                starLevel = raw,
+                huaji = correction.huaji ?: OperatorHuajiRules.legacy(raw, catalog, OperatorHuajiRules.read(existing, catalog)),
+                huajiLegacy = correction.huajiLegacy,
+            )
+        }
         if ("disc_loadouts" in correction.fields) {
             merged = merged.copy(discLoadouts = correction.discLoadouts.orEmpty())
             merged = merged.copy(discs = merged.discLoadouts.firstOrNull()?.discs.orEmpty())
         }
         if ("star_stones" in correction.fields) merged = merged.copy(starStones = correction.starStones.orEmpty())
         if ("combat_stats" in correction.fields) merged = merged.copy(combatStats = correction.combatStats)
-        if (combatInputsChanged(existing, merged) && "combat_stats" !in correction.fields) merged = merged.markObservationStale()
+        if (combatInputsChanged(existing.copy(huaji = OperatorHuajiRules.read(existing, catalog)), merged) &&
+            "combat_stats" !in correction.fields
+        ) {
+            merged = merged.markObservationStale()
+        }
         merged = merged.copy(revision = existing.revision + 1, updatedAt = correction.createdAt).normalized()
         val entries = current.entries.toMutableMap().also { it[correction.operatorId] = merged }
         normalizeSpRelations(entries, setOf(correction.operatorId), correction.createdAt)
@@ -1163,13 +1308,13 @@ class OperatorService(
                     effectiveAt = current.fullBaselineAt ?: current.updatedAt,
                     entries = current.entries.map { (id, raw) ->
                         val entry = raw.normalized()
-                        OperatorRecordEntry(
+                        OperatorEntryRequest(
                             id = id,
                             elite = entry.elite,
                             starLevel = entry.starLevel,
                             level = entry.level,
-                            discs = entry.discs,
-                            starStones = entry.starStones,
+                            discs = entry.discs.map { OperatorDiscRequest(it.otName, it.abbreviation, it.color, it.desp) },
+                            starStones = entry.starStones.map { OperatorStarStoneRequest(it.name, it.type, it.level) },
                         )
                     },
                 )
@@ -1189,14 +1334,14 @@ class OperatorService(
         val after = afterRaw.normalized()
         return before.level != after.level ||
             before.elite != after.elite ||
-            before.starLevel != after.starLevel ||
+            (before.huaji ?: before.starLevel) != (after.huaji ?: after.starLevel) ||
             normalizedStarStones(before) != normalizedStarStones(after) ||
             before.combatStats?.oddities.orEmpty() != after.combatStats?.oddities.orEmpty()
     }
 
     private fun normalizedStarStones(entry: OperatorEntry): List<OperatorStarStone> = entry.normalized().starStones.sortedBy { it.type }
 
-    private fun OperatorEntry.withFreshObservationMetadata(raw: JsonNode): OperatorEntry {
+    private fun OperatorEntry.withFreshObservationMetadata(raw: JsonNode, verified: Boolean = true): OperatorEntry {
         val normalized = normalized()
         val stats = normalized.combatStats ?: return normalized
         val hasAttack = raw.hasNonNull("observed_attack")
@@ -1206,17 +1351,26 @@ class OperatorService(
             combatStats = stats.copy(
                 manualAttack = if (hasAttack) stats.observedAttack else stats.manualAttack,
                 manualHp = if (hasHp) stats.observedHp else stats.manualHp,
-                observedStatus = "valid",
-                combatInputSignature = stats.combatInputSignature.takeIf {
-                    raw.hasNonNull("combat_input_signature")
-                } ?: combatInputSignature(normalized),
-                observedInputs = OperatorObservedInputs(
-                    level = normalized.level,
-                    elite = normalized.elite,
-                    starLevel = normalized.starLevel,
-                    odditiesSignature = signature(canonicalOddities(normalized)),
-                    equippedStarStonesSignature = signature(canonicalStarStones(normalized)),
-                ),
+                observedStatus = if (verified) "valid" else "stale",
+                combatInputSignature = if (!verified) {
+                    stats.combatInputSignature
+                } else {
+                    stats.combatInputSignature.takeIf {
+                        raw.hasNonNull("combat_input_signature")
+                    } ?: combatInputSignature(normalized)
+                },
+                observedInputs = if (!verified) {
+                    stats.observedInputs?.copy(huaji = null)
+                } else {
+                    OperatorObservedInputs(
+                        level = normalized.level,
+                        elite = normalized.elite,
+                        starLevel = normalized.starLevel,
+                        huaji = normalized.huaji,
+                        odditiesSignature = signature(canonicalOddities(normalized)),
+                        equippedStarStonesSignature = signature(canonicalStarStones(normalized)),
+                    )
+                },
                 displayMode = displayMode.copy(
                     attack = if (hasAttack) "manual" else displayMode.attack,
                     hp = if (hasHp) "manual" else displayMode.hp,
@@ -1231,6 +1385,11 @@ class OperatorService(
             put("level", normalized.level)
             put("elite", normalized.elite)
             put("star_level", normalized.starLevel)
+            normalized.huaji?.let { huaji ->
+                val node = putObject("huaji").put("owned", huaji.owned)
+                if (huaji.stage == null) node.putNull("stage") else node.put("stage", huaji.stage)
+                if (huaji.awakened == null) node.putNull("awakened") else node.put("awakened", huaji.awakened)
+            }
             set<JsonNode>("oddities", canonicalOddities(normalized))
             set<JsonNode>("equipped_star_stones", canonicalStarStones(normalized))
         }
@@ -1287,7 +1446,7 @@ class OperatorService(
     private fun sameBody(existing: OperatorRecord, request: OperatorRecordRequest): Boolean = existing.recordType == request.recordType &&
         existing.game == request.game &&
         existing.snapshotScope == request.snapshotScope &&
-        existing.effectiveAt.equals(parseTime(request.effectiveAt, "effective_at")) &&
+        (existing.effectiveAtPrecision?.let(Instant::parse) ?: existing.effectiveAt) == parseTime(request.effectiveAt, "effective_at") &&
         existing.entries == request.entries.map { it.toEntity() }
 
     private fun Validated.toEntity(userId: String, producer: ProducerDto, effect: String) = OperatorRecord(
@@ -1301,6 +1460,7 @@ class OperatorService(
         producer = ProducerInfo(producer.platform, producer.version),
         entries = record.entries.map { it.toEntity() },
         snapshotEffect = effect,
+        effectiveAtPrecision = effectiveAt.toString(),
     )
 
     private fun OperatorEntryRequest.toEntity() = OperatorRecordEntry(

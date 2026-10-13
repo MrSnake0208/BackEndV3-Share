@@ -121,10 +121,17 @@ class OperatorV3ImportService(
                             item.response
                         } else {
                             // Prepare and refresh inside this transaction: earlier forms may have synced this revision.
-                            item.patch.put(
-                                "expected_revision",
-                                currentRevision(userId, item.targetAccountId, item.targetGame, item.operatorId),
-                            )
+                            val relatedWritten = written.any { prior ->
+                                OperatorSharedGrowth.baseId(prior.operatorId, catalogService) ==
+                                    OperatorSharedGrowth.baseId(item.operatorId, catalogService) &&
+                                    prior.status in setOf(ACCEPTED, PARTIAL)
+                            }
+                            if (relatedWritten) {
+                                item.patch.put(
+                                    "expected_revision",
+                                    currentRevision(userId, item.targetAccountId, item.targetGame, item.operatorId),
+                                )
+                            }
                             val current = operatorService.patchCurrent(
                                 userId,
                                 item.targetAccountId,
@@ -173,7 +180,7 @@ class OperatorV3ImportService(
                     written.none { it.status == REJECTED } &&
                     (
                         prepared.any { it.patch != null } || text(record, "record_type") == ANNOTATION_RECORD ||
-                            written.any { it.status == UNCHANGED } ||
+                            written.any { it.status == UNCHANGED || it.status == REVIEW } ||
                             (entries(record).isEmpty() && text(record, "snapshot_scope") == "full")
                         )
                 if (shouldAudit) {
@@ -188,6 +195,7 @@ class OperatorV3ImportService(
                             snapshotScope = text(record, "snapshot_scope"),
                             payload = objectMapper.writeValueAsString(record),
                             revisions = written.mapNotNull { item -> item.revision?.let { item.operatorId to it } }.toMap(),
+                            statuses = written.associate { it.operatorId to it.status },
                         ),
                     )
                 }
@@ -305,7 +313,13 @@ class OperatorV3ImportService(
                         accountId = targetAccountId,
                         operatorId = operatorId,
                         recordId = recordId,
-                        status = if (same) UNCHANGED else REJECTED,
+                        status = if (!same) {
+                            REJECTED
+                        } else if (existingAudit.statuses[operatorId] == REVIEW) {
+                            REVIEW
+                        } else {
+                            UNCHANGED
+                        },
                         warnings = if (same) listOf(issue("duplicate_record", "record_id was already committed")) else emptyList(),
                         blockingErrors = if (same) {
                             emptyList()
@@ -482,7 +496,22 @@ class OperatorV3ImportService(
             warnings += oddityMaxWarnings(entry, catalog)
 
             val patch = buildPatch(entry, record, command)
-            val review = hasReview(entry)
+            val legacyAnomaly = entry.has("star_level") && OperatorHuajiRules.anomalous(entry.path("star_level").asInt(), catalog)
+            if (legacyAnomaly) {
+                patch.remove("star_level")
+                warnings +=
+                    issue(
+                        "legacy_huaji_requires_review",
+                        "Hidden rarity legacy value retained in the source record; confirm progress separately",
+                        "star_level",
+                    )
+            }
+            if (text(record, "source_kind") == "scan" && patch.has("huaji")) {
+                val facts = patch.path("huaji") as ObjectNode
+                if (facts.path("stage").isNull) facts.remove("stage")
+                if (facts.path("awakened").isNull) facts.remove("awakened")
+            }
+            val review = hasReview(entry) || legacyAnomaly
             val partial = hasPartial(entry)
             val matchReview = entry.path("match").path("status").asText("ready") != "ready"
             if ((review || matchReview) && !command.confirmReview) removeReviewSections(patch, entry, matchReview)
@@ -500,6 +529,25 @@ class OperatorV3ImportService(
                         status,
                         warnings = warnings,
                         targetRevision = currentRevision(userId, target.accountId, targetGame, operatorId),
+                    ),
+                )
+            }
+            val latest = operatorService.current(userId, target.accountId, targetGame).singleOrNull()?.entries?.get(operatorId)
+            if (text(record, "source_kind") == "scan" &&
+                latest?.updatedAt?.isAfter(OffsetDateTime.parse(text(record, "effective_at")).toInstant()) == true
+            ) {
+                return PreparedItem(
+                    target.accountId,
+                    targetGame,
+                    operatorId,
+                    null,
+                    OperatorV3ImportItem(
+                        target.accountId,
+                        operatorId,
+                        recordId,
+                        REVIEW,
+                        warnings = warnings + issue("newer_current_requires_review", "Scan predates the current correction"),
+                        targetRevision = latest.revision,
                     ),
                 )
             }
@@ -734,6 +782,10 @@ class OperatorV3ImportService(
         if (includeSection(entry, "huaji", command.confirmReview) && entry.has("star_level")) {
             patch.set<JsonNode>("star_level", entry.get("star_level"))
         }
+        if (includeSection(entry, "huaji", command.confirmReview) && entry.has("huaji")) {
+            patch.set<JsonNode>("huaji", entry.get("huaji").deepCopy<JsonNode>())
+            if (entry.has("huaji_legacy")) patch.set<JsonNode>("huaji_legacy", entry.get("huaji_legacy"))
+        }
         if (includeSection(entry, "disc_loadouts", command.confirmReview) && entry.has("disc_loadouts")) {
             patch.set<JsonNode>("disc_loadouts", entry.get("disc_loadouts"))
         }
@@ -771,7 +823,11 @@ class OperatorV3ImportService(
             patch.remove("level")
             patch.remove("elite")
         }
-        if (all || sectionStatus(entry, "huaji") == REVIEW) patch.remove("star_level")
+        if (all || sectionStatus(entry, "huaji") == REVIEW) {
+            patch.remove("star_level")
+            patch.remove("huaji")
+            patch.remove("huaji_legacy")
+        }
         if (all || sectionStatus(entry, "disc_loadouts") == REVIEW) patch.remove("disc_loadouts")
         if (all || sectionStatus(entry, "equipment") == REVIEW) patch.remove("star_stones")
         val combat = patch.get("combat_stats") as? ObjectNode ?: return
@@ -792,7 +848,7 @@ class OperatorV3ImportService(
         }
         if (patch.has("level")) add("level", before?.level, after.level)
         if (patch.has("elite")) add("elite", before?.elite, after.elite)
-        if (patch.has("star_level")) add("star_level", before?.starLevel, after.starLevel)
+        if (patch.has("star_level") || patch.has("huaji")) add("huaji", before?.huaji, after.huaji)
         if (patch.has("disc_loadouts")) add("disc_loadouts", before?.discLoadouts, after.discLoadouts)
         if (patch.has("star_stones")) add("equipped_star_stones", before?.starStones, after.starStones)
         if (patch.has("combat_stats")) add("combat_stats", before?.combatStats, after.combatStats)

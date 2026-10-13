@@ -29,6 +29,7 @@ data class OperatorUpgradeTransaction(
     val consumed: List<UpgradeConsumedEntry>,
     val inventoryRevision: Long,
     val createdAt: Instant = Instant.now(),
+    val operatorHuaji: OperatorHuaji? = null,
 )
 
 data class UpgradeConsumedEntry(
