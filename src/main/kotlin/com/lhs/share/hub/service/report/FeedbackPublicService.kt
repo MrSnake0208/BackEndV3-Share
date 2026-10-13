@@ -26,6 +26,7 @@ class FeedbackPublicService(
     private val ticketRepository: FeedbackTicketRepository,
     private val queryRepository: FeedbackTicketQueryRepository,
     private val supportRepository: FeedbackSupportRepository,
+    private val categories: FeedbackCategoryService,
 ) {
     private val random = SecureRandom()
 
@@ -73,7 +74,7 @@ class FeedbackPublicService(
         )
         val supported = supportedIds(currentUserId, result.content.mapNotNull { it.id })
         return PublicFeedbackPage(
-            items = result.content.map { toListItem(it, it.id in supported) },
+            items = toListItems(result.content, supported),
             total = result.totalElements,
             page = page,
             pageSize = pageSize,
@@ -106,7 +107,7 @@ class FeedbackPublicService(
             .take(take)
             .map { it.first }
         val supported = supportedIds(currentUserId, ranked.mapNotNull { it.id })
-        return ranked.map { toListItem(it, it.id in supported) }
+        return toListItems(ranked, supported)
     }
 
     /** 支持;重复支持幂等,不重复加票。 */
@@ -173,19 +174,28 @@ class FeedbackPublicService(
         return supportRepository.findByUserIdAndFeedbackIdIn(userId, feedbackIds).map { it.feedbackId }.toSet()
     }
 
-    private fun toListItem(ticket: FeedbackTicket, supported: Boolean): PublicFeedbackListItem = PublicFeedbackListItem(
-        id = checkNotNull(ticket.id),
-        publicTitle = ticket.publicTitle,
-        publicSummary = ticket.publicSummary,
-        type = publicType(ticket),
-        publicStatus = ticket.publicStatus,
-        supportCount = ticket.supportCount.coerceAtLeast(0),
-        supportedByCurrentUser = supported,
-        publishedAt = ticket.publishedAt,
-        publicUpdatedAt = ticket.publicUpdatedAt ?: ticket.publishedAt,
-        targetVersionLabel = ticket.targetVersionLabel,
-        completedVersionLabel = ticket.completedVersionLabel,
-    )
+    private fun toListItems(tickets: List<FeedbackTicket>, supported: Set<String>): List<PublicFeedbackListItem> {
+        if (tickets.isEmpty()) return emptyList()
+        val labels = categories.list().associate { it.key to it.label }
+        return tickets.map { toListItem(it, it.id in supported, labels[FeedbackWorkflow.area(it)]) }
+    }
+
+    private fun toListItem(ticket: FeedbackTicket, supported: Boolean, categoryLabel: String?): PublicFeedbackListItem =
+        PublicFeedbackListItem(
+            id = checkNotNull(ticket.id),
+            publicTitle = ticket.publicTitle,
+            publicSummary = ticket.publicSummary,
+            type = publicType(ticket),
+            category = FeedbackWorkflow.area(ticket),
+            categoryLabel = categoryLabel,
+            publicStatus = ticket.publicStatus,
+            supportCount = ticket.supportCount.coerceAtLeast(0),
+            supportedByCurrentUser = supported,
+            publishedAt = ticket.publishedAt,
+            publicUpdatedAt = ticket.publicUpdatedAt ?: ticket.publishedAt,
+            targetVersionLabel = ticket.targetVersionLabel,
+            completedVersionLabel = ticket.completedVersionLabel,
+        )
 
     private fun toDetail(ticket: FeedbackTicket, currentUserId: String?): PublicFeedbackDetail {
         val mergedInto = ticket.mergedIntoId?.let { targetId ->
@@ -206,6 +216,8 @@ class FeedbackPublicService(
             publicTitle = ticket.publicTitle,
             publicSummary = ticket.publicSummary,
             type = publicType(ticket),
+            category = FeedbackWorkflow.area(ticket),
+            categoryLabel = categories.label(FeedbackWorkflow.area(ticket)),
             publicStatus = ticket.publicStatus,
             supportCount = ticket.supportCount.coerceAtLeast(0),
             supportedByCurrentUser = supported,

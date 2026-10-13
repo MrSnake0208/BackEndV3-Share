@@ -20,6 +20,8 @@ data class PublicFeedbackListItem(
     val publicUpdatedAt: Instant?,
     val targetVersionLabel: String? = null,
     val completedVersionLabel: String? = null,
+    val category: String? = null,
+    val categoryLabel: String? = null,
 )
 
 /** 公开反馈列表分页响应。 */
@@ -45,6 +47,8 @@ data class PublicFeedbackDetail(
     val targetVersionLabel: String? = null,
     val completedVersionLabel: String? = null,
     val mergedInto: MergedInto?,
+    val category: String? = null,
+    val categoryLabel: String? = null,
 ) {
     data class MergedInto(
         val id: String,
