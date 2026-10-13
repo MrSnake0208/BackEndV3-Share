@@ -19,7 +19,7 @@ data class OperatorV3BrowserImportRequest(
 data class OperatorV3ExchangeDocumentRequest(
     @field:Schema(allowableValues = ["myshare-operator-exchange"])
     val format: String,
-    @field:Schema(allowableValues = ["3"])
+    @field:Schema(allowableValues = ["3", "4"])
     val version: Int,
     val exportedAt: String,
     val producer: JsonNode,

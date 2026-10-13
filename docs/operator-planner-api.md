@@ -116,4 +116,8 @@ PLANNER_TEST_MONGO_URI='mongodb://127.0.0.1:27017/?replicaSet=rs0&serverSelectio
 
 ### SP 星级目标（2026-10-05）
 
-规划 workspace 的星级目标按目录识别：普通密探使用 0..31 节点编码，SP 使用 0..5 直接星级；超出对应范围拒绝保存。默认养成目标及 v3 annotation targets 使用相同约束。各形态保留独立目标，客户端在单个清单中按本体关联组合并等级/修为的最大目标，材料只计一次。
+规划 workspace 的星级目标按目录识别：旧字段普通密探保留0..31兼容编码（25..30均五星，31只确认觉醒），SP保留0..5直接星级；新huaji使用独立owned/stage/awakened，不以31作为新阶段；超出对应范围拒绝保存。默认养成目标及 v3 annotation targets 使用相同约束。各形态保留独立目标，客户端在单个清单中按本体关联组合并等级/修为的最大目标，材料只计一次。
+
+## 独立化极（本次兼容更新）
+
+新Current/PATCH/目标使用huaji owned/stage/awakened；普通终点25、隐密24、SP稀疏stage且材料422保护。level/elite共享只计一次，stage/awake目标独立。旧25..30永久适配五星，31仅确认觉醒且stage可未知，历史异常不批量清理。无损交换使用operator-only v4；旧v2 camelCase/v3字段及幂等契约保留，旧观测不伪造新验证。详情见[化极兼容规范](./operator-huaji-compatibility.md)。

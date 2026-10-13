@@ -13,6 +13,8 @@ data class OperatorCurrentPatchRequest(
     val level: Int? = null,
     val elite: Int? = null,
     @JsonProperty("star_level") val starLevel: Int? = null,
+    @field:Schema(description = "独立化极事实；缺失子字段保留；stage/awakened可显式null表示未知")
+    val huaji: OperatorHuajiPatchRequest? = null,
     @JsonProperty("disc_loadouts") val discLoadouts: List<OperatorDiscLoadoutPatchRequest>? = null,
     @field:Schema(description = "六槽当前装备的完整替换；缺失保留，空数组清空；槽位仅允许 main1..main3、assist1..assist3")
     @JsonProperty("star_stones") val starStones: List<OperatorStarStonePatchRequest>? = null,
@@ -24,6 +26,13 @@ data class OperatorCurrentPatchRequest(
         allowableValues = ["manual_correction", "local_migration"],
     )
     val reason: String,
+)
+
+@Schema(description = "局部事实；至少一个字段。缺失保留；stage/awakened的显式null表示未知", minProperties = 1)
+data class OperatorHuajiPatchRequest(
+    @field:Schema(nullable = false) val owned: Boolean? = null,
+    @field:Schema(nullable = true, minimum = "0", maximum = "25") val stage: Int? = null,
+    @field:Schema(nullable = true) val awakened: Boolean? = null,
 )
 
 data class OperatorDiscLoadoutPatchRequest(
@@ -70,6 +79,7 @@ data class OperatorObservedInputsPatchRequest(
     val starLevel: Int? = null,
     val odditiesSignature: String? = null,
     val equippedStarStonesSignature: String? = null,
+    val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
 )
 
 data class OperatorOddityPatchRequest(

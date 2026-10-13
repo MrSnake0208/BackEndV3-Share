@@ -25,4 +25,5 @@ data class OperatorV3ImportRecord(
     val payload: String,
     val revisions: Map<String, Long>,
     val importedAt: Instant = Instant.now(),
+    val statuses: Map<String, String> = emptyMap(),
 )

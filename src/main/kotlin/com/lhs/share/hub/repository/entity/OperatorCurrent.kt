@@ -32,7 +32,12 @@ data class OperatorEntry(
     val revision: Long = 0,
     val listedBaselineAt: Instant? = null,
     val updatedAt: Instant? = null,
+    val huaji: OperatorHuaji? = null,
+    val huajiLegacy: OperatorHuajiLegacy? = null,
 )
+
+data class OperatorHuaji(val owned: Boolean, val stage: Int?, val awakened: Boolean?)
+data class OperatorHuajiLegacy(val raw: Int, val source: String)
 
 data class OperatorDisc(val otName: String, val abbreviation: String? = null, val color: String? = null, val desp: String? = null)
 data class OperatorStarStone(val name: String? = null, val type: String, val level: Int)
@@ -63,6 +68,7 @@ data class OperatorObservedInputs(
     val starLevel: Int? = null,
     val odditiesSignature: String? = null,
     val equippedStarStonesSignature: String? = null,
+    val huaji: OperatorHuaji? = null,
 )
 
 data class OperatorOddityValue(

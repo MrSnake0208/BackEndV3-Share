@@ -7,6 +7,7 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.controller.operator.request.OperatorImportRequest
 import com.lhs.share.hub.controller.operator.request.OperatorV3ExchangeDocumentRequest
+import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
 import com.lhs.share.hub.controller.operator.response.OperatorExportResponse
@@ -14,9 +15,8 @@ import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.account.SubAccountService
-import com.lhs.share.hub.controller.operator.response.OperatorAnnotationListResponse
-import com.lhs.share.hub.service.operator.OperatorSubjectiveService
 import com.lhs.share.hub.service.operator.OperatorService
+import com.lhs.share.hub.service.operator.OperatorSubjectiveService
 import com.lhs.share.hub.service.operator.OperatorV3ImportService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -50,7 +50,10 @@ class OpenApiOperatorController(
         return success(SubAccountResponse.of(accountService.requireAccount(principal.userId, principal.accountId)))
     }
 
-    @Operation(summary = "Read operator growth annotations", description = "Requires operator:read. Uses the token-bound account; absent operators default to growth_state=active.")
+    @Operation(
+        summary = "Read operator growth annotations",
+        description = "Requires operator:read. Uses the token-bound account; absent operators default to growth_state=active.",
+    )
     @RequireOpenApiToken
     @GetMapping("/annotations")
     fun annotations(
@@ -133,7 +136,14 @@ class OpenApiOperatorController(
     }
 
     @GetMapping("/export")
-    fun export(@RequestHeader(value = "Authorization", required = false) authorization: String?): OperatorExportResponse {
+    fun export(
+        @RequestHeader(value = "Authorization", required = false) authorization: String?,
+        response: jakarta.servlet.http.HttpServletResponse? = null,
+    ): OperatorExportResponse {
+        response?.setHeader(
+            "X-Operator-Exchange-Warning",
+            "v2 cannot encode independent stage and awakened (including unknown); use operator v4",
+        )
         val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_EXPORT)
         return service.export(principal.userId, principal.accountId, null)
     }

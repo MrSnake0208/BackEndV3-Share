@@ -21,6 +21,7 @@ data class OperatorGrowthTarget(
     val targetElite: Int? = null,
     val targetStarLevel: Int? = null,
     val targetHeartPaper: Int? = null,
+    val targetHuaji: OperatorHuaji? = null,
     val revision: Long = 1,
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now(),

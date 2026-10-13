@@ -28,6 +28,7 @@ interface OperatorGrowthTargetRepositoryCustom {
         starLevel: Int?,
         heartPaper: Int?,
         updatedAt: Instant,
+        huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
     ): OperatorGrowthTarget?
 
     fun deleteIfRevision(userId: String, accountId: String, operatorId: String, expectedRevision: Long): Boolean
@@ -46,13 +47,14 @@ class OperatorGrowthTargetRepositoryImpl(
         starLevel: Int?,
         heartPaper: Int?,
         updatedAt: Instant,
+        huaji: com.lhs.share.hub.repository.entity.OperatorHuaji?,
     ): OperatorGrowthTarget? = template.findAndModify(
         Query.query(
             Criteria.where("userId").`is`(userId).and("accountId").`is`(accountId)
                 .and("operatorId").`is`(operatorId).and("revision").`is`(expectedRevision),
         ),
         Update().set("targetLevel", level).set("targetElite", elite).set("targetStarLevel", starLevel)
-            .set("targetHeartPaper", heartPaper).set("updatedAt", updatedAt).inc("revision", 1),
+            .set("targetHeartPaper", heartPaper).set("targetHuaji", huaji).set("updatedAt", updatedAt).inc("revision", 1),
         FindAndModifyOptions.options().returnNew(true),
         OperatorGrowthTarget::class.java,
     )

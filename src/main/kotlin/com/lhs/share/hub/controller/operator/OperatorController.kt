@@ -83,7 +83,7 @@ class OperatorController(
         @RequestBody request: JsonNode,
     ): ApiResult<Any> {
         val document = request.path("document").takeUnless(JsonNode::isMissingNode) ?: request
-        return if (document.path("version").asInt() == 3) {
+        return if (document.path("version").asInt() in setOf(3, 4)) {
             success(requireNotNull(v3ImportService).commitBrowser(helper.requireUserId(), request))
         } else {
             val v2 = objectMapper.treeToValue(request, OperatorImportRequest::class.java)
@@ -281,13 +281,20 @@ class OperatorController(
         @RequestParam(name = "account_id", required = false) accountId: String?,
         @RequestParam(required = false) scope: String?,
         @RequestParam(required = false, defaultValue = "2") version: Int,
+        response: jakarta.servlet.http.HttpServletResponse? = null,
     ): Any = when (version) {
-        2 -> service.export(helper.requireUserId(), accountId, scope)
-        3 -> requireNotNull(v3ExportService).export(helper.requireUserId(), accountId, scope)
+        2 -> {
+            response?.setHeader(
+                "X-Operator-Exchange-Warning",
+                "v2 cannot encode independent stage and awakened (including unknown); use operator v4",
+            )
+            service.export(helper.requireUserId(), accountId, scope)
+        }
+        3, 4 -> requireNotNull(v3ExportService).export(helper.requireUserId(), accountId, scope, version)
         else -> throw com.lhs.share.hub.service.operator.OperatorApiException(
             org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
             "unsupported_exchange_version",
-            "Export version must be 2 or 3",
+            "Export version must be 2, 3 or 4",
         )
     }
 

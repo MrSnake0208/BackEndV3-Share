@@ -68,6 +68,10 @@ class OperatorV3ExportServiceTest {
             InventoryAgentFavorite(userId = "u1", accountId = "a1", agentId = "op1"),
         )
         every { catalog.currentCatalogVersion() } returns "catalog-1"
+        every { catalog.getOperator("op1") } returns com.lhs.share.hub.repository.entity.OperatorCatalogEntity(
+            operatorId = "op1", name = "密探", rarity = 5, prof = listOf("风"), subProf = emptyList(),
+            games = listOf("如鸢"), discs = emptyList(), starStones = emptyList(), catalogVersion = "catalog-1",
+        )
         val service = OperatorV3ExportService(mapper, accounts, currents, annotations, targets, favorites, catalog)
 
         val exported = service.export("u1", "a1", null)
@@ -86,5 +90,13 @@ class OperatorV3ExportServiceTest {
         assertTrue(entry.path("favorite").booleanValue())
         assertEquals("继续收集", entry.path("note").asText())
         assertEquals(31, entry.path("targets").path("star_level").intValue())
+        every { catalog.getOperator("op1") } returns null
+        val orphanBackup = service.export("u1", "a1", null, 4)
+        OperatorV3SchemaValidator(mapper).validate(orphanBackup)
+        val orphan = orphanBackup.path("records").get(0).path("entries").get(0)
+        assertTrue(orphan.path("huaji").path("stage").isNull)
+        assertTrue(orphan.path("huaji").path("awakened").isNull)
+        assertEquals(31, orphan.path("huaji_legacy").path("raw").asInt())
+        assertTrue(!orphan.has("star_level"))
     }
 }
