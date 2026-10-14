@@ -33,7 +33,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
     fun validate(document: RecruitmentExchangeDocument) {
         if (document.schema != RECRUITMENT_EXCHANGE_SCHEMA) fail("不支持的招募备份版本")
         if (document.game !in setOf("如鸢", "代号鸢")) fail("备份游戏不正确")
-        id(document.sourceAccount.accountId)
+        document.sourceAccount?.let { id(it.accountId) }
         if (document.archiveRevision !in 0 until Long.MAX_VALUE) fail("源档案版本不正确")
         recruitmentCount(document.baseline, "baseline")
         if (document.pools.size > 500 || document.temporaryAgents.size > 1000 ||

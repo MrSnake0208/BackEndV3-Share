@@ -41,12 +41,14 @@ internal fun recruitmentExchangePlan(
     currentBatches: List<RecruitmentBatch>,
     backup: RecruitmentExchangeDocument,
     options: RecruitmentImportOptions,
+    recordsOnly: Boolean = false,
 ): RecruitmentExchangePlan {
     if (options.stateStrategy !in setOf("keep_current", "use_backup")) throw recruitmentInvalid("导入状态策略不正确")
     val original = exchangeDocument(current, currentEvents, currentBatches, Instant.EPOCH)
-    val restoring = currentEvents.isEmpty() && currentBatches.isEmpty() && current.baseline == 0L &&
+    if (recordsOnly && options.stateStrategy != "keep_current") throw recruitmentInvalid("记录导入只能追加，不能恢复备份状态")
+    val restoring = !recordsOnly && currentEvents.isEmpty() && currentBatches.isEmpty() && current.baseline == 0L &&
         current.temporaryAgents.isEmpty() && current.pools.all { it.snapshot.catalogPoolId != null && it.progress == 0L }
-    val useState = restoring || options.stateStrategy == "use_backup"
+    val useState = !recordsOnly && (restoring || options.stateStrategy == "use_backup")
     val items = mutableListOf<RecruitmentImportItem>()
     val risks = linkedSetOf<String>()
     val badPools = mutableSetOf<String>()
@@ -94,9 +96,9 @@ internal fun recruitmentExchangePlan(
     val eventsToAdd = mutableListOf<RecruitmentExchangeEvent>()
     val unavailableBatches = mutableSetOf<String>()
     fun overlap(poolId: String): Boolean = !restoring && (
-        current.baseline > 0 || backup.baseline > 0 ||
+        current.baseline > 0 || (!recordsOnly && backup.baseline > 0) ||
             current.pools.any { it.poolId == poolId && (it.progress == null || it.progress > 0) } ||
-            backup.pools.any { it.poolId == poolId && (it.progress == null || it.progress > 0) } ||
+            (!recordsOnly && backup.pools.any { it.poolId == poolId && (it.progress == null || it.progress > 0) }) ||
             currentBatches.any { it.poolId == poolId && it.deletedAt == null }
         )
     backup.batches.forEach { batch ->
