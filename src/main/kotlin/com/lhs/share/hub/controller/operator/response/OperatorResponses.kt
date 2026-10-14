@@ -155,6 +155,7 @@ data class OperatorCatalogEntryResponse(
                 maxStage = if (e.spOf == null && e.rarity == 3) 24 else 25,
                 hasNodes = e.spOf == null,
                 awakeningSupported = e.spOf == null && e.rarity != 3,
+                awakeningUpgradeSupported = e.spOf == null && e.rarity in 4..5,
             ),
         )
     }

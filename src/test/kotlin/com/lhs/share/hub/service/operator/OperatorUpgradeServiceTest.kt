@@ -330,6 +330,113 @@ class OperatorUpgradeServiceTest {
         assertTrue(storedRecords.all { record -> record.entries.all { it.id == "bingshucanjuan" } })
     }
 
+    @Test
+    fun `awakening consumes own heart and glass once while retaining stage and leaving money untouched`() {
+        operatorCurrent = current(starLevel = 25)
+        inventoryCurrent["agent"] = stock("agent", mapOf("op1" to 120, "other" to 999))
+        inventoryCurrent["item"] = stock("item", mapOf("zhuangjinboli" to 1, "wuzhuqian" to 999_999))
+        val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "awakening", 1, 7)
+        val preview = service.preview("u1", request)
+        assertTrue(preview.available)
+        assertEquals(0, preview.from)
+        assertEquals(1, preview.to)
+        assertEquals(300_000, preview.moneyRequired)
+        assertEquals(mapOf("op1" to 100L, "zhuangjinboli" to 1L), preview.requirements.associate { it.id to it.required })
+        assertTrue(storedRecords.isEmpty())
+        val execute = OperatorUpgradeExecuteRequest("a1", "如鸢", "op1", "awakening", 1, 7, 42, preview.previewToken)
+        val result = service.execute("u1", "awakening", execute)
+        assertEquals(result, service.execute("u1", "awakening", execute))
+        assertEquals(25, result.operator.starLevel)
+        assertEquals(com.lhs.share.hub.repository.entity.OperatorHuaji(true, 25, true), result.operator.huaji)
+        assertEquals(8, result.operator.revision)
+        assertEquals(20, inventoryCurrent.getValue("agent").entries.getValue("op1").count)
+        assertEquals(999, inventoryCurrent.getValue("agent").entries.getValue("other").count)
+        assertEquals(0, inventoryCurrent.getValue("item").entries.getValue("zhuangjinboli").count)
+        assertEquals(999_999, inventoryCurrent.getValue("item").entries.getValue("wuzhuqian").count)
+        assertEquals(43, inventoryRevision)
+        assertEquals(2, storedRecords.size)
+        assertTrue(storedRecords.all { it.recordType == "consumption_delta" && it.transactionId == result.transactionId })
+        assertEquals(1, storedUpgrades.size)
+        val conflict = assertThrows(OperatorApiException::class.java) { service.execute("u1", "awakening", execute.copy(target = 25)) }
+        assertEquals("idempotency_conflict", conflict.code)
+    }
+
+    @Test
+    fun `awakening missing either material blocks execution without writes`() {
+        for ((heart, glass) in listOf(99L to 1L, 100L to 0L)) {
+            operatorCurrent = current(starLevel = 25)
+            inventoryCurrent["agent"] = stock("agent", mapOf("op1" to heart))
+            inventoryCurrent["item"] = stock("item", mapOf("zhuangjinboli" to glass))
+            val before = inventoryCurrent.toMap()
+            val preview = service.preview("u1", OperatorUpgradeRequest("a1", "如鸢", "op1", "awakening", 1, 7))
+            assertFalse(preview.available)
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.execute(
+                    "u1",
+                    "insufficient-awake",
+                    OperatorUpgradeExecuteRequest("a1", "如鸢", "op1", "awakening", 1, 7, 42, preview.previewToken),
+                )
+            }
+            assertEquals("insufficient_inventory", error.code)
+            assertEquals(before, inventoryCurrent)
+            assertEquals(current(starLevel = 25), operatorCurrent)
+            assertTrue(storedRecords.isEmpty())
+            assertTrue(storedUpgrades.isEmpty())
+            assertEquals(42, inventoryRevision)
+        }
+    }
+
+    @Test
+    fun `awakening validates independent state catalog target and owner before writes`() {
+        val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "awakening", 1, 7)
+        val original = catalog.getOperator("op1")!!
+        for (huaji in listOf(
+            com.lhs.share.hub.repository.entity.OperatorHuaji(false, 0, null),
+            com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null),
+            com.lhs.share.hub.repository.entity.OperatorHuaji(true, 24, false),
+            com.lhs.share.hub.repository.entity.OperatorHuaji(true, 25, true),
+        )) {
+            operatorCurrent = current(25).copy(entries = mapOf("op1" to current(25).entries.getValue("op1").copy(huaji = huaji)))
+            assertEquals("awakening_not_available", assertThrows(OperatorApiException::class.java) { service.preview("u1", request) }.code)
+        }
+        operatorCurrent = current(25).copy(
+            entries = mapOf(
+                "op1" to current(25).entries.getValue("op1").copy(
+                    huaji = com.lhs.share.hub.repository.entity.OperatorHuaji(true, 25, false),
+                ),
+            ),
+        )
+        assertFalse(service.preview("u1", request).available)
+        for (invalidCatalog in listOf(original.copy(rarity = 3), original.copy(spOf = "base"))) {
+            every { catalog.getOperator("op1") } returns invalidCatalog
+            if (invalidCatalog.spOf != null) every { catalog.getOperator("base") } returns original
+            assertEquals("awakening_not_available", assertThrows(OperatorApiException::class.java) { service.preview("u1", request) }.code)
+        }
+        every { catalog.getOperator("op1") } returns original
+        for (target in listOf(0, 2, 25, 31)) {
+            assertEquals(
+                "invalid_upgrade_target",
+                assertThrows(OperatorApiException::class.java) {
+                    service.preview("u1", request.copy(target = target))
+                }.code,
+            )
+        }
+        every { accounts.findByUserIdAndAccountId("other-user", "a1") } returns null
+        assertEquals("account_not_found", assertThrows(OperatorApiException::class.java) { service.preview("other-user", request) }.code)
+        assertTrue(storedRecords.isEmpty())
+        assertTrue(storedUpgrades.isEmpty())
+        assertEquals(42, inventoryRevision)
+        for (rarity in listOf(3, 4, 5)) {
+            val ordinary = com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse.of(original.copy(rarity = rarity))
+            assertEquals(rarity != 3, checkNotNull(ordinary.huajiCapabilities).awakeningUpgradeSupported)
+        }
+        assertFalse(
+            com.lhs.share.hub.controller.operator.response.OperatorCatalogEntryResponse.of(
+                original.copy(spOf = "base"),
+            ).huajiCapabilities!!.awakeningUpgradeSupported,
+        )
+    }
+
     private fun request(target: Int) = OperatorUpgradeRequest("a1", "如鸢", "op1", "huaji", target, 7)
 
     private fun executeRequest(token: String, target: Int) = OperatorUpgradeExecuteRequest("a1", "如鸢", "op1", "huaji", target, 7, 42, token)

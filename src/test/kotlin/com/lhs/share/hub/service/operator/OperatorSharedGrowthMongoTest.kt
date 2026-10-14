@@ -21,6 +21,7 @@ import com.lhs.share.hub.service.star.StarStateService
 import com.lhs.share.testinfra.TestMongo
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.spyk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -442,6 +443,61 @@ class OperatorSharedGrowthMongoTest {
         val conflicting = execute.copy(target = 24)
         assertThrows(OperatorApiException::class.java) { upgrade.execute("owner", "five-star", conflicting) }
         assertEquals(920, inventories.findById("heart-stock").orElseThrow().entries.getValue("base").count)
+
+        val foreignStock = inventories.save(
+            com.lhs.share.hub.repository.entity.InventoryCurrent(
+                id = "foreign-stock",
+                userId = "other-owner",
+                accountId = "account",
+                entityType = "agent",
+                entries = mapOf("base" to com.lhs.share.hub.repository.entity.StockEntry(500)),
+            ),
+        )
+        val awakeningRequest = request.copy(dimension = "awakening", target = 1, expectedOperatorRevision = 8)
+        val beforeAwakening = current.findById("state").orElseThrow()
+        val stockBeforeAwakening = inventories.findAll().associateBy { it.id }
+        val correctionsBefore = corrections.count()
+        val failingUpgrades = spyk(upgrades)
+        every { failingUpgrades.save(any<com.lhs.share.hub.repository.entity.OperatorUpgradeTransaction>()) } throws
+            IllegalStateException("injected late write failure")
+        val failingService = OperatorUpgradeService(
+            accounts, catalog, current, inventories, inventoryRecords, revisions, failingUpgrades,
+            mockk<AccountEventService>(relaxed = true), transactions, corrections,
+        )
+        val failedPreview = failingService.preview("owner", awakeningRequest)
+        val awakeningExecute = execute.copy(
+            dimension = "awakening",
+            target = 1,
+            expectedOperatorRevision = 8,
+            expectedInventoryRevision = 1,
+            previewToken = failedPreview.previewToken,
+        )
+        assertThrows(IllegalStateException::class.java) { failingService.execute("owner", "rolled-back-awakening", awakeningExecute) }
+        assertEquals(beforeAwakening, current.findById("state").orElseThrow())
+        assertEquals(stockBeforeAwakening, inventories.findAll().associateBy { it.id })
+        assertEquals(correctionsBefore, corrections.count())
+        assertEquals(1L, inventoryRecords.count())
+        assertEquals(1L, upgrades.count())
+        assertEquals(1L, revisions.findByUserIdAndAccountId("owner", "account")!!.revision)
+
+        val awakeningPreview = upgrade.preview("owner", awakeningRequest)
+        val confirmed = awakeningExecute.copy(previewToken = awakeningPreview.previewToken)
+        val awakened = upgrade.execute("owner", "awakening", confirmed)
+        assertEquals(awakened, upgrade.execute("owner", "awakening", confirmed))
+        assertEquals(25, awakened.operator.starLevel)
+        assertEquals(com.lhs.share.hub.repository.entity.OperatorHuaji(true, 25, true), awakened.operator.huaji)
+        assertEquals(820, inventories.findById("heart-stock").orElseThrow().entries.getValue("base").count)
+        assertEquals(99, inventories.findById("glass-stock").orElseThrow().entries.getValue("zhuangjinboli").count)
+        assertEquals(foreignStock, inventories.findById("foreign-stock").orElseThrow())
+        val afterAwakening = current.findById("state").orElseThrow()
+        for (id in listOf("movie", "sibling")) assertEquals(beforeAwakening.entries[id], afterAwakening.entries[id])
+        assertEquals(3L, inventoryRecords.count())
+        assertEquals(2L, upgrades.count())
+        assertEquals(2L, revisions.findByUserIdAndAccountId("owner", "account")!!.revision)
+        assertThrows(OperatorApiException::class.java) {
+            upgrade.preview("owner", awakeningRequest.copy(expectedOperatorRevision = 9))
+        }
+        assertEquals(3L, inventoryRecords.count())
     }
 
     @Test

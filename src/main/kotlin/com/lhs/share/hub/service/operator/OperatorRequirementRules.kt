@@ -135,6 +135,11 @@ object OperatorRequirementRules {
         return Cost(items, heart = heart, money = money)
     }
 
+    fun awakening(): Cost {
+        val row = checkNotNull(stars.last())
+        return Cost(row.items, heart = row.heart, money = row.money)
+    }
+
     fun chooseBooks(requiredExperience: Long, stock: Map<String, Long>): BookChoice? {
         if (requiredExperience <= 0) return BookChoice(emptyMap(), 0)
         val requiredUnits = ceil(requiredExperience / 100.0).toLong()

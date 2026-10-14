@@ -58,6 +58,14 @@ class OperatorRequirementRulesTest {
         assertEquals(mapOf("liutaobingshu" to 1L, "bingshuquanjuan" to 1L), stable?.items)
     }
 
+    @Test
+    fun `awakening has a separate fixed cost without a fake huaji stage`() {
+        val result = OperatorRequirementRules.awakening()
+        assertEquals(100, result.heart)
+        assertEquals(300_000, result.money)
+        assertEquals(mapOf("zhuangjinboli" to 1L), result.items)
+    }
+
     private fun catalog(prof: String, subProf: String) = OperatorCatalogEntity(
         operatorId = "op1",
         name = "密探",
