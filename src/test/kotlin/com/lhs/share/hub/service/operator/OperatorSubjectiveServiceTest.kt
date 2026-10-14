@@ -96,7 +96,7 @@ class OperatorSubjectiveServiceTest {
         every { targets.save(any()) } answers {
             firstArg<OperatorGrowthTarget>().also { targetData[Triple(it.userId, it.accountId, it.operatorId)] = it }
         }
-        every { targets.compareAndSet(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+        every { targets.compareAndSet(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
             val key = Triple(firstArg<String>(), secondArg<String>(), thirdArg<String>())
             val current = targetData[key]
             if (current?.revision != arg<Long>(3)) {
@@ -107,6 +107,7 @@ class OperatorSubjectiveServiceTest {
                     targetElite = arg(5),
                     targetStarLevel = arg(6),
                     targetHeartPaper = arg(7),
+                    targetHuaji = arg(9),
                     revision = current.revision + 1,
                     updatedAt = arg(8),
                 ).also { targetData[key] = it }
@@ -175,6 +176,47 @@ class OperatorSubjectiveServiceTest {
         assertTrue(service.annotations("u1", "a2").items.isEmpty())
         assertTrue(service.annotations("u2", "a1").items.isEmpty())
         assertEquals("active", service.subjectiveState("u1", "a2", "op1")["growth_state"])
+    }
+
+    @Test
+    fun `independent target facts survive partial updates without copying to other forms`() {
+        val first = service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree(
+                """{"expected_revision":0,"huaji":{"owned":true,"stage":null,"awakened":true}}""",
+            ) as com.fasterxml.jackson.databind.node.ObjectNode,
+        )!!
+        assertEquals(null, first.huaji?.stage)
+        assertEquals(true, first.huaji?.awakened)
+        val second = service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree("""{"expected_revision":1,"level":100}""") as com.fasterxml.jackson.databind.node.ObjectNode,
+        )!!
+        assertEquals(first.huaji, second.huaji)
+        val third = service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree("""{"expected_revision":2,"huaji":{"awakened":false}}""") as com.fasterxml.jackson.databind.node.ObjectNode,
+        )!!
+        assertEquals(false, third.huaji?.awakened)
+        assertEquals(null, third.huaji?.stage)
+        assertEquals(1, service.targets("u1", "a1").items.size)
+        assertThrows(OperatorApiException::class.java) {
+            service.putTarget(
+                "u1",
+                "a1",
+                "op1",
+                mapper.readTree(
+                    """{"expected_revision":3,"star_level":31,"huaji":{"awakened":false}}""",
+                ) as com.fasterxml.jackson.databind.node.ObjectNode,
+            )
+        }
+        assertEquals(third, service.targets("u1", "a1").items.single())
     }
 
     @Test

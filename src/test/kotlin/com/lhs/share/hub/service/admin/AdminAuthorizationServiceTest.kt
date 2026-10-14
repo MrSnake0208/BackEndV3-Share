@@ -76,6 +76,37 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
+    fun `新增日历不扩大普通管理员范围日历维护角色不授予反馈权限`() {
+        for (userId in listOf("user", "operator", "platform", "calendar")) {
+            activeUser(userId)
+            every { roleRepository.findById(userId) } returns
+                if (userId == "platform") Optional.of(binding(userId, AdminRole.PLATFORM_ADMIN)) else Optional.empty()
+            val areas = if (userId ==
+                "calendar"
+            ) {
+                setOf(FeedbackArea.CALENDAR)
+            } else if (userId == "operator") {
+                setOf(FeedbackArea.OPERATOR)
+            } else {
+                emptySet()
+            }
+            every { feedbackRepository.findById(userId) } returns Optional.of(
+                FeedbackAccessGrant(
+                    userId,
+                    manageAreas = areas,
+                    feedbackRoles = setOf("OPERATOR"),
+                    operatorAreas = areas,
+                    updatedBy = "root",
+                ),
+            )
+            assertEquals(userId == "calendar", service.canReadFeedback(userId, FeedbackArea.CALENDAR))
+            assertEquals(userId == "calendar", service.canManageFeedback(userId, FeedbackArea.CALENDAR))
+            assertEquals(areas, service.operatorAreasFor(userId))
+            assertTrue(service.developerAreasFor(userId).isEmpty())
+        }
+    }
+
+    @Test
     fun `更新日志编辑和审核角色彼此隔离`() {
         activeUser("editor")
         activeUser("reviewer")

@@ -29,5 +29,7 @@ data class OperatorCorrectionRecord(
     val discLoadouts: List<OperatorDiscLoadout>? = null,
     val starStones: List<OperatorStarStone>? = null,
     val combatStats: OperatorCombatStats? = null,
+    val huaji: OperatorHuaji? = null,
+    val huajiLegacy: OperatorHuajiLegacy? = null,
     val createdAt: Instant = Instant.now(),
 )

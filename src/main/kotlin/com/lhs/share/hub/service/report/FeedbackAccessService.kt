@@ -46,7 +46,7 @@ class FeedbackAccessService(
     fun current(userId: String): CurrentFeedbackAccessResponse {
         val superAdmin = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)
         val grant = repository.findById(userId).orElse(null)
-        val availableAreas = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label) }
+        val availableAreas = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey) }
         return CurrentFeedbackAccessResponse(
             superAdmin = superAdmin,
             receiveAreas = grant?.receiveAreas.orEmpty(),
@@ -124,7 +124,7 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val created = categories.create(label)
         auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_CREATED, created, null)
-        return FeedbackAreaOptionResponse(created.key, created.label)
+        return FeedbackAreaOptionResponse(created.key, created.label, created.builtinKey)
     }
 
     @Transactional(transactionManager = "hubTransactionManager")
@@ -132,7 +132,7 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val (before, renamed) = categories.rename(key, label)
         if (renamed != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_RENAMED, renamed, before)
-        return FeedbackAreaOptionResponse(renamed.key, renamed.label)
+        return FeedbackAreaOptionResponse(renamed.key, renamed.label, renamed.builtinKey)
     }
 
     private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {

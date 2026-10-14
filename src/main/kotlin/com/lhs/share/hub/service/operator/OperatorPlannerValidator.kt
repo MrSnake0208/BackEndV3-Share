@@ -53,10 +53,27 @@ class OperatorPlannerValidator(
             if (source == "favorites" && !targets.isEmpty) invalid("Favorites targets use growth-targets", "plans.targets")
             targets.fields().forEach { (operatorId, target) ->
                 operator(operatorId)
-                fields(target, setOf("level", "elite", "star_level"))
+                fields(target, setOf("level", "elite", "star_level", "huaji"))
                 val level = integer(target.path("level"), "level", 0, 100)
                 val elite = integer(target.path("elite"), "elite", 0, 17)
-                integer(target.path("star_level"), "star_level", 0, if (catalog.getOperator(operatorId)?.spOf == null) 31 else 5)
+                val subject = checkNotNull(catalog.getOperator(operatorId))
+                if (target.has("huaji")) {
+                    if (target.has("star_level")) invalid("Conflicting target representations", "plans.targets.huaji")
+                    OperatorHuajiRules.patch(
+                        target.path("huaji"),
+                        subject,
+                        com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null),
+                    )
+                } else {
+                    integer(target.path("star_level"), "star_level", 0, if (subject.spOf == null) 31 else 5)
+                    if (OperatorHuajiRules.anomalous(
+                            target.path("star_level").asInt(),
+                            subject,
+                        )
+                    ) {
+                        invalid("Hidden rarity target requires review", "plans.targets.star_level")
+                    }
+                }
                 val maxElite = OperatorGrowthRules.maxEliteForLevel(level.toInt())
                 if (elite > maxElite) invalid("Elite target exceeds the level limit $maxElite", "plans.targets.elite")
             }

@@ -31,7 +31,8 @@ class OperatorCoreInvariantTest {
                 OperatorRequirementRules.elite(elite, elite, TestFixtures.operator()),
             )
         }
-        for (star in 0..31) assertEquals(OperatorRequirementRules.Cost(emptyMap()), OperatorRequirementRules.huaji(star, star))
+        for (star in 0..30) assertEquals(OperatorRequirementRules.Cost(emptyMap()), OperatorRequirementRules.huaji(star, star))
+        assertThrows(IllegalArgumentException::class.java) { OperatorRequirementRules.huaji(31, 31) }
     }
 
     @Test

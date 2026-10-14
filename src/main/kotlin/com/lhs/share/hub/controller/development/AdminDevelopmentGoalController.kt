@@ -8,6 +8,7 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.development.request.DevelopmentGoalRequest
 import com.lhs.share.hub.controller.development.response.DevelopmentGoalResponse
 import com.lhs.share.hub.service.development.DevelopmentGoalService
+import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -19,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequireJwt
-@RequestMapping("/v1/admin/development-goals")
+@RequestMapping("/v1/admin/development-goals", produces = [MediaType.APPLICATION_JSON_VALUE])
 class AdminDevelopmentGoalController(private val service: DevelopmentGoalService, private val helper: AuthenticationHelper) {
     @GetMapping
     fun list(

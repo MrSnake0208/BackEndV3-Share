@@ -48,6 +48,8 @@ data class OperatorCurrentEntryDto(
     val revision: Long,
     val listedBaselineAt: Instant?,
     val updatedAt: Instant?,
+    val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
+    val huajiLegacy: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy? = null,
 ) {
     companion object {
         fun of(entry: com.lhs.share.hub.repository.entity.OperatorEntry): OperatorCurrentEntryDto {
@@ -63,6 +65,8 @@ data class OperatorCurrentEntryDto(
                 normalized.revision,
                 normalized.listedBaselineAt,
                 normalized.updatedAt,
+                normalized.huaji,
+                normalized.huajiLegacy,
             )
         }
     }
@@ -89,7 +93,7 @@ data class OperatorExportRecordDto(
     val game: String?,
     val effectiveAt: Instant,
     val snapshotScope: String = "full",
-    val entries: List<OperatorRecordEntry>,
+    val entries: List<com.lhs.share.hub.controller.operator.request.OperatorEntryRequest>,
 )
 
 data class OperatorRecordPageResponse(val items: List<OperatorRecordListItemDto>, val nextCursor: String?)
@@ -130,6 +134,7 @@ data class OperatorCatalogEntryResponse(
     val spOf: String? = null,
     // 密探头像相对路径（如 "/avatar/char_001_yangxiu.webp"），前端拼 baseURL；未上传为 null。
     val avatar: String? = null,
+    val huajiCapabilities: OperatorHuajiCapabilities? = null,
 ) {
     companion object {
         fun of(e: OperatorCatalogEntity) = OperatorCatalogEntryResponse(
@@ -146,6 +151,11 @@ data class OperatorCatalogEntryResponse(
             e.discs,
             e.spOf,
             e.avatar,
+            OperatorHuajiCapabilities(
+                maxStage = if (e.spOf == null && e.rarity == 3) 24 else 25,
+                hasNodes = e.spOf == null,
+                awakeningSupported = e.spOf == null && e.rarity != 3,
+            ),
         )
     }
 }
@@ -241,4 +251,11 @@ data class OperatorError(
     val entryId: String? = null,
     val operatorId: String? = null,
     val fieldPath: String? = null,
+)
+
+data class OperatorHuajiCapabilities(
+    val maxStage: Int,
+    val hasNodes: Boolean,
+    val awakeningSupported: Boolean,
+    val awakeningUpgradeSupported: Boolean = false,
 )

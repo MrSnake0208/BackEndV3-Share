@@ -45,7 +45,7 @@ class OperatorShareService(
         val growthStates = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(account.userId, account.accountId)
             .associate { it.operatorId to it.growthState }
         val entries = current?.entries.orEmpty()
-            .filterValues { it.starLevel > 0 }
+            .filterValues { it.huaji?.owned ?: (it.starLevel > 0) }
             .mapValues { (operatorId, entry) -> entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE) }
         return OperatorShareViewResponse(
             game = account.game,
@@ -166,6 +166,7 @@ class OperatorShareService(
         level = level,
         elite = elite,
         starLevel = starLevel,
+        huaji = huaji,
         growthState = growthState,
         discLoadouts = discLoadouts.map { loadout ->
             OperatorShareDiscLoadout(

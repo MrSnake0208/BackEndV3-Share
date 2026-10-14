@@ -92,7 +92,7 @@ class OperatorSubjectiveService(
     }
 
     fun putTarget(userId: String, accountId: String, operatorId: String, request: ObjectNode): OperatorGrowthTargetResponse? {
-        rejectUnknown(request, setOf("level", "elite", "star_level", "heart_paper", "targets", "expected_revision"))
+        rejectUnknown(request, setOf("level", "elite", "star_level", "huaji", "heart_paper", "targets", "expected_revision"))
         requireSubject(userId, accountId, operatorId)
         val expected = requiredRevision(request)
         if (request.has("targets")) {
@@ -116,9 +116,10 @@ class OperatorSubjectiveService(
             },
             current?.targetStarLevel,
         )
+        val huaji = targetHuaji(request, operatorId, current)
         val heart = value(request, "heart_paper", 0, 1_000_000, current?.targetHeartPaper)
-        if (current != null && listOf(level, elite, star, heart) ==
-            listOf(current.targetLevel, current.targetElite, current.targetStarLevel, current.targetHeartPaper)
+        if (current != null && listOf(level, elite, star, heart, huaji) ==
+            listOf(current.targetLevel, current.targetElite, current.targetStarLevel, current.targetHeartPaper, current.targetHuaji)
         ) {
             return OperatorGrowthTargetResponse.of(current)
         }
@@ -136,6 +137,7 @@ class OperatorSubjectiveService(
                         targetElite = elite,
                         targetStarLevel = star,
                         targetHeartPaper = heart,
+                        targetHuaji = huaji,
                         createdAt = now,
                         updatedAt = now,
                     ),
@@ -144,7 +146,7 @@ class OperatorSubjectiveService(
                 conflict("growth_target_revision_conflict")
             }
         } else {
-            targetRepository.compareAndSet(userId, accountId, operatorId, expected, level, elite, star, heart, now)
+            targetRepository.compareAndSet(userId, accountId, operatorId, expected, level, elite, star, heart, now, huaji)
                 ?: conflict("growth_target_revision_conflict")
         }
         accountEvents?.publishChange(
@@ -244,6 +246,7 @@ class OperatorSubjectiveService(
                     "elite" to it.targetElite,
                     "star_level" to it.targetStarLevel,
                     "heart_paper" to it.targetHeartPaper,
+                    "huaji" to it.targetHuaji,
                 ).filterValues { value -> value != null }
             },
         )
@@ -269,9 +272,10 @@ class OperatorSubjectiveService(
         val level = value(target, "level", 0, 100, old?.targetLevel)
         val elite = value(target, "elite", 0, 17, old?.targetElite)
         val star = value(target, "star_level", 0, if (catalogService.getOperator(operatorId)?.spOf == null) 31 else 5, old?.targetStarLevel)
+        val huaji = targetHuaji(target, operatorId, old)
         val heart = value(target, "heart_paper", 0, 1_000_000, old?.targetHeartPaper)
-        if (old != null && listOf(level, elite, star, heart) ==
-            listOf(old.targetLevel, old.targetElite, old.targetStarLevel, old.targetHeartPaper)
+        if (old != null && listOf(level, elite, star, heart, huaji) ==
+            listOf(old.targetLevel, old.targetElite, old.targetStarLevel, old.targetHeartPaper, old.targetHuaji)
         ) {
             return
         }
@@ -282,6 +286,7 @@ class OperatorSubjectiveService(
                 targetElite = elite,
                 targetStarLevel = star,
                 targetHeartPaper = heart,
+                targetHuaji = huaji,
                 revision = old.revision + 1,
                 updatedAt = now,
             ) ?: OperatorGrowthTarget(
@@ -293,6 +298,7 @@ class OperatorSubjectiveService(
                 targetElite = elite,
                 targetStarLevel = star,
                 targetHeartPaper = heart,
+                targetHuaji = huaji,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -328,6 +334,28 @@ class OperatorSubjectiveService(
             invalid("expected_revision must be a non-negative integer")
         }
         return node.longValue()
+    }
+
+    private fun targetHuaji(
+        node: ObjectNode,
+        operatorId: String,
+        old: OperatorGrowthTarget?,
+    ): com.lhs.share.hub.repository.entity.OperatorHuaji? {
+        val catalog = checkNotNull(catalogService.getOperator(operatorId))
+        if (node.has("huaji") && node.has("star_level")) invalidTarget("Use one target huaji representation")
+        if (node.has("huaji")) {
+            return OperatorHuajiRules.patch(
+                node.get("huaji"),
+                catalog,
+                old?.targetHuaji ?: com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null),
+            )
+        }
+        if (node.hasNonNull("star_level")) {
+            val raw = node.path("star_level").asInt()
+            if (OperatorHuajiRules.anomalous(raw, catalog)) invalidTarget("Hidden rarity legacy target requires review")
+            return OperatorHuajiRules.legacy(raw, catalog, old?.targetHuaji)
+        }
+        return old?.targetHuaji
     }
 
     private fun value(node: ObjectNode, field: String, min: Int, max: Int, fallback: Int?): Int? {
@@ -370,6 +398,6 @@ class OperatorSubjectiveService(
     companion object {
         const val ACTIVE = "active"
         val GROWTH_STATES = setOf(ACTIVE, "graduated", "skip", "discarded")
-        val TARGET_FIELDS = setOf("level", "elite", "star_level", "heart_paper")
+        val TARGET_FIELDS = setOf("level", "elite", "star_level", "huaji", "heart_paper")
     }
 }

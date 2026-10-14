@@ -14,7 +14,10 @@
       "pattern": "Z$"
     },
     "source_account": {
-      "type": "object",
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
         "account_id": {
@@ -24,7 +27,8 @@
       },
       "required": [
         "account_id"
-      ]
+      ],
+      "description": "可省略或为null的来源元信息；提供对象时account_id必填。导入目标由已认证请求的account_id决定，导出仍携带来源。"
     },
     "game": {
       "enum": [
@@ -85,7 +89,6 @@
   "required": [
     "schema",
     "exported_at",
-    "source_account",
     "game",
     "archive_revision",
     "baseline",

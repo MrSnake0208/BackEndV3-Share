@@ -6,6 +6,7 @@ import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
 import org.bson.Document
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.data.convert.Jsr310Converters.LocalDateToDateConverter
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.aggregation.Aggregation
@@ -16,6 +17,7 @@ import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.time.LocalDate
+import java.util.stream.Stream
 
 /** Explicit Hub template: no recruitment collection can fall back to MaaBackend. */
 @Repository
@@ -130,13 +132,16 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
         limit: Int,
         direction: Sort.Direction = Sort.Direction.DESC,
     ): List<RecruitmentEvent> {
-        val query = owner(userId, accountId).addCriteria(Criteria.where("deletedAt").`is`(null))
-        poolId?.let { query.addCriteria(Criteria.where("poolId").`is`(it)) }
+        val filters = mutableListOf(Criteria.where("deletedAt").`is`(null))
+        poolId?.let { filters += Criteria.where("poolId").`is`(it) }
         if (dateFrom != null || dateTo != null) {
             val date = Criteria.where("acquiredDate").ne(null)
             dateFrom?.let(date::gte)
             dateTo?.let(date::lte)
-            query.addCriteria(date)
+            val legacy = mutableListOf(Document("\$eq", listOf(Document("\$type", "\$acquiredDate"), "date")))
+            dateFrom?.let { legacy += Document("\$gte", listOf("\$acquiredDate", LocalDateToDateConverter.INSTANCE.convert(it))) }
+            dateTo?.let { legacy += Document("\$lt", listOf("\$acquiredDate", LocalDateToDateConverter.INSTANCE.convert(it.plusDays(1)))) }
+            filters += Criteria().orOperator(date, Criteria.where("\$expr").`is`(Document("\$and", legacy)))
         }
         if (afterOrder != null && afterId != null) {
             val orderBoundary = Criteria.where("sortOrder")
@@ -148,8 +153,9 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
                 orderBoundary.lt(afterOrder)
                 idBoundary.lt(afterId)
             }
-            query.addCriteria(Criteria().orOperator(orderBoundary, idBoundary))
+            filters += Criteria().orOperator(orderBoundary, idBoundary)
         }
+        val query = owner(userId, accountId).addCriteria(Criteria().andOperator(filters))
         return template.find(query.with(Sort.by(direction, "sortOrder", "eventId")).limit(limit), RecruitmentEvent::class.java)
     }
 
@@ -180,6 +186,21 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
                 row.get("_id", Document::class.java).getString("agentId") to (row["count"] as Number).toLong()
             }
         }
+
+    /** Ordered, projected cursor: no portraits, snapshots or full history list for summary calculations. */
+    fun statisticEvents(userId: String, accountId: String): Stream<RecruitmentStatisticEvent> {
+        val query = owner(userId, accountId).addCriteria(Criteria.where("deletedAt").`is`(null))
+            .addCriteria(Criteria.where("agentSnapshot.rarity").ne(4)).with(Sort.by("sortOrder", "eventId"))
+        query.fields().include("poolId", "agentSnapshot.rarity", "pullSpan", "upStatus").exclude("_id")
+        return template.stream(query, Document::class.java, "recruitment_events").map { row ->
+            RecruitmentStatisticEvent(
+                row.getString("poolId"),
+                (row.get("agentSnapshot", Document::class.java)?.get("rarity") as? Number)?.toInt(),
+                (row["pullSpan"] as? Number)?.toLong(),
+                row.getString("upStatus"),
+            )
+        }
+    }
 
     private fun eventGroup(id: String?): Document {
         fun sum(expression: Any) = Document("\$sum", expression)
@@ -259,3 +280,5 @@ data class RecruitmentTotals(
     val unknownCount: Long,
     val fourStarCount: Long = 0,
 )
+
+data class RecruitmentStatisticEvent(val poolId: String, val rarity: Int?, val pullSpan: Long?, val upStatus: String?)

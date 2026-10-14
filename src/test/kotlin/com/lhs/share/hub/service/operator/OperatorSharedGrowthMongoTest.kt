@@ -155,6 +155,296 @@ class OperatorSharedGrowthMongoTest {
     }
 
     @Test
+    fun `30 scan remains idempotent for confirmed awake values and contradictory body cannot overwrite`() {
+        for (awakened in listOf(true, false)) {
+            resetCurrent()
+            val patch = mapper.readTree(
+                """{"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":25,"awakened":$awakened}}""",
+            ) as ObjectNode
+            val confirmed = service.patchCurrent("owner", "account", "如鸢", "base", patch)
+            val command = document("thirty-$awakened")
+            val record = command.path("document").path("records").get(0) as ObjectNode
+            record.put("effective_at", Instant.now().plusSeconds(1).toString())
+            record.set<com.fasterxml.jackson.databind.JsonNode>(
+                "entries",
+                mapper.readTree("""[{"operator_id":"base","star_level":30}]"""),
+            )
+            val before = current.findById("state").orElseThrow()
+            assertEquals(1, imports.previewBrowser("owner", command).unchanged)
+            assertEquals(1, imports.commitBrowser("owner", command).unchanged)
+            assertEquals(1, imports.commitBrowser("owner", command).unchanged)
+            record.put("record_id", "thirty-again-$awakened")
+            assertEquals(1, imports.commitBrowser("owner", command).unchanged)
+            assertEquals(before, current.findById("state").orElseThrow())
+            val read = service.current("owner", "account", "如鸢").single().entries.getValue("base")
+            assertEquals(confirmed.revision, read.revision)
+            assertEquals(awakened, read.huaji?.awakened)
+            (record.path("entries").get(0) as ObjectNode).put("star_level", 19)
+            assertEquals(1, imports.commitBrowser("owner", command).rejected)
+            assertEquals(before, current.findById("state").orElseThrow())
+        }
+    }
+
+    @Test
+    fun `v2 camelCase 30 and 31 roundtrip preserves independent facts and semantic retries`() {
+        every { accounts.findAllByUserIdAndAccountIdIn("owner", any()) } returns listOf(
+            SubAccount(userId = "owner", accountId = "account", name = "test", game = "如鸢"),
+        )
+        for (awakened in listOf(true, false)) {
+            resetCurrent()
+            service.patchCurrent(
+                "owner",
+                "account",
+                "如鸢",
+                "base",
+                mapper.readTree(
+                    """{"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":25,"awakened":$awakened}}""",
+                ) as ObjectNode,
+            )
+            val before = current.findById("state").orElseThrow()
+            val document = mapper.readValue(
+                """{"format":"myshare-operator-exchange","version":2,"exported_at":"2026-10-13T00:00:00Z",
+                "producer":{"platform":"test"},"records":[{"account_id":"account","record_id":"v2-$awakened",
+                "record_type":"operator_snapshot","game":"如鸢","effective_at":"${Instant.now().plusSeconds(1)}","snapshot_scope":"listed",
+                "entries":[{"id":"base","elite":16,"level":90,"starLevel":30}]}]}""",
+                com.lhs.share.hub.controller.operator.request.OperatorImportRequest::class.java,
+            )
+            val wire = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(document)
+            assertEquals(30, wire.path("records").get(0).path("entries").get(0).path("starLevel").asInt())
+            assertEquals(1, service.import("owner", document).accepted)
+            assertEquals(1, service.import("owner", document).duplicates)
+            val precisionConflict = document.copy(
+                records = document.records.map {
+                    it.copy(effectiveAt = Instant.parse(it.effectiveAt).plusNanos(1).toString())
+                },
+            )
+            assertThrows(OperatorApiException::class.java) { service.import("owner", precisionConflict) }
+            val again = document.copy(records = document.records.map { it.copy(recordId = "v2-again-$awakened") })
+            assertEquals(1, service.import("owner", again).accepted)
+            val after = current.findById("state").orElseThrow()
+            val baselineAt = Instant.parse(document.records.single().effectiveAt).truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+            assertEquals(
+                before.copy(
+                    updatedAt = after.updatedAt,
+                    entries = before.entries + ("base" to before.entries.getValue("base").copy(listedBaselineAt = baselineAt)),
+                ),
+                after,
+            )
+            val conflicting = again.copy(
+                records = again.records.map {
+                    it.copy(entries = it.entries.map { row -> row.copy(starLevel = 19) })
+                },
+            )
+            assertThrows(OperatorApiException::class.java) { service.import("owner", conflicting) }
+            assertEquals(after, current.findById("state").orElseThrow())
+            val awake = document.copy(
+                records = document.records.map {
+                    it.copy(recordId = "v2-awake-$awakened", entries = it.entries.map { row -> row.copy(starLevel = 31) })
+                },
+            )
+            assertEquals(1, service.import("owner", awake).accepted)
+            val read = service.current("owner", "account", "如鸢").single().entries.getValue("base")
+            assertEquals(25, read.huaji?.stage)
+            assertEquals(true, read.huaji?.awakened)
+        }
+    }
+
+    @Test
+    fun `independent awakening uses CAS and survives Mongo read without stage promotion`() {
+        val request = mapper.readTree(
+            """{"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":19,"awakened":false}}""",
+        ) as ObjectNode
+        val first = service.patchCurrent("owner", "account", "如鸢", "base", request)
+        val beforeSibling = current.findById("state").orElseThrow().entries.getValue("movie")
+        request.put("expected_revision", first.revision)
+        request.set<com.fasterxml.jackson.databind.JsonNode>("huaji", mapper.readTree("""{"awakened":true}"""))
+        val second = service.patchCurrent("owner", "account", "如鸢", "base", request)
+        assertEquals(19, second.huaji?.stage)
+        assertEquals(true, service.current("owner", "account", "如鸢").single().entries.getValue("base").huaji?.awakened)
+        assertEquals(beforeSibling, current.findById("state").orElseThrow().entries.getValue("movie"))
+        val before = current.findById("state").orElseThrow()
+        val auditCount = corrections.count()
+        assertThrows(OperatorApiException::class.java) { service.patchCurrent("owner", "account", "如鸢", "base", request) }
+        assertEquals(before, current.findById("state").orElseThrow())
+        assertEquals(auditCount, corrections.count())
+    }
+
+    @Test
+    fun `v4 backup schema and import preserve independent unknown facts and legacy trace`() {
+        val source = current.findById("state").orElseThrow()
+        val facts = com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, true)
+        val trace = com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(31, "legacy_current")
+        current.save(source.copy(entries = mapOf("base" to source.entries.getValue("base").copy(huaji = facts, huajiLegacy = trace))))
+        val annotations = mockk<com.lhs.share.hub.repository.OperatorAnnotationRepository>()
+        val targets = mockk<com.lhs.share.hub.repository.OperatorGrowthTargetRepository>()
+        val favorites = mockk<com.lhs.share.hub.repository.InventoryAgentFavoriteRepository>()
+        every { accounts.findByUserIdAndAccountId("owner", "account") } returns
+            SubAccount(userId = "owner", accountId = "account", name = "测试", game = "如鸢")
+        every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("owner", "account") } returns emptyList()
+        every { targets.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("owner", "account") } returns emptyList()
+        every { favorites.findAllByUserIdAndAccountIdOrderByAgentIdAsc("owner", "account") } returns emptyList()
+        every { catalog.currentCatalogVersion() } returns "test"
+        val exporter = OperatorV3ExportService(mapper, accounts, current, annotations, targets, favorites, catalog)
+        val exported = exporter.export("owner", "account", null, 4)
+        OperatorV3SchemaValidator(mapper).validate(exported)
+        val firstRecord = exported.path("records").get(0) as ObjectNode
+        val entry = firstRecord.path("entries").get(0)
+        assertEquals(true, entry.path("huaji").path("stage").isNull)
+        assertEquals(true, entry.path("huaji").path("awakened").asBoolean())
+        assertEquals(31, entry.path("huaji_legacy").path("raw").asInt())
+        (exported.path("records") as com.fasterxml.jackson.databind.node.ArrayNode).remove(1)
+        // Export files cross JSON transport, which removes JVM-specific LongNode/IntNode distinctions.
+        val transported = mapper.readTree(mapper.writeValueAsString(exported)) as ObjectNode
+        current.deleteAll()
+        val committed = imports.commitBrowser("owner", transported)
+        assertEquals(0, committed.rejected)
+        val read = service.current("owner", "account", "如鸢").single().entries.getValue("base")
+        assertEquals(facts, read.huaji)
+        assertEquals(trace, read.huajiLegacy)
+        assertEquals(1, imports.commitBrowser("owner", transported).unchanged)
+        val invalid = transported.deepCopy()
+        val invalidFacts = invalid.path("records").get(0).path("entries").get(0).path("huaji") as ObjectNode
+        invalidFacts.put("owned", false).put("stage", 25)
+        assertThrows(OperatorApiException::class.java) { imports.previewBrowser("owner", invalid) }
+    }
+
+    @Test
+    fun `v4 false null and missing facts retain their distinct meanings through Mongo`() {
+        for (awakened in listOf(false, null)) {
+            resetCurrent()
+            val command = document("v4-$awakened")
+            val root = command.path("document") as ObjectNode
+            root.put("version", 4)
+            val record = root.path("records").get(0) as ObjectNode
+            record.put("source_kind", "backup")
+            record.set<com.fasterxml.jackson.databind.JsonNode>(
+                "entries",
+                mapper.readTree(
+                    """[{"operator_id":"base","huaji":{"owned":true,"stage":null,"awakened":$awakened},"huaji_legacy":{"raw":31,"source":"legacy_fixture"}}]""",
+                ),
+            )
+            assertEquals(1, imports.commitBrowser("owner", command).accepted)
+            val before = current.findById("state").orElseThrow()
+            val read = service.current("owner", "account", "如鸢").single().entries.getValue("base")
+            assertEquals(true, read.huaji?.owned)
+            assertEquals(null, read.huaji?.stage)
+            assertEquals(awakened, read.huaji?.awakened)
+            record.put("record_id", "missing-$awakened")
+            record.set<com.fasterxml.jackson.databind.JsonNode>("entries", mapper.readTree("""[{"operator_id":"base","level":90}]"""))
+            assertEquals(1, imports.commitBrowser("owner", command).unchanged)
+            assertEquals(before, current.findById("state").orElseThrow())
+            assertEquals(awakened, service.current("owner", "account", "如鸢").single().entries.getValue("base").huaji?.awakened)
+        }
+    }
+
+    @Test
+    fun `hidden legacy anomaly remains isolated while another valid entry commits`() {
+        val hidden = catalog.getOperator("base")!!.copy(operatorId = "hidden", rarity = 3)
+        every { catalog.getOperator("hidden") } returns hidden
+        every { catalog.spFormsOf("hidden") } returns emptyList()
+        for (raw in listOf(25, 30, 31)) {
+            val command = document("hidden-$raw")
+            val record = command.path("document").path("records").get(0) as ObjectNode
+            record.put("source_kind", "backup")
+            record.set<com.fasterxml.jackson.databind.JsonNode>(
+                "entries",
+                mapper.readTree(
+                    """[{"operator_id":"hidden","star_level":$raw},{"operator_id":"base","star_level":25}]""",
+                ),
+            )
+            val result = imports.commitBrowser("owner", command)
+            assertEquals(1, result.review)
+            assertEquals(0, result.rejected)
+            assertEquals(false, current.findById("state").orElseThrow().entries.containsKey("hidden"))
+            assertEquals(25, service.current("owner", "account", "如鸢").single().entries.getValue("base").huaji?.stage)
+            val audit = audits.findByUserIdAndAccountIdAndRecordId("owner", "account", "hidden-$raw")!!
+            assertEquals(raw, mapper.readTree(audit.payload).path("entries").get(0).path("star_level").asInt())
+            assertEquals(1, imports.commitBrowser("owner", command).review)
+        }
+    }
+
+    @Test
+    fun `final upgrade is atomic and hidden terminal or forged execute cannot consume inventory`() {
+        val inventories = factory.getRepository(com.lhs.share.hub.repository.InventoryCurrentRepository::class.java)
+        val inventoryRecords = factory.getRepository(com.lhs.share.hub.repository.InventoryRecordRepository::class.java)
+        val revisions = factory.getRepository(
+            com.lhs.share.hub.repository.InventoryRevisionRepository::class.java,
+            RepositoryFragments.just(com.lhs.share.hub.repository.InventoryRevisionRepositoryImpl(template)),
+        )
+        val upgrades = factory.getRepository(com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository::class.java)
+        listOf("inventory_current", "inventory_records", "inventory_revision", "operator_upgrade_transaction").forEach {
+            template.createCollection(it)
+        }
+        val growth = current.findById("state").orElseThrow()
+        current.save(
+            growth.copy(
+                entries = growth.entries + (
+                    "base" to growth.entries.getValue("base").copy(
+                        starLevel = 24,
+                        huaji = com.lhs.share.hub.repository.entity.OperatorHuaji(true, 24, false),
+                    )
+                    ),
+            ),
+        )
+        inventories.save(
+            com.lhs.share.hub.repository.entity.InventoryCurrent(
+                id = "heart-stock",
+                userId = "owner",
+                accountId = "account",
+                entityType = "agent",
+                entries = mapOf("base" to com.lhs.share.hub.repository.entity.StockEntry(1000)),
+            ),
+        )
+        inventories.save(
+            com.lhs.share.hub.repository.entity.InventoryCurrent(
+                id = "glass-stock",
+                userId = "owner",
+                accountId = "account",
+                entityType = "item",
+                entries = mapOf("zhuangjinboli" to com.lhs.share.hub.repository.entity.StockEntry(100)),
+            ),
+        )
+        val upgrade = OperatorUpgradeService(
+            accounts, catalog, current, inventories, inventoryRecords, revisions, upgrades,
+            mockk<AccountEventService>(relaxed = true), transactions, corrections,
+        )
+        val request = com.lhs.share.hub.controller.operator.request.OperatorUpgradeRequest("account", "如鸢", "base", "huaji", 25, 7)
+        val preview = upgrade.preview("owner", request)
+        val original = catalog.getOperator("base")!!
+        val before = current.findById("state").orElseThrow()
+        val stockBefore = inventories.findAll()
+        every { catalog.getOperator("base") } returns original.copy(rarity = 3)
+        assertThrows(OperatorApiException::class.java) { upgrade.preview("owner", request) }
+        val execute = com.lhs.share.hub.controller.operator.request.OperatorUpgradeExecuteRequest(
+            "account",
+            "如鸢",
+            "base",
+            "huaji",
+            25,
+            7,
+            0,
+            preview.previewToken,
+        )
+        assertThrows(OperatorApiException::class.java) { upgrade.execute("owner", "denied", execute) }
+        assertEquals(before, current.findById("state").orElseThrow())
+        assertEquals(stockBefore, inventories.findAll())
+        assertEquals(0L, inventoryRecords.count())
+        assertEquals(0L, upgrades.count())
+        assertEquals(0L, revisions.count())
+        every { catalog.getOperator("base") } returns original
+        val first = upgrade.execute("owner", "five-star", execute)
+        assertEquals(first, upgrade.execute("owner", "five-star", execute))
+        assertEquals(920, inventories.findById("heart-stock").orElseThrow().entries.getValue("base").count)
+        assertEquals(100, inventories.findById("glass-stock").orElseThrow().entries.getValue("zhuangjinboli").count)
+        assertEquals(false, current.findById("state").orElseThrow().entries.getValue("base").huaji?.awakened)
+        assertEquals(1L, inventoryRecords.count())
+        assertEquals(1L, upgrades.count())
+        val conflicting = execute.copy(target = 24)
+        assertThrows(OperatorApiException::class.java) { upgrade.execute("owner", "five-star", conflicting) }
+        assertEquals(920, inventories.findById("heart-stock").orElseThrow().entries.getValue("base").count)
+    }
+
+    @Test
     fun `conflicting group rejects preview and commit without current corrections or audit writes`() {
         val before = current.findById("state").orElseThrow()
         assertEquals(2, imports.previewBrowser("owner", document("conflict", conflict = true)).rejected)

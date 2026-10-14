@@ -88,12 +88,23 @@ class RecruitmentControllerContractTest {
         val summary = RecruitmentSummary(0, 0, 0, 0, 0, 0, 0, 0, false)
         every { service.archive("u", "a") } returns RecruitmentArchiveResponse(
             "a", "如鸢", 0, 0, null, emptyList(), emptyList(), summary, false,
-            mapOf("p" to summary.copy(upAgentCounts = mapOf("catalog_p:up:A" to 2L, "catalog_p:up:B" to 0L))),
+            mapOf(
+                "p" to summary.copy(
+                    upAgentCounts = mapOf("catalog_p:up:A" to 2L, "catalog_p:up:B" to 0L),
+                    averageGoldPulls = 18.2,
+                    smallPityWinRate = 0.0,
+                ),
+                "empty" to summary,
+            ),
         )
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:A']").value(2))
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:B']").value(0))
+            .andExpect(jsonPath("$.data.pool_summaries.p.average_gold_pulls").value(18.2))
+            .andExpect(jsonPath("$.data.pool_summaries.p.small_pity_win_rate").value(0.0))
+            .andExpect(jsonPath("$.data.pool_summaries.empty.average_gold_pulls").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.pool_summaries.empty.small_pity_win_rate").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.records").doesNotExist())
         verify(exactly = 1) { service.archive("u", "a") }
     }

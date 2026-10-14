@@ -32,6 +32,7 @@ object TestMongo {
                     command.hostConfig!!.withPortBindings(PortBinding(Ports.Binding.bindIp("127.0.0.1"), ExposedPort(27017)))
                 }
                 .also { container ->
+                    System.getenv("AO_SESSION_ID")?.let { container.withLabel("ao.session", it) }
                     container.start() // Starts a replica set; missing Docker is deliberately a test failure.
                     Runtime.getRuntime().addShutdownHook(Thread({ container.stop() }, "yuanhub-test-mongo-cleanup"))
                 }
@@ -91,6 +92,7 @@ object TestRedis {
                     command.hostConfig!!.withPortBindings(PortBinding(Ports.Binding.bindIp("127.0.0.1"), ExposedPort(6379)))
                 }
                 .also { container ->
+                    System.getenv("AO_SESSION_ID")?.let { container.withLabel("ao.session", it) }
                     container.start()
                     allocatedUri = "redis://${container.host}:${container.getMappedPort(6379)}"
                     Runtime.getRuntime().addShutdownHook(Thread({ container.stop() }, "yuanhub-test-redis-cleanup"))

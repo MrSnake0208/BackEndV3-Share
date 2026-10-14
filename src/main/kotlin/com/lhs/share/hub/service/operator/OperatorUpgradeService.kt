@@ -87,7 +87,7 @@ class OperatorUpgradeService(
                 if (!calculation.available) {
                     conflict("insufficient_inventory", "Inventory is insufficient for this upgrade")
                 }
-                val now = Instant.now()
+                val now = Instant.now().truncatedTo(ChronoUnit.MILLIS)
                 val consumed = consume(userId, request.accountId, calculation.requirements)
                 val nextEntry = upgradedEntry(calculation.entry, request.dimension, request.target, now)
                 val current =
@@ -117,6 +117,8 @@ class OperatorUpgradeService(
                         level = savedEntry.level,
                         elite = savedEntry.elite,
                         starLevel = savedEntry.starLevel,
+                        huaji = savedEntry.huaji,
+                        huajiLegacy = savedEntry.huajiLegacy,
                         createdAt = now,
                     ),
                 )
@@ -145,6 +147,7 @@ class OperatorUpgradeService(
                         operatorLevel = savedEntry.level,
                         operatorElite = savedEntry.elite,
                         operatorStarLevel = savedEntry.starLevel,
+                        operatorHuaji = savedEntry.huaji,
                         operatorRevision = savedEntry.revision,
                         consumed = consumed,
                         inventoryRevision = nextInventoryRevision,
@@ -212,16 +215,20 @@ class OperatorUpgradeService(
         ) {
             invalid("shared_growth_conflict", "Correct inconsistent shared growth before consuming inventory")
         }
+        val huaji = OperatorHuajiRules.read(entry, catalog)
+        if (request.dimension == HUAJI && (!huaji.owned || huaji.stage == null)) {
+            invalid("huaji_stage_unknown", "Confirm owned huaji stage before calculating materials")
+        }
         val from = when (request.dimension) {
             LEVEL -> entry.level
             ELITE -> entry.elite
-            HUAJI -> entry.starLevel
+            HUAJI -> checkNotNull(huaji.stage)
             else -> invalid("invalid_upgrade_target", "dimension must be level, elite, or huaji")
         }
         val max = when (request.dimension) {
             LEVEL -> 100
             ELITE -> 17
-            else -> if (catalog.spOf == null) 31 else 5
+            else -> OperatorHuajiRules.maximum(catalog)
         }
         if (request.target !in (from + 1)..max) {
             val code = if (request.dimension == HUAJI) "invalid_star_level" else "invalid_upgrade_target"
@@ -262,7 +269,7 @@ class OperatorUpgradeService(
         val revision = inventoryRevisionRepository.findByUserIdAndAccountId(userId, request.accountId)?.revision ?: 0
         return Calculation(
             request,
-            entry,
+            entry.copy(huaji = huaji),
             from,
             rows,
             reasons.isEmpty(),
@@ -328,7 +335,13 @@ class OperatorUpgradeService(
         return when (dimension) {
             LEVEL -> entry.copy(level = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
             ELITE -> entry.copy(elite = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
-            else -> entry.copy(starLevel = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
+            else -> entry.copy(
+                starLevel = target,
+                huaji = (entry.huaji ?: com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null)).copy(stage = target),
+                combatStats = staleStats,
+                revision = entry.revision + 1,
+                updatedAt = now,
+            )
         }
     }
 

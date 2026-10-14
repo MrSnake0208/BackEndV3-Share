@@ -4,6 +4,8 @@
 
 ## 读接口
 
+纯日期字段（卡池日期、个人池快照日期、出货日期）新写入 Mongo 时保存为 `YYYY-MM-DD` 字符串，查询与跨时区读取使用同一转换器；空值继续表示未知。日期筛选和分页同时兼容新字符串与旧 BSON Date，旧日期沿用原有本地时区的读取/查询边界；读取不迁移数据，不能在缺少原始写入时区的情况下自动改写历史日期。
+
 - `GET /catalog?game=如鸢|代号鸢` → `{catalog_revision,pools}`。池字段 `pool_id,game,name,pool_type,start_date,end_date,enabled,revision,up_agents`，兼容保留派生的 `up_agent_ids,up_agent_names,unmapped_up_agent_names,up_status`；未知日期为空。目录含停用池和退役槽以便解析历史，新增时服务端校验启用状态。
 - `GET /archive?account_id=...` → `{account_id,game_snapshot,archive_revision,baseline,current_pool_id,pools,temporary_agents,summary,pool_summaries,game_mismatch}`。pool_summaries为以pool_id为key的summary对象，不含账号baseline，基于服务端完整历史聚合；空档案 revision=0、baseline=0；pools 自动展示账号真实游戏的全部公共卡池（含停用池），合并已有个人池，保留其 ID 和进度。未保存的目录池使用响应中的稳定 pool_id，progress=null；读取不创建档案，summary 只统计实际保存的状态。游戏快照不一致时仅投影原个人池，保持只读。
 - `GET /events?account_id=...&pool_id=...&cursor=...&limit=50&order=desc&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` → `{items,next_cursor,archive_revision}`。limit 1–100，pool/date可省略；order为asc（从早到晚）或desc（从新到旧，默认），按用户录入/调整的顺序排序，不声称真实获得时刻排序。游标绑定作用域、筛选、方向和revision，修改后继续旧页返回409，应重新读首页，切换方向须从首页重读。日期筛选不包含未知日期。尚未保存的本游戏公共池也可筛选，返回空历史，不写入个人档案。
@@ -22,6 +24,13 @@ acquired_date和snapshot的start_date/end_date在API与Mongo内均为YYYY-MM-DD�
 summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_count,exact_event_count,unknown_event_count,unknown_progress_count,has_unknown,up_agent_counts}`。总数=baseline+有效独立事件span+有效批次total+已知进度。批次内span不重复贡献累计；unknown标记不能解释为0抽事实。
 
 `pool_summaries[pool_id].up_agent_counts` 为 `{UP槽id: 获得次数}`，例如 `{"catalog_p:up:A":2,"catalog_p:up:B":0}`。键使用 `up_agents[].id`，不是 `operator_id`：占位绑定图鉴后仍统计原有记录。服务端在当前用户/账号范围一次聚合所有未删除事件，按池和原始 agent_id 分组，再按当前投影快照的有效 UP 槽筛选；兼容同一密探旧图鉴 ID，重复出货累加，批次每条事件算一次，不依赖 pull_span/up_status。退役或非 UP 结果不输出。历史池、未保存公共池同口径，当前有效槽无结果也明确返回0；目录缺失回退已保存快照。全局 summary 此字段为null。GET不写个人状态、不返回完整events、不逐池查询。字段或某槽键缺失表示摘要未知，客户端必须显示“—”等未知状态，不能自行补0；并行目录更新新增了尚未包含在archive中的槽时也遵循此规则。此字段仅为读摘要，不改备份协议或Mongo持久化结构。
+
+`pool_summaries[pool_id]` 新增两个可空数值（全局 `summary` 均为 null）：
+- `average_gold_pulls`：未删除5星事件中正整数 `pull_span` 的均值，四舍五入保留一位小数。包含批次中已知单条间隔，不使用批次总量、不包含当前垫抽，缺少有效样本为 null。
+- `small_pity_win_rate`：每池首条5星默认小保底，按 `sortOrder,eventId` 升序推演，小保底UP成功后重置、非UP失败后转大保底，大保底UP不进入分子分母并重置。结果为百分数（如66.7），与抽数无关；4星和删除记录不推进状态。无样本、未知UP/稀有度或大保底非UP的矛盾顺序为 null，有样本但无成功为0。常驻池的适用性沿用前端卡池分类规则，不展示该比例。
+
+这两个值在首次 archive 请求中计算完整历史，独立于 events 分页。服务端在原有账号校验及读取事务内，一次打开当前 userId/accountId、未删除且非4星的有序游标，只投影 poolId、agentSnapshot.rarity、pullSpan、upStatus；按池保存常数大小状态，关闭游标，不下载完整快照、不逐池查库、不写Mongo。响应不携带这些逐条投影数据，不新增接口、缓存或备份字段。保存后重新读取 archive 即得新值。
+
 
 ## 管理员目录
 
@@ -160,3 +169,25 @@ preview 与 commit 均重新检查隐藏状态。隐藏池备份只允许目标�
 `pool_records_save.remaining_pulls` 仍必填；仅维护4星时可显式null，表示保留当前进度（含未知）。涉及5星的修改仍须填写1–40的真实剩余保底。
 
 兼容历史：曾以占位槽录入的原始5星快照，即使该槽后来绑定到4星，备份仍按固定槽身份与原始稀有度恢复。新录入由图鉴派生稀有度；新4星快照须与图鉴一致，原历史不回写。
+
+## 导入来源账号可选（2026-10-14）
+
+招募 JSON 的 `source_account` 可省略或为 `null`。外部资料/AI 生成的文件无需提供或编造账号 ID；提供对象时，其 `account_id` 必须为符合 ID 格式的 JSON 字符串，数字、布尔值等类型不会自动转换。导出完整备份继续携带来源信息，旧文件兼容。
+
+导入目标始终是页面当前选择的游戏账号，后端按请求目标验证所有权、游戏、预览绑定及版本。来源已知且与当前账号不同时才提示跨账号；无来源时不提示。导入仍需先预览，切换账号会清空原文件及预览，必须重新选择文件。
+
+## 普通记录导入与备份恢复（2026-10-14）
+
+导入预览/提交继续使用原接口，根据 `document.schema` 自动识别。`yuanhub.recruitment.v1` 是完整备份，保留恢复状态、原身份和历史快照；新增 `yuanhub.recruitment.import.v1` 用于外部记录，仅追加，不替换当前基准、池进度或当前池。普通导入只允许 `state_strategy=keep_current`，计数重叠仍需确认后重新预览。
+
+```json
+{"schema":"yuanhub.recruitment.import.v1","game":"如鸢","events":[{"event_id":"550e8400-e29b-41d4-a716-446655440000","catalog_pool_id":"xlsx-1e717a2211d8b823e02bb46f","agent_id":"char_099_pangxi","pull_span":37}]}
+```
+
+示例为虚构出货。记录 UUID 必须小写且稳定，重复导入/修订保留，不使用 `evt_1` 流水号。使用公共卡池 ID，不添加 `catalog:`；密探使用图鉴 ID 或所属卡池的管理员 UP 槽 ID。系统查目录生成快照/稀有度，保留官方角色ID，不自动推断UP。数组顺序代表先后。`up_status` 可选，默认 `unknown`；`acquired_date`、`note`、`batch_id` 可选。5星间隔为正整数或null；4星只计次，间隔必须null。
+
+可选 `batches`：每条 `{batch_id,catalog_pool_id,total_pull_count}`，batch_id同样为稳定小写UUID。关联事件填写batch_id，必须同池，其已知间隔之和不得超过批次总抽数；累计仅计批次总量一次。events必填，可空但不能和batches同时为空。最多5MiB、各20000条事件/批次、500个公共池；超过或非法整包拒绝。
+
+普通文件不接受 `source_account`、`exported_at`、`archive_revision`、`baseline`、`pools`、快照、排序号、时间戳等备份字段。同目录有多份个人池时拒绝歧义，使用完整备份明确归属。前后端继续绑定当前账号/原文件/选项/版本；提交重新解析目录，解析结果变化要求重新预览。写入时生成时间，重复导入仍按事件身份判重，不按名字/日期合并。
+
+普通导入预览统计只计记录/批次，items增加可选 `display_name`，显示解析后的池名、密探名和抽数；完整备份维持原统计语义。UI自动识别，普通文件隐藏恢复状态选项。下载入口按目的命名：获取导入规范（实时公开目录与示例）、下载完整备份（JSON）、导出表格（CSV）。规范文件不可直接导入，CSV仍仅用于阅读/分析；外部AI负责转换。

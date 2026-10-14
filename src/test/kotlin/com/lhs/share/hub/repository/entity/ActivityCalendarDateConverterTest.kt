@@ -13,6 +13,8 @@ import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.util.Date
 
 class ActivityCalendarDateConverterTest {
     private val conversions = MongoCustomConversions(emptyList<Any>())
@@ -69,5 +71,35 @@ class ActivityCalendarDateConverterTest {
         assertNull(converter.read(ActivityCalendarEvent::class.java, encoded).endDate)
         encoded.remove("endDate")
         assertNull(converter.read(ActivityCalendarEvent::class.java, encoded).endDate)
+    }
+
+    @Test
+    fun `recruitment catalog dates are ISO strings and null or missing dates remain unknown`() {
+        val pool = RecruitmentCatalogPool(
+            "synthetic-pool",
+            "如鸢",
+            "合成卡池",
+            startDate = LocalDate.of(2026, 10, 1),
+            endDate = LocalDate.of(2026, 10, 3),
+        )
+        val encoded = Document()
+        converter.write(pool, encoded)
+        assertEquals("2026-10-01", encoded["startDate"])
+        assertEquals("2026-10-03", encoded["endDate"])
+        assertEquals(pool, converter.read(RecruitmentCatalogPool::class.java, encoded))
+        encoded["startDate"] = null
+        encoded.remove("endDate")
+        assertEquals(pool.copy(startDate = null, endDate = null), converter.read(RecruitmentCatalogPool::class.java, encoded))
+    }
+
+    @Test
+    fun `legacy recruitment BSON dates retain the existing local date read semantics`() {
+        val date = LocalDate.of(2026, 10, 1)
+        val raw = Document("_id", "legacy-pool").append("game", "如鸢").append("name", "合成旧卡池")
+            .append("startDate", Date.from(date.atStartOfDay(ZoneId.systemDefault()).toInstant()))
+            .append("endDate", "2026-10-03")
+        val pool = converter.read(RecruitmentCatalogPool::class.java, raw)
+        assertEquals(date, pool.startDate)
+        assertEquals(date.plusDays(2), pool.endDate)
     }
 }

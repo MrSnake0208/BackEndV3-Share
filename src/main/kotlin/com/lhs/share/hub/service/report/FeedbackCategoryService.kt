@@ -43,8 +43,20 @@ class FeedbackCategoryService(private val repository: FeedbackCategoryCatalogRep
         return existing to renamed
     }
 
-    private fun snapshot(): FeedbackCategoryCatalog = repository.findById("feedback").orElseGet {
-        FeedbackCategoryCatalog(categories = FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) })
+    private fun snapshot(): FeedbackCategoryCatalog {
+        val current = repository.findById("feedback").orElseGet {
+            FeedbackCategoryCatalog(categories = FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) })
+        }
+        // 只补缺失日历；复用已建同名板块，不改历史标识、授权，也不在读取时写库。
+        val calendar = current.categories.find { it.key == FeedbackArea.CALENDAR || it.builtinKey == FeedbackArea.CALENDAR }
+            ?: current.categories.find { it.label.trim() == FeedbackArea.labels.getValue(FeedbackArea.CALENDAR) }
+        if (calendar != null) {
+            if (calendar.key == FeedbackArea.CALENDAR || calendar.builtinKey == FeedbackArea.CALENDAR) return current
+            val registered = calendar.copy(builtinKey = FeedbackArea.CALENDAR)
+            return current.copy(categories = current.categories.map { if (it == calendar) registered else it })
+        }
+        val added = FeedbackCategory(FeedbackArea.CALENDAR, FeedbackArea.labels.getValue(FeedbackArea.CALENDAR))
+        return current.copy(categories = current.categories + added)
     }
 
     private fun validateLabel(label: String, others: List<FeedbackCategory>): String {

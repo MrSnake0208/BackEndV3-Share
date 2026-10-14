@@ -32,6 +32,12 @@ YuanHub-All 工作区默认由**用户/CI 执行回归与全量验证**。Agent 
 
 容器依赖的 `integrationTest` / `apiSchemaTest` / `realisticTest` 只在修改真正触及对应语义时建议执行；`stressTest` 仅用于索引、分页、聚合、大规模导入/同步等规模敏感修改。不得把它们当成普通小改动的固定流程。
 
+## 浏览器自动化默认禁用
+
+- YuanHub 开发任务默认不运行 Playwright、Chrome DevTools、Puppeteer、Cypress、真实浏览器 E2E、自动页面/截图/视口矩阵；不得为此启动浏览器或重复启动服务、安装浏览器依赖、修复无关浏览器测试环境。只有当前任务由用户明确要求浏览器自动化时才可例外；普通“验证”或“集中回归”不视作授权。
+- 后端开发仍按 L0–L4 保留必要的非浏览器定向单元、API/契约、权限、账户隔离和数据正确性验证；Mongo/Redis 集成检查必须使用隔离、可抛弃的自有容器。行为变化同步维护测试，不得删除有效测试或弱化 CI。
+- 页面布局与交互由用户手动验收；最终报告实际执行的代码检查、未执行项、剩余风险及必要的人工验收步骤。
+
 === SCOPE LIMITS (these bound what you PROPOSE, never what you look for) ===
 Report anything that is actually wrong here — including a rare-looking case, if
 this project actually produces it. Then keep the fix in scope:
