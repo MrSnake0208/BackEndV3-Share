@@ -18,6 +18,9 @@ import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.data.mongodb.core.query.Update
 import java.time.Instant
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Field-only share writes must not undo recruitment's lifecycle fence or resurrect deleted accounts. */
 @Tag("integration")
@@ -45,6 +48,23 @@ class OperatorShareMongoTest {
     }
 
     private fun owner(accountId: String) = Query.query(Criteria.where("userId").`is`("u").and("accountId").`is`(accountId))
+
+    @Test
+    fun `simultaneous scope CAS writes have exactly one winner without changing another account`() {
+        val barrier = CyclicBarrier(2)
+        Executors.newFixedThreadPool(2).use { executor ->
+            val attempts = listOf(listOf("operator", "star"), listOf("star")).map { scopes ->
+                executor.submit<SubAccount?> {
+                    barrier.await(10, TimeUnit.SECONDS)
+                    repository.updateShareAuthorization("u", "a", "old-a", null, "old-a", scopes, now)
+                }
+            }
+            val winners = attempts.mapNotNull { it.get(10, TimeUnit.SECONDS) }
+            assertEquals(1, winners.size)
+            assertEquals(winners.single().shareScopes, template.findOne(owner("a"), SubAccount::class.java)!!.shareScopes)
+            assertEquals("old-b", template.findOne(owner("b"), SubAccount::class.java)!!.shareToken)
+        }
+    }
 
     @Test
     fun `scope CAS rejects stale scopes even when token is unchanged`() {
