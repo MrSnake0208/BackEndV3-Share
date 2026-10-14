@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.operator
 
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class OperatorRequirementRulesTest {
@@ -23,12 +24,13 @@ class OperatorRequirementRulesTest {
     }
 
     @Test
-    fun `huaji awakening consumes heart paper and special item but not money inventory`() {
-        val result = OperatorRequirementRules.huaji(24, 31)
-
-        assertEquals(180, result.heart)
-        assertEquals(460_000, result.money)
-        assertEquals(mapOf("zhuangjinboli" to 1L), result.items)
+    fun `huaji reaches five stars once and does not price legacy awakening`() {
+        val result = OperatorRequirementRules.huaji(24, 25)
+        assertEquals(80, result.heart)
+        assertEquals(160_000, result.money)
+        assertEquals(emptyMap<String, Long>(), result.items)
+        for (target in 25..30) assertEquals(0, OperatorRequirementRules.huaji(25, target).heart)
+        assertThrows(IllegalArgumentException::class.java) { OperatorRequirementRules.huaji(24, 31) }
     }
 
     @Test

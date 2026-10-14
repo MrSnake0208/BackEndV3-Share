@@ -2,9 +2,8 @@ package com.lhs.share.hub.repository.entity
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import org.springframework.data.annotation.Id
+import org.springframework.data.convert.ValueConverter
 import org.springframework.data.mongodb.core.mapping.Document
-import org.springframework.data.mongodb.core.mapping.Field
-import org.springframework.data.mongodb.core.mapping.FieldType
 import java.time.Instant
 import java.time.LocalDate
 
@@ -18,8 +17,8 @@ data class RecruitmentCatalogPool(
     @Id val poolId: String,
     val game: String,
     val name: String,
-    @field:Field(targetType = FieldType.STRING) val startDate: LocalDate? = null,
-    @field:Field(targetType = FieldType.STRING) val endDate: LocalDate? = null,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val startDate: LocalDate? = null,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val endDate: LocalDate? = null,
     val poolType: String? = null,
     val enabled: Boolean = true,
     val revision: Long = 0,

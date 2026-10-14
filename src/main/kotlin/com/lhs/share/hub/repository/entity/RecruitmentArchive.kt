@@ -2,10 +2,9 @@ package com.lhs.share.hub.repository.entity
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import org.springframework.data.annotation.Id
+import org.springframework.data.convert.ValueConverter
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.mapping.Document
-import org.springframework.data.mongodb.core.mapping.Field
-import org.springframework.data.mongodb.core.mapping.FieldType
 import java.time.Instant
 import java.time.LocalDate
 
@@ -29,8 +28,8 @@ data class RecruitmentPoolSnapshot(
     val name: String,
     val game: String,
     val catalogPoolId: String? = null,
-    @field:Field(targetType = FieldType.STRING) val startDate: LocalDate? = null,
-    @field:Field(targetType = FieldType.STRING) val endDate: LocalDate? = null,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val startDate: LocalDate? = null,
+    @field:ValueConverter(ActivityCalendarDateConverter::class) val endDate: LocalDate? = null,
     val upAgentIds: List<String> = emptyList(),
     val upStatus: String = "unknown",
     val upAgentNames: List<String> = emptyList(),

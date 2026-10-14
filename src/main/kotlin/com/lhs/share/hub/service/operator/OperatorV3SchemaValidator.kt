@@ -14,6 +14,10 @@ class OperatorV3SchemaValidator(objectMapper: ObjectMapper) {
         JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(objectMapper.readTree(it))
     }
 
+    private val v4Schema = ClassPathResource("schema/operator-growth-exchange-v4.schema.json").inputStream.use {
+        JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(objectMapper.readTree(it))
+    }
+
     fun validate(document: JsonNode) {
         // Report numeric contract failures using the same field/code as PATCH,
         // before multipleOf/type schema errors hide the actionable reason.
@@ -36,7 +40,7 @@ class OperatorV3SchemaValidator(objectMapper: ObjectMapper) {
                 }
             }
         }
-        val errors = schema.validate(document)
+        val errors = (if (document.path("version").asInt() == 4) v4Schema else schema).validate(document)
         if (errors.isNotEmpty()) {
             val first = errors.sortedBy { it.message }.first()
             throw OperatorApiException(

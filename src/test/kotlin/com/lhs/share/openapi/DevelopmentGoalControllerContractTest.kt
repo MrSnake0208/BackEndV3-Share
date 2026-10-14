@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -62,6 +63,7 @@ class DevelopmentGoalControllerContractTest {
         every { service.list(1, 12, null) } returns PagedDTO(false, 1, 1, listOf(response))
         mvc.perform(get("/v1/development-goals"))
             .andExpect(status().isOk)
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.data.data[0].target_version").value("0.2.0"))
             .andExpect(jsonPath("$.data.data[0].feedback_ids").doesNotExist())
             .andExpect(jsonPath("$.data.data[0].criteria[0].completed").value(false))
@@ -81,6 +83,7 @@ class DevelopmentGoalControllerContractTest {
             ),
         )
             .andExpect(status().isOk)
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         verify {
             service.update(
                 "admin",

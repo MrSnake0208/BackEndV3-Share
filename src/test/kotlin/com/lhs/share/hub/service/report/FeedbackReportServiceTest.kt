@@ -30,6 +30,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.data.domain.PageImpl
 import java.time.Instant
 import java.util.Optional
@@ -83,6 +85,34 @@ class FeedbackReportServiceTest {
         every { accessService.receiverUserIds(any()) } returns emptySet()
         every { accessService.canManage("user", any()) } returns false
         every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["BUG", "EXPERIENCE", "FEATURE", "CONTENT", "ACCOUNT", "REPORT", "OTHER"])
+    fun `七种类型均可提交日历并回读且不自动公开`(type: String) {
+        prepareCreate()
+        val response = service.create("user", FeedbackReportCreateRequest(type = type, category = "CALENDAR", content = "日历测试"))
+        assertEquals(type, response.type)
+        assertEquals(FeedbackArea.CALENDAR, response.category)
+        verify {
+            ticketRepository.save(
+                match {
+                    it.category == FeedbackArea.CALENDAR && it.area == FeedbackArea.CALENDAR &&
+                        it.workArea == FeedbackArea.CALENDAR && it.reporterUserId == "user" && it.visibility != "PUBLIC"
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `旧 FEEDBACK 体验优化请求保留日历归属`() {
+        prepareCreate()
+        val response = service.create(
+            "user",
+            FeedbackReportCreateRequest(type = "FEEDBACK", category = "EXPERIENCE", area = "CALENDAR", content = "日历测试"),
+        )
+        assertEquals(FeedbackType.EXPERIENCE, response.type)
+        assertEquals(FeedbackArea.CALENDAR, response.category)
     }
 
     @Test

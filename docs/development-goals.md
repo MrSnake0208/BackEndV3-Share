@@ -6,6 +6,8 @@
 
 管理员接口：`GET /v1/admin/development-goals`、`GET /v1/admin/development-goals/{id}`、`POST /v1/admin/development-goals`、`PUT /v1/admin/development-goals/{id}`。需要 JWT 与 `development_goal:manage`。该能力由现有 PLATFORM_ADMIN/SUPER_ADMIN 角色获得；没有自动修改账号角色或授予反馈岗位。
 
+公开和管理员接口均声明响应媒体类型为 `application/json`，OpenAPI 使用同一类型描述 ApiResult 与分页结构，客户端按 JSON 读取。
+
 保存参数：`title`（1–120 字）、`description`（1–3000 字）、`stage`（PLANNED/IN_PROGRESS/COMPLETED/PAUSED）、`criteria`（1–20 项 `{title,completed}`，标题 1–200 字）、`feedback_ids`（最多 20 条）、可选 `target_version`（最多 80 字）和 `target_date`（YYYY-MM-DD）。更新还必须携带 `expected_version`。
 
 保存后立即公开。只有全部验收项 completed=true 时可选择 COMPLETED。进度展示为已通过项目/总项目；不表示工时比例，也不承诺发布日期。新增关联必须是 PUBLIC 反馈。已有关联后续取消公开不阻止编辑，但公开响应实时过滤其标题和 ID；管理员保留关联 ID 以便清理，不暴露私人正文。

@@ -73,7 +73,7 @@ Content-Type: application/json
 }
 ```
 
-缺失目标字段保留旧值。范围为 `level 0..100`、`elite 0..17`、`star_level 普通 0..31 / SP 0..5`、`heart_paper 0..1000000`。目标只表示计划，不改变 current，也不要求 favorite。
+缺失目标字段保留旧值。范围为 `level 0..100`、`elite 0..17`、兼容旧`star_level 普通0..31 / SP0..5`，新`huaji.stage 普通0..25 / 隐密0..24 / SP0,1,7,13,19,25`（可null未知），独立`huaji.awakened`、`heart_paper 0..1000000`。目标只表示计划，不改变 current，也不要求 favorite。
 
 以下两种调用都明确删除整组目标：
 
@@ -155,7 +155,7 @@ Content-Type: application/json
 
 - `level`：经验、突破材料和按从属选择的 70/80 级材料；服务端从六韬兵书/兵书全卷/兵书残卷中选择最小溢出且稳定的组合；
 - `elite`：按密探属性分为风火、水地、阴阳/其他三组；
-- `huaji`：扣该密探自己的 agent 心纸，普通密探觉醒同时扣装金玻璃；SP 专属消耗尚未接入，preview/execute 均返回 422 `sp_huaji_upgrade_not_supported`，不得使用普通心纸表；
+- `huaji`：只提升化极阶段，扣该密探自己的 agent 心纸；普通终点25、隐密24，24→25为80心纸，不扣装金玻璃。觉醒独立确认，扣料动作未开放；SP preview/execute 均返回422 `sp_huaji_upgrade_not_supported`，不得使用普通心纸表；
 - `money_required` 仅展示五铢钱估算，绝不进入 requirements、库存校验或扣减。
 
 ## 原子执行
@@ -251,3 +251,7 @@ v3 两份 schema 同步接受第四值，listed/full 导入导出和分享/OpenA
 每次成功快捷提升写入 `reason=quick_upgrade` 的成长校正快照，重放时恢复成长并同步关联组，不再次扣库存；删除最后一条 v2 导入记录也不会丢失此后已扣库提升。SP 化极 execute 会重新检查目录，旧 preview token 不能绕过限制。成功幂等重试仍返回原交易结果，不再次执行。
 
 本次不迁移数据库，不自动修正历史冲突导入或回填旧升级事务。已有冲突须先核对来源和正确练度，再另行修复；新写入约束不能替代存量审计。
+
+## 独立化极（本次兼容更新）
+
+新Current/PATCH/目标使用huaji owned/stage/awakened；普通终点25、隐密24、SP稀疏stage且材料422保护。level/elite共享只计一次，stage/awake目标独立。旧25..30永久适配五星，31仅确认觉醒且stage可未知，历史异常不批量清理。无损交换使用operator-only v4；旧v2 camelCase/v3字段及幂等契约保留，旧观测不伪造新验证。详情见[化极兼容规范](./operator-huaji-compatibility.md)。

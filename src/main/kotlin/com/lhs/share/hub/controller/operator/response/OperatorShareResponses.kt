@@ -27,6 +27,7 @@ data class OperatorShareEntryDto(
     val discLoadouts: List<OperatorShareDiscLoadout>,
     val starStones: List<OperatorShareStarStone>,
     val combatStats: OperatorShareCombatStats?,
+    val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
 )
 
 /** Public combat values; observation provenance, signatures and display preferences stay private. */

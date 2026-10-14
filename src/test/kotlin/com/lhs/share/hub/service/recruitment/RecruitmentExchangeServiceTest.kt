@@ -360,6 +360,27 @@ class RecruitmentExchangeServiceTest {
         assertEquals("count_overlap", result.items.single { it.entityType == "event" }.status)
     }
 
+    @Test fun `source account may be absent or null but supplied metadata remains strict`() {
+        val validation = RecruitmentExchangeValidation(mapper)
+        val node = mapper.valueToTree<ObjectNode>(document(record()))
+        node.remove("source_account")
+        assertEquals(null, validation.read(node).sourceAccount)
+        node.putNull("source_account")
+        assertEquals(null, validation.read(node).sourceAccount)
+        node.set<JsonNode>("source_account", mapper.readTree("""{"account_id":"other-account"}"""))
+        assertEquals("other-account", validation.read(node).sourceAccount?.accountId)
+        node.set<JsonNode>("source_account", mapper.readTree("""{"account_id":"42"}"""))
+        assertEquals("42", validation.read(node).sourceAccount?.accountId)
+        listOf(
+            "{}", "[]", "true", "42", "\"account\"", """{"account_id":null}""", """{"account_id":""}""",
+            """{"account_id":"bad id"}""", """{"account_id":42}""", """{"account_id":42.5}""", """{"account_id":true}""",
+            """{"account_id":["a"]}""", """{"account_id":{}}""", """{"account_id":"a","extra":true}""",
+        ).forEach { value ->
+            node.set<JsonNode>("source_account", mapper.readTree(value))
+            assertThrows(RecruitmentApiException::class.java, { validation.read(node) }, "source_account=$value")
+        }
+    }
+
     @Test fun `strict document validation rejects IDs links ordering game tombstones counts and oversize whole document`() {
         val validation = RecruitmentExchangeValidation(mapper)
         val good = document(record())
@@ -400,6 +421,7 @@ class RecruitmentExchangeServiceTest {
         every { fixture.store.exchangeEvents("u", "a", 20_001) } returns listOf(dead)
         val exported = fixture.service.export("u", "a")
         assertEquals(listOf("A"), exported.events.map { it.eventId })
+        assertEquals("a", exported.sourceAccount?.accountId)
         val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(document(record()))))
         assertEquals(1, preview.stats.conflicts)
         verify(exactly = 3) { fixture.accounts.requireAccount("u", "a") }

@@ -76,6 +76,33 @@ class FeedbackAccessServiceTest {
         assertEquals(current.availableAreas, current.availableWorkAreas)
         assertTrue(current.availableAreas.any { it.key == FeedbackArea.STAR && it.label == "星石" })
         assertTrue(current.availableAreas.any { it.key == FeedbackArea.MAAYUAN && it.label == "麻圆" })
+        assertEquals(1, current.availableAreas.count { it.key == FeedbackArea.CALENDAR && it.label == "活动日历" })
+        assertTrue(current.operatorAreas.isEmpty())
+        assertTrue(current.developerAreas.isEmpty())
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `日历工单仅日历运营可接单程序仅在交接后可看且不能控制`() {
+        val ticket = FeedbackTicket(id = "rpt_cal", type = "EXPERIENCE", category = "CALENDAR", reporterUserId = "reporter", content = "测试")
+        every { authorizationService.operatorAreasFor("operator") } returns setOf(FeedbackArea.CALENDAR)
+        every { authorizationService.operatorAreasFor("other") } returns setOf(FeedbackArea.OPERATOR)
+        every { authorizationService.operatorAreasFor("developer") } returns emptySet()
+        every { authorizationService.developerAreasFor("developer") } returns setOf(FeedbackArea.CALENDAR)
+        every { authorizationService.developerAreasFor("other") } returns emptySet()
+        every { authorizationService.hasRole(any(), AdminRole.SUPER_ADMIN) } returns false
+
+        assertEquals(FeedbackArea.CALENDAR, FeedbackWorkflow.area(ticket))
+        assertTrue(service.canClaimTicket("operator", ticket))
+        assertTrue(service.canViewTicket("operator", ticket))
+        assertFalse(service.canClaimTicket("other", ticket))
+        assertFalse(service.canViewTicket("other", ticket))
+        assertFalse(service.canViewTicket("developer", ticket))
+        assertTrue(service.canViewTicket("developer", ticket.copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF)))
+        assertFalse(service.canControlTicket("developer", ticket.copy(workflowStage = FeedbackWorkflow.DEV_HANDOFF)))
+        assertFalse(service.canControlTicket("other", ticket.copy(operatorAssigneeUserId = "other")))
+        assertTrue(service.canControlTicket("operator", ticket.copy(operatorAssigneeUserId = "operator")))
+        verify(exactly = 0) { repository.save(any()) }
     }
 
     @Test

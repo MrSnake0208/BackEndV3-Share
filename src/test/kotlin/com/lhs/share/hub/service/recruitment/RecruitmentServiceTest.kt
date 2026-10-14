@@ -7,6 +7,7 @@ import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandReques
 import com.lhs.share.hub.repository.OperatorCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
+import com.lhs.share.hub.repository.RecruitmentStatisticEvent
 import com.lhs.share.hub.repository.RecruitmentTotals
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
@@ -633,6 +634,10 @@ class RecruitmentServiceTest {
         every { readStore.totals("u", "a") } returns RecruitmentTotals(0, 0, 0, 0, 0)
         every { readStore.poolTotals("u", "a") } returns emptyMap()
         every { readStore.poolAgentCounts("u", "a") } returns emptyMap()
+        var closedStreams = 0
+        every { readStore.statisticEvents("u", "a") } answers {
+            java.util.stream.Stream.empty<RecruitmentStatisticEvent>().onClose { closedStreams++ }
+        }
         val service = RecruitmentService(readStore, accountService, accounts, mutation, publisher, mapper, tx)
         repeat(3) {
             val visible = service.archive("u", "a")
@@ -642,9 +647,19 @@ class RecruitmentServiceTest {
             assertEquals(0, visible.summary.unknownProgressCount)
             assertEquals(managed.upAgents.associate { it.id to 0L }, visible.poolSummaries.values.single().upAgentCounts)
             assertNull(visible.summary.upAgentCounts)
+            assertNull(visible.poolSummaries.values.single().averageGoldPulls)
+            assertNull(visible.poolSummaries.values.single().smallPityWinRate)
             assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
         }
         every { readStore.archive("u", "a") } returns state
+        every { readStore.statisticEvents("u", "a") } answers {
+            listOf(
+                RecruitmentStatisticEvent("p", 5, 39, "non_up"),
+                RecruitmentStatisticEvent("other", 5, 1, "unknown"),
+                RecruitmentStatisticEvent("p", 5, 38, "up"),
+                RecruitmentStatisticEvent("p", 5, null, "up"),
+            ).stream().onClose { closedStreams++ }
+        }
         every { catalogStore.all() } returns listOf(
             managed.copy(
                 upAgents = listOf(
@@ -667,12 +682,17 @@ class RecruitmentServiceTest {
         every { readStore.archive("u", "a") } returns state.copy(
             pools = listOf(state.pools.single().copy(snapshot = state.pools.single().snapshot.copy(upAgents = managed.upAgents))),
         )
-        assertEquals(2L, service.archive("u", "a").poolSummaries.getValue("p").upAgentCounts?.get("catalog_p:up:A"))
+        val poolSummary = service.archive("u", "a").poolSummaries.getValue("p")
+        assertEquals(2L, poolSummary.upAgentCounts?.get("catalog_p:up:A"))
+        assertEquals(38.5, poolSummary.averageGoldPulls)
+        assertEquals(50.0, poolSummary.smallPityWinRate)
+        assertEquals(8, closedStreams)
         verify(exactly = 8) { accountService.requireAccount("u", "a") }
         verify(exactly = 8) { readStore.archive("u", "a") }
         verify(exactly = 8) { readStore.totals("u", "a") }
         verify(exactly = 8) { readStore.poolTotals("u", "a") }
         verify(exactly = 8) { readStore.poolAgentCounts("u", "a") }
+        verify(exactly = 8) { readStore.statisticEvents("u", "a") }
         confirmVerified(readStore, accountService)
         verify {
             publisher wasNot io.mockk.Called

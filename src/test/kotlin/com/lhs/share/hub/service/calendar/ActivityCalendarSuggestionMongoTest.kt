@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit
 /** Uses only an owned disposable replica set. No development connection is accepted. */
 @Tag("integration")
 class ActivityCalendarSuggestionMongoTest {
-    private val database = TestMongo.database("calendar_suggestions")
+    private val database = TestMongo.database("cal_suggest")
     private val client = TestMongo.client()
     private val factory = SimpleMongoClientDatabaseFactory(client, database)
     private val template = MongoTemplate(factory)

@@ -1,13 +1,17 @@
 package com.lhs.share.hub.service.recruitment
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentExchangeDocument
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportCommitRequest
+import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportOptions
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentImportPreviewRequest
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportPreviewResponse
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentImportStats
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
@@ -67,32 +71,66 @@ class RecruitmentExchangeService(
 
     fun preview(userId: String, input: RecruitmentImportPreviewRequest): RecruitmentImportPreviewResponse {
         accountService.requireAccount(userId, input.accountId)
-        val document = validation.read(input.document)
         val documentHash = recruitment.hash(input.document)
         val optionHash = recruitment.hash(mapper.valueToTree(input.options))
-        val plan = checkNotNull(
+        val recordsOnly = input.document.path("schema").asText() == RECRUITMENT_RECORD_IMPORT_SCHEMA
+        val (plan, document) = checkNotNull(
             transactions.execute {
                 val account = accountService.requireAccount(userId, input.accountId)
-                if (document.game != account.game) gameMismatch()
+                if (input.document.path("game").asText() != account.game) gameMismatch()
                 val current = store.archive(userId, input.accountId) ?: recruitment.empty(userId, input.accountId, account.game)
                 if (current.gameSnapshot != account.game) gameMismatch()
+                val document = readDocument(input.document, current, input.options)
                 val (records, batches) = history(userId, input.accountId)
                 validation.validateImport(document, current, records, batches, catalog)
-                recruitmentExchangePlan(current, records, batches, document, input.options)
+                recruitmentExchangePlan(current, records, batches, document, input.options, recordsOnly) to document
             },
         )
         val now = clock.instant()
-        checkPlanSize(plan, now)
+        checkPlanSize(plan, now, recordsOnly)
         val expiry = now.plusSeconds(600)
         val token = "recruitment_preview_${UUID.randomUUID()}"
         synchronized(previews) {
             previews.entries.removeIf { !it.value.expiresAt.isAfter(now) }
             if (previews.size >= 4096) previews.remove(previews.keys.first())
-            previews[token] = PreviewBinding(userId, input.accountId, documentHash, optionHash, plan.archive.archiveRevision, expiry)
+            previews[token] = PreviewBinding(
+                userId,
+                input.accountId,
+                documentHash,
+                optionHash,
+                plan.archive.archiveRevision,
+                expiry,
+                if (recordsOnly) recruitment.hash(mapper.valueToTree(document)) else null,
+            )
         }
+        val recordsById = document.events.associateBy { it.eventId }
+        val batchesById = document.batches.associateBy { it.batchId }
+        val poolsById = document.pools.associateBy { it.poolId }
+        val items = if (recordsOnly) {
+            plan.items.filter { it.entityType in setOf("event", "batch") }.map { item ->
+                val record = recordsById[item.id].takeIf { item.entityType == "event" }
+                val name = if (record != null) {
+                    val count = if (record.agentSnapshot.rarity == 4) "4星计次" else record.pullSpan?.let { "$it 抽" } ?: "抽数未知"
+                    "${record.poolSnapshot.name} · ${record.agentSnapshot.name} · $count"
+                } else {
+                    val batch = batchesById.getValue(item.id)
+                    "${poolsById.getValue(batch.poolId).snapshot.name} · 批次 ${batch.totalPullCount} 抽"
+                }
+                item.copy(displayName = name)
+            }
+        } else {
+            plan.items
+        }
+        val stats = RecruitmentImportStats(
+            items.count { it.status == "add" },
+            items.count { it.status == "duplicate" },
+            items.count { it.status == "conflict" },
+            items.count { it.status in setOf("skip", "count_overlap") },
+        )
         return RecruitmentImportPreviewResponse(
-            token, documentHash, plan.archive.archiveRevision, expiry, plan.items, plan.stats, plan.risks,
-            plan.currentKnownTotal, plan.backupKnownTotal, plan.candidateKnownTotal, plan.canCommit,
+            token, documentHash, plan.archive.archiveRevision, expiry, items, stats, plan.risks,
+            plan.currentKnownTotal, plan.backupKnownTotal, plan.candidateKnownTotal,
+            plan.canCommit && (!recordsOnly || items.none { it.status == "count_overlap" }),
         )
     }
 
@@ -104,7 +142,6 @@ class RecruitmentExchangeService(
         val requestHash = recruitment.hash(mapper.valueToTree(listOf("recruitment_import", input)))
         // Durable success is checked before preview expiry/revision, including retries after a server restart.
         recruitment.retry(userId, input.accountId, input.requestId, requestHash)?.let { return it }
-        val document = validation.read(input.document)
         val documentHash = recruitment.hash(input.document)
         val optionHash = recruitment.hash(mapper.valueToTree(input.options))
         checkBinding(userId, input, documentHash, optionHash)
@@ -114,16 +151,26 @@ class RecruitmentExchangeService(
                     recruitment.retry(userId, input.accountId, input.requestId, requestHash)?.let { return@execute it }
                     checkBinding(userId, input, documentHash, optionHash)
                     val account = accountService.requireAccount(userId, input.accountId)
-                    if (account.game != document.game) gameMismatch()
+                    if (account.game != input.document.path("game").asText()) gameMismatch()
                     val existing = store.archive(userId, input.accountId)
                     val current = existing ?: recruitment.empty(userId, input.accountId, account.game)
                     if (current.gameSnapshot != account.game) gameMismatch()
                     if (current.archiveRevision != input.expectedRevision) throw recruitmentConflict("目标档案已变化，请重新预览")
+                    val document = readDocument(input.document, current, input.options)
+                    val recordsOnly = input.document.path("schema").asText() == RECRUITMENT_RECORD_IMPORT_SCHEMA
+                    if (recordsOnly) {
+                        val binding = checkBinding(userId, input, documentHash, optionHash)
+                        if (binding.resolvedHash != recruitment.hash(mapper.valueToTree(document))) {
+                            throw recruitmentConflict("目录或记录解析已变化，请重新预览")
+                        }
+                    }
                     val (records, batches) = history(userId, input.accountId)
                     validation.validateImport(document, current, records, batches, catalog)
-                    val plan = recruitmentExchangePlan(current, records, batches, document, input.options)
-                    if (!plan.canCommit) throw recruitmentInvalid("请明确确认候选总抽数后重新预览")
-                    checkPlanSize(plan, clock.instant())
+                    val plan = recruitmentExchangePlan(current, records, batches, document, input.options, recordsOnly)
+                    if (!plan.canCommit || (recordsOnly && plan.items.any { it.status == "count_overlap" })) {
+                        throw recruitmentInvalid("请先处理重复计数提示并重新预览")
+                    }
+                    checkPlanSize(plan, clock.instant(), recordsOnly)
                     if (!accounts.fenceRecruitmentWrite(userId, input.accountId, account.game)) {
                         throw recruitmentConflict("账号已变化或删除，请重新读取账号列表")
                     }
@@ -135,7 +182,11 @@ class RecruitmentExchangeService(
                         store.insertBatch(
                             RecruitmentBatch(
                                 "$userId:${input.accountId}:${batch.batchId}", userId, input.accountId, batch.batchId, batch.poolId,
-                                batch.totalPullCount, batch.createdAt, batch.deletedAt, batch.deletedAt?.let { 0L }, importId, now,
+                                batch.totalPullCount, if (recordsOnly) now else batch.createdAt, batch.deletedAt,
+                                batch.deletedAt?.let {
+                                    0L
+                                },
+                                importId, now,
                             ),
                         )
                     }
@@ -144,7 +195,8 @@ class RecruitmentExchangeService(
                             RecruitmentEvent(
                                 "$userId:${input.accountId}:${record.eventId}", userId, input.accountId, record.eventId, record.poolId,
                                 record.poolSnapshot, record.agentSnapshot, record.pullSpan, record.sortOrder, record.upStatus,
-                                record.acquiredDate, record.note, record.source, record.batchId, record.createdAt, record.updatedAt,
+                                record.acquiredDate, record.note, record.source, record.batchId,
+                                if (recordsOnly) now else record.createdAt, if (recordsOnly) now else record.updatedAt,
                                 record.deletedAt, record.deletedAt?.let { 0L }, importId, now,
                             ),
                         )
@@ -174,7 +226,7 @@ class RecruitmentExchangeService(
         return result
     }
 
-    private fun checkPlanSize(plan: RecruitmentExchangePlan, now: Instant) {
+    private fun checkPlanSize(plan: RecruitmentExchangePlan, now: Instant, recordsOnly: Boolean = false) {
         // Reserve the complete target metadata and maximum nanosecond precision before accepting the plan.
         val sizingTime = Instant.ofEpochSecond(now.epochSecond, 123456789)
         val importId = "import_00000000-0000-0000-0000-000000000000"
@@ -186,7 +238,13 @@ class RecruitmentExchangeService(
                 if (it.eventId in
                     eventIds
                 ) {
-                    it.copy(importBatchId = importId, importedAt = sizingTime, deletedRevision = it.deletedAt?.let { 0L })
+                    it.copy(
+                        importBatchId = importId,
+                        importedAt = sizingTime,
+                        deletedRevision = it.deletedAt?.let { 0L },
+                        createdAt = if (recordsOnly) sizingTime else it.createdAt,
+                        updatedAt = if (recordsOnly) sizingTime else it.updatedAt,
+                    )
                 } else {
                     it
                 }
@@ -195,7 +253,12 @@ class RecruitmentExchangeService(
                 if (it.batchId in
                     batchIds
                 ) {
-                    it.copy(importBatchId = importId, importedAt = sizingTime, deletedRevision = it.deletedAt?.let { 0L })
+                    it.copy(
+                        importBatchId = importId,
+                        importedAt = sizingTime,
+                        deletedRevision = it.deletedAt?.let { 0L },
+                        createdAt = if (recordsOnly) sizingTime else it.createdAt,
+                    )
                 } else {
                     it
                 }
@@ -215,7 +278,18 @@ class RecruitmentExchangeService(
         return records to batches
     }
 
-    private fun checkBinding(userId: String, input: RecruitmentImportCommitRequest, documentHash: String, optionHash: String) {
+    private fun readDocument(node: JsonNode, current: RecruitmentArchive, options: RecruitmentImportOptions): RecruitmentExchangeDocument {
+        if (node.path("schema").asText() != RECRUITMENT_RECORD_IMPORT_SCHEMA) return validation.read(node)
+        if (options.stateStrategy != "keep_current") throw recruitmentInvalid("记录导入只能追加，不能恢复备份状态")
+        return RecruitmentRecordImport(mapper, catalog).read(node, current)
+    }
+
+    private fun checkBinding(
+        userId: String,
+        input: RecruitmentImportCommitRequest,
+        documentHash: String,
+        optionHash: String,
+    ): PreviewBinding {
         val binding = synchronized(previews) { previews[input.previewToken] }
         if (binding == null || !binding.expiresAt.isAfter(clock.instant())) {
             throw RecruitmentApiException(HttpStatus.CONFLICT, "recruitment_preview_expired", "预览已过期或服务已重启，请重新预览")
@@ -225,6 +299,7 @@ class RecruitmentExchangeService(
         ) {
             throw RecruitmentApiException(HttpStatus.CONFLICT, "recruitment_preview_mismatch", "预览不属于当前账号、文件或选择，请重新预览")
         }
+        return binding
     }
 
     private fun gameMismatch(): Nothing = throw RecruitmentApiException(
@@ -240,5 +315,6 @@ class RecruitmentExchangeService(
         val optionHash: String,
         val revision: Long,
         val expiresAt: Instant,
+        val resolvedHash: String? = null,
     )
 }

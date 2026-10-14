@@ -580,7 +580,7 @@ class OperatorCurrentFoundationServiceTest {
     }
 
     @Test
-    fun `scan keeps an explicitly submitted combat signature`() {
+    fun `scan keeps legacy signature and panel values without claiming new verification`() {
         stored = stored.copy(
             entries = mapOf(
                 "op1" to baseEntry().copy(
@@ -601,7 +601,8 @@ class OperatorCurrentFoundationServiceTest {
             ),
         )
 
-        assertEquals("valid", result.combatStats?.observedStatus)
+        assertEquals("stale", result.combatStats?.observedStatus)
+        assertNull(result.combatStats?.observedInputs?.huaji)
         assertEquals("collector-v2", result.combatStats?.combatInputSignature)
         assertEquals(4001, result.combatStats?.manualAttack)
         assertEquals("manual", result.combatStats?.displayMode?.attack)
@@ -658,7 +659,7 @@ class OperatorCurrentFoundationServiceTest {
         }
 
         val baseline = signature()
-        assertEquals("sha256:c039cce8bac6cebbea657857d9f84c27f5055529ab9daeb2137df2eb569743ec", baseline)
+        assertEquals("sha256:ed11767e1909c3a450478fb2874f745bc88475fa0aa116e50cbc9af2d3cade34", baseline)
         assertEquals(baseline, signature(reverseStones = true, includeOddityMax = true))
         specialOddityName = "增伤值（新展示名）"
         assertEquals(baseline, signature())
@@ -871,12 +872,77 @@ class OperatorCurrentFoundationServiceTest {
             "acc1",
             "代号鸢",
             "op1",
-            patch(""""combat_stats":{"display_mode":{"attack":null}},"expected_revision":8""", includeRevision = false),
+            patch(""""combat_stats":{"display_mode":{"attack":null}}""", revision = first.revision),
         )
         assertNull(second.combatStats?.displayMode?.attack)
         assertEquals("manual", second.combatStats?.displayMode?.hp)
         assertEquals(900, second.combatStats?.manualAttack)
         assertEquals("valid", second.combatStats?.observedStatus)
+    }
+
+    @Test
+    fun `independent awakening changes signature and stale while legacy signature never becomes freshly verified`() {
+        val before = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""huaji":{"owned":true,"stage":19,"awakened":false},"combat_stats":{"source":"scan","observed_attack":100}"""),
+        )
+        val preview = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""huaji":{"awakened":true}""", revision = before.revision),
+        )
+        assertEquals(19, preview.after.huaji?.stage)
+        assertEquals(true, preview.stale)
+        assertEquals("stale", preview.after.combatStats?.observedStatus)
+        val fresh = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""huaji":{"awakened":true},"combat_stats":{"source":"scan","observed_attack":100}""", revision = before.revision),
+        )
+        assertNotEquals(before.combatStats?.combatInputSignature, fresh.combatStats?.combatInputSignature)
+        assertEquals(true, fresh.combatStats?.observedInputs?.huaji?.awakened)
+        val legacy = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"combat_stats":{"source":"scan","observed_attack":100,"combat_input_signature":"legacy-signature"}""",
+                revision = fresh.revision,
+            ),
+        )
+        assertEquals("stale", legacy.after.combatStats?.observedStatus)
+        assertEquals("legacy-signature", legacy.after.combatStats?.combatInputSignature)
+    }
+
+    @Test
+    fun `legacy 31 and explicit facts reject only actual conflicts without any writes`() {
+        val before = stored
+        val contradictory = patch(""""star_level":31,"huaji":{"awakened":false}""")
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.patchCurrent("u1", "acc1", "代号鸢", "op1", contradictory)
+        }
+        assertEquals("huaji_conflict", error.code)
+        assertEquals(before, stored)
+        assertNull(lastCorrection)
+        verify(exactly = 0) { currentRepository.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) }
+        val compatible = service.previewCurrentPatch(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""star_level":31,"huaji":{"stage":25,"awakened":true}"""),
+        )
+        assertEquals(25, compatible.after.huaji?.stage)
+        assertEquals(true, compatible.after.huaji?.awakened)
+        assertEquals(before, stored)
     }
 
     @Test

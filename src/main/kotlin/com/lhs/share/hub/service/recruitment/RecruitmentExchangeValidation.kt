@@ -21,6 +21,9 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
 
     fun read(node: JsonNode): RecruitmentExchangeDocument {
         if (mapper.writeValueAsBytes(node).size > RECRUITMENT_EXCHANGE_MAX_BYTES) fail("备份超过5MiB上限，请拆分整理后重试")
+        if (node.hasNonNull("source_account") && !node.path("source_account").path("account_id").isTextual) {
+            fail("source_account.account_id必须为字符串")
+        }
         val document = decoder.read(node, RecruitmentExchangeDocument::class.java)
         validate(document)
         node.path("pools").forEach { if (!it.has("progress")) fail("卡池进度必须显式填写，未知时为null") }
@@ -33,7 +36,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
     fun validate(document: RecruitmentExchangeDocument) {
         if (document.schema != RECRUITMENT_EXCHANGE_SCHEMA) fail("不支持的招募备份版本")
         if (document.game !in setOf("如鸢", "代号鸢")) fail("备份游戏不正确")
-        id(document.sourceAccount.accountId)
+        document.sourceAccount?.let { id(it.accountId) }
         if (document.archiveRevision !in 0 until Long.MAX_VALUE) fail("源档案版本不正确")
         recruitmentCount(document.baseline, "baseline")
         if (document.pools.size > 500 || document.temporaryAgents.size > 1000 ||

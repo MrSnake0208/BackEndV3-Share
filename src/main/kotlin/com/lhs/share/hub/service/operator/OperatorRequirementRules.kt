@@ -120,6 +120,7 @@ object OperatorRequirementRules {
     }
 
     fun huaji(fromLevel: Int, toLevel: Int): Cost {
+        require(fromLevel != 31 && toLevel != 31) { "Awakening is not a huaji stage" }
         val from = starStage(fromLevel)
         val to = starStage(toLevel)
         val items = linkedMapOf<String, Long>()

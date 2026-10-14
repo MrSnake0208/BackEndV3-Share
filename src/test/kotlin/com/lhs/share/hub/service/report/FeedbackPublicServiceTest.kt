@@ -4,6 +4,7 @@ import com.lhs.share.controller.response.ApiResultException
 import com.lhs.share.hub.repository.FeedbackSupportRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
+import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackSupport
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import io.mockk.every
@@ -23,7 +24,13 @@ class FeedbackPublicServiceTest {
     private val ticketRepository = mockk<FeedbackTicketRepository>()
     private val queryRepository = mockk<FeedbackTicketQueryRepository>()
     private val supportRepository = mockk<FeedbackSupportRepository>()
-    private val service = FeedbackPublicService(ticketRepository, queryRepository, supportRepository)
+    private val categories = mockk<FeedbackCategoryService>()
+    private val service = FeedbackPublicService(ticketRepository, queryRepository, supportRepository, categories)
+
+    init {
+        every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
+        every { categories.label(any()) } answers { FeedbackArea.labels[firstArg()] }
+    }
 
     private fun ticket(
         id: String,
@@ -49,6 +56,29 @@ class FeedbackPublicServiceTest {
         publishedAt = Instant.parse("2026-09-01T00:00:00Z"),
         publicUpdatedAt = Instant.parse("2026-09-02T00:00:00Z"),
     )
+
+    @Test
+    fun `匿名公开日历反馈仅显示目录板块和公开内容且每批只读一次目录`() {
+        val publicTicket = ticket(
+            "rpt_cal",
+            type = FeedbackType.EXPERIENCE,
+        ).copy(category = FeedbackArea.CALENDAR, area = FeedbackArea.CALENDAR)
+        every { queryRepository.publicSearch(any(), any(), any(), any(), any(), any()) } returns
+            PageImpl(listOf(publicTicket, publicTicket.copy(id = "rpt_cal_2")))
+        every { ticketRepository.findById("rpt_cal") } returns Optional.of(publicTicket)
+        val page = service.list(null, 1, 20, "EXPERIENCE", null, null, null, "latest")
+        assertTrue(page.items.all { it.category == FeedbackArea.CALENDAR && it.categoryLabel == "活动日历" })
+        verify(exactly = 1) { categories.list() }
+        val detail = service.getById(null, "rpt_cal")
+        assertEquals(FeedbackArea.CALENDAR, detail.category)
+        assertEquals("活动日历", detail.categoryLabel)
+        assertEquals(FeedbackType.EXPERIENCE, detail.type)
+        val privateFields =
+            setOf("content", "messages", "reporterUserId", "clientInfo", "diagnostics", "workArea", "operatorAssigneeUserId")
+        assertTrue(detail.javaClass.declaredFields.none { it.name in privateFields })
+        assertTrue(page.items.first().javaClass.declaredFields.none { it.name in privateFields })
+        verify(exactly = 0) { supportRepository.findByUserIdAndFeedbackIdIn(any(), any()) }
+    }
 
     @Test
     fun `缺失 visibility 的历史工单在公开详情中表现为不存在`() {

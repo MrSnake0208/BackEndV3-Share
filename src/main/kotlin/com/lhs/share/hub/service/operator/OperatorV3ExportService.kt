@@ -27,13 +27,13 @@ class OperatorV3ExportService(
     private val favoriteRepository: InventoryAgentFavoriteRepository,
     private val catalogService: OperatorCatalogService,
 ) {
-    fun export(userId: String, accountId: String?, scope: String?): ObjectNode {
+    fun export(userId: String, accountId: String?, scope: String?, version: Int = 3): ObjectNode {
         val accounts = accounts(userId, accountId, scope)
         val now = Instant.now()
         val exportId = UUID.randomUUID().toString().replace("-", "")
         val root = objectMapper.createObjectNode()
             .put("format", "myshare-operator-exchange")
-            .put("version", 3)
+            .put("version", version)
             .put("exported_at", now.toString())
             .put("catalog_version", catalogService.currentCatalogVersion())
         root.set<ObjectNode>(
@@ -53,19 +53,25 @@ class OperatorV3ExportService(
         accounts.forEach { account ->
             val currents = currentRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, account.accountId)
             if (currents.isEmpty()) {
-                records.add(objectiveRecord(account, exportId, now, emptyMap()))
+                records.add(objectiveRecord(account, exportId, now, emptyMap(), version))
             } else {
                 val merged = linkedMapOf<String, OperatorEntry>()
                 currents.filter { it.game == "*" || it.game == "universal" }.forEach { merged.putAll(it.entries) }
                 currents.filter { it.game == account.game }.forEach { merged.putAll(it.entries) }
-                records.add(objectiveRecord(account, exportId, now, merged))
+                records.add(objectiveRecord(account, exportId, now, merged, version))
             }
-            records.add(annotationRecord(userId, account, exportId, now))
+            records.add(annotationRecord(userId, account, exportId, now, version))
         }
         return root
     }
 
-    private fun objectiveRecord(account: SubAccount, exportId: String, now: Instant, entries: Map<String, OperatorEntry>): ObjectNode {
+    private fun objectiveRecord(
+        account: SubAccount,
+        exportId: String,
+        now: Instant,
+        entries: Map<String, OperatorEntry>,
+        version: Int,
+    ): ObjectNode {
         val record = baseRecord(account, "myshare:export:$exportId:${account.accountId}:objective", "operator_snapshot", now)
         val array = record.putArray("entries")
         entries.toSortedMap().forEach { (operatorId, raw) ->
@@ -75,6 +81,26 @@ class OperatorV3ExportService(
                 .put("level", entry.level)
                 .put("elite", entry.elite)
                 .put("star_level", entry.starLevel)
+            val catalog = catalogService.getOperator(operatorId)
+            run {
+                val huaji = OperatorHuajiRules.read(entry, catalog)
+                if (version == 4) {
+                    node.remove("star_level")
+                    node.set<JsonNode>("huaji", objectMapper.valueToTree(huaji))
+                    node.set<JsonNode>(
+                        "huaji_legacy",
+                        objectMapper.valueToTree(
+                            entry.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(entry.starLevel, "legacy_current"),
+                        ),
+                    )
+                } else {
+                    node.putArray(
+                        "warnings",
+                    ).add(
+                        "legacy_huaji_information_loss: owned=${huaji.owned}, stage=${huaji.stage}, awakened=${huaji.awakened}; legacy star_level=${entry.starLevel} cannot encode independent facts, use v4",
+                    )
+                }
+            }
             val loadouts = node.putArray("disc_loadouts")
             entry.discLoadouts.forEach { loadout ->
                 val loadoutNode = objectMapper.createObjectNode().put("id", loadout.id).put("name", loadout.name)
@@ -112,6 +138,7 @@ class OperatorV3ExportService(
                     inputs.level?.let { observed.put("level", it) }
                     inputs.elite?.let { observed.put("elite", it) }
                     inputs.starLevel?.let { observed.put("star_level", it) }
+                    if (version == 4) inputs.huaji?.let { observed.set<JsonNode>("huaji", objectMapper.valueToTree(it)) }
                     inputs.odditiesSignature?.let { observed.put("oddities_signature", it) }
                     inputs.equippedStarStonesSignature?.let { observed.put("equipped_star_stones_signature", it) }
                     if (!observed.isEmpty) combat.set<ObjectNode>("observed_inputs", observed)
@@ -133,7 +160,7 @@ class OperatorV3ExportService(
         return record
     }
 
-    private fun annotationRecord(userId: String, account: SubAccount, exportId: String, now: Instant): ObjectNode {
+    private fun annotationRecord(userId: String, account: SubAccount, exportId: String, now: Instant, versionForTargets: Int): ObjectNode {
         val record = baseRecord(account, "myshare:export:$exportId:${account.accountId}:annotations", ANNOTATION, now)
         val annotations = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(userId, account.accountId)
             .associateBy { it.operatorId }
@@ -157,7 +184,11 @@ class OperatorV3ExportService(
                 val targetNode = objectMapper.createObjectNode()
                 target.targetLevel?.let { targetNode.put("level", it) }
                 target.targetElite?.let { targetNode.put("elite", it) }
-                target.targetStarLevel?.let { targetNode.put("star_level", it) }
+                if (versionForTargets == 4 && target.targetHuaji != null) {
+                    targetNode.set<JsonNode>("huaji", objectMapper.valueToTree(target.targetHuaji))
+                } else {
+                    target.targetStarLevel?.let { targetNode.put("star_level", it) }
+                }
                 target.targetHeartPaper?.let { targetNode.put("heart_paper", it) }
                 node.set<ObjectNode>("targets", targetNode)
             }

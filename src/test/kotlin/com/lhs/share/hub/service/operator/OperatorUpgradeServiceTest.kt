@@ -202,19 +202,28 @@ class OperatorUpgradeServiceTest {
     }
 
     @Test
-    fun `awakening consumes heart paper and special item in linked records`() {
+    fun `ordinary final stage consumes only last node and terminal upgrades have zero side effects`() {
         operatorCurrent = current(starLevel = 24)
         inventoryCurrent["agent"] = stock("agent", mapOf("op1" to 180))
-        val preview = service.preview("u1", request(target = 31))
-
+        val preview = service.preview("u1", request(target = 25))
         assertTrue(preview.available)
-        assertEquals(setOf("agent" to "op1", "item" to "zhuangjinboli"), preview.requirements.map { it.entityType to it.id }.toSet())
-        val result = service.execute("u1", "awakening", executeRequest(preview.previewToken, target = 31))
-
-        assertEquals(0, inventoryCurrent.getValue("agent").entries.getValue("op1").count)
-        assertEquals(0, inventoryCurrent.getValue("item").entries.getValue("zhuangjinboli").count)
-        assertEquals(2, storedRecords.size)
+        assertEquals(listOf("agent" to "op1"), preview.requirements.map { it.entityType to it.id })
+        assertEquals(80, preview.requirements.single().required)
+        val result = service.execute("u1", "five-star", executeRequest(preview.previewToken, target = 25))
+        assertEquals(100, inventoryCurrent.getValue("agent").entries.getValue("op1").count)
+        assertEquals(1, inventoryCurrent.getValue("item").entries.getValue("zhuangjinboli").count)
+        assertEquals(25, operatorCurrent.entries.getValue("op1").huaji?.stage)
+        assertEquals(1, storedRecords.size)
         assertTrue(storedRecords.all { it.transactionId == result.transactionId })
+        val before = operatorCurrent
+        val stockBefore = inventoryCurrent.toMap()
+        for (target in 26..31) {
+            assertThrows(OperatorApiException::class.java) { service.preview("u1", request(target = target)) }
+        }
+        assertEquals(before, operatorCurrent)
+        assertEquals(stockBefore, inventoryCurrent)
+        assertEquals(1, storedRecords.size)
+        assertEquals(1, storedUpgrades.size)
     }
 
     @Test

@@ -18,6 +18,8 @@ data class RecruitmentSummary(
     val hasUnknown: Boolean,
     val upAgentCounts: Map<String, Long>? = null,
     val fourStarCount: Long = 0,
+    val averageGoldPulls: Double? = null,
+    val smallPityWinRate: Double? = null,
 )
 
 data class RecruitmentArchiveResponse(
