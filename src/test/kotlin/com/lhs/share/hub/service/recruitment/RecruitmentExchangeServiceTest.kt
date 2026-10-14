@@ -369,12 +369,15 @@ class RecruitmentExchangeServiceTest {
         assertEquals(null, validation.read(node).sourceAccount)
         node.set<JsonNode>("source_account", mapper.readTree("""{"account_id":"other-account"}"""))
         assertEquals("other-account", validation.read(node).sourceAccount?.accountId)
+        node.set<JsonNode>("source_account", mapper.readTree("""{"account_id":"42"}"""))
+        assertEquals("42", validation.read(node).sourceAccount?.accountId)
         listOf(
             "{}", "[]", "true", "42", "\"account\"", """{"account_id":null}""", """{"account_id":""}""",
-            """{"account_id":"bad id"}""", """{"account_id":42}""", """{"account_id":"a","extra":true}""",
+            """{"account_id":"bad id"}""", """{"account_id":42}""", """{"account_id":42.5}""", """{"account_id":true}""",
+            """{"account_id":["a"]}""", """{"account_id":{}}""", """{"account_id":"a","extra":true}""",
         ).forEach { value ->
             node.set<JsonNode>("source_account", mapper.readTree(value))
-            assertThrows(RecruitmentApiException::class.java) { validation.read(node) }
+            assertThrows(RecruitmentApiException::class.java, { validation.read(node) }, "source_account=$value")
         }
     }
 
