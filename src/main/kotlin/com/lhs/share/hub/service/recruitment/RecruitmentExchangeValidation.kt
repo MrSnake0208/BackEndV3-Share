@@ -21,6 +21,9 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
 
     fun read(node: JsonNode): RecruitmentExchangeDocument {
         if (mapper.writeValueAsBytes(node).size > RECRUITMENT_EXCHANGE_MAX_BYTES) fail("备份超过5MiB上限，请拆分整理后重试")
+        if (node.hasNonNull("source_account") && !node.path("source_account").path("account_id").isTextual) {
+            fail("source_account.account_id必须为字符串")
+        }
         val document = decoder.read(node, RecruitmentExchangeDocument::class.java)
         validate(document)
         node.path("pools").forEach { if (!it.has("progress")) fail("卡池进度必须显式填写，未知时为null") }
