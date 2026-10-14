@@ -1033,6 +1033,41 @@ class RecruitmentMongoTest {
         verify(exactly = 1) { publisher.publish("u", "a", "account_updated", any(), any()) }
     }
 
+    @Test fun `catalog wishlist flag persists through rereads legacy omission and CAS`() {
+        template.getCollection("recruitment_catalog").updateOne(
+            org.bson.Document("_id", "catalog_p"),
+            org.bson.Document("\$unset", org.bson.Document("allowCustomUp", "")),
+        )
+        val old = catalogStore.find("catalog_p")!!
+        assertFalse(old.allowCustomUp)
+        val request = RecruitmentCatalogWriteRequest(
+            "catalog_p",
+            "如鸢",
+            "管理员池",
+            1,
+            upAgents = old.upAgents,
+            allowCustomUp = true,
+        )
+        assertTrue(catalog.update("admin", "catalog_p", request).allowCustomUp)
+        assertTrue(catalogStore.find("catalog_p")!!.allowCustomUp)
+        assertTrue(catalog.listForAdmin().pools.single { it.poolId == "catalog_p" }.allowCustomUp)
+        assertTrue(catalog.catalog("如鸢").path("pools").single().path("allow_custom_up").booleanValue())
+        assertTrue(catalog.snapshot("如鸢", "catalog_p").allowCustomUp)
+
+        catalog.update("admin", "catalog_p", request.copy(expectedRevision = 2, allowCustomUp = null))
+        assertTrue(catalogStore.find("catalog_p")!!.allowCustomUp)
+        assertEquals(3L, catalogStore.find("catalog_p")!!.revision)
+        assertThrows(RecruitmentApiException::class.java) {
+            catalog.update("stale", "catalog_p", request.copy(allowCustomUp = false))
+        }
+        assertTrue(catalogStore.find("catalog_p")!!.allowCustomUp)
+
+        catalog.update("admin", "catalog_p", request.copy(expectedRevision = 3, allowCustomUp = false))
+        assertFalse(catalogStore.find("catalog_p")!!.allowCustomUp)
+        assertFalse(catalog.catalog("如鸢").path("pools").single().path("allow_custom_up").booleanValue())
+        assertEquals(4L, catalogStore.find("catalog_p")!!.revision)
+    }
+
     @Test fun `legacy Mongo hidden omission defaults false and catalog CAS persists visibility without restoring on old PUT`() {
         template.getCollection("recruitment_catalog").updateOne(
             org.bson.Document("_id", "catalog_p"),

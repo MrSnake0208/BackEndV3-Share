@@ -2,7 +2,7 @@
 
 ## 个人心愿 UP
 
-管理员卡池与快照新增 `allow_custom_up:boolean`，默认 `false`，与 `pool_type` 独立；只有管理员明确开启的池允许个人自选。管理员创建/编辑支持该字段，编辑时省略保留原值，显式 null 或非布尔值拒绝；目录 JSON 导入也支持。公开目录不包含任何用户选择。
+管理员卡池与快照新增 `allow_custom_up:boolean`，默认 `false`，与 `pool_type` 独立；只有管理员明确开启的池允许个人自选。管理员创建/编辑支持该字段，编辑时省略保留原值，显式 null 或非布尔值拒绝；目录 JSON 导入也支持。开启或关闭均随卡池 revision 的 CAS 更新写入 Mongo，随后管理员与公开目录 GET 返回持久化后的值；保存响应不能替代重新读取验收。公开目录不包含任何用户选择。
 
 个人池新增 `wish_agent_ids:string[]`，默认空数组。通过 `pool_records_save` 的可选同名字段保存，必须恰好两位不同、当前游戏图鉴中 rarity=5 的密探；未开放、隐藏或停用池不允许修改心愿。仅修改心愿时可发送 `entries:[]`、`remaining_pulls:null`。沿用用户/账号隔离、archive revision CAS、request_id 幂等和账号事务；不创建公共 UP 槽。省略字段保留当前选择。
 
@@ -50,7 +50,7 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 - `POST /v1/admin/recruitment-catalog` → 新池，`expected_revision=0`。
 - `PUT /v1/admin/recruitment-catalog/{poolId}` → 更新，路径 ID 须匹配 body，`expected_revision` 必须等于当前 `revision`，并发修改409。
 
-写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,hidden?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=4/5 的图鉴密探（含照影SP），有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
+写 body：`{pool_id,game,name,expected_revision,start_date?,end_date?,pool_type?,enabled?,hidden?,allow_custom_up?,up_agents?}`。UP 数量等于 `up_agents` 中 `active=true` 的数量，最多120个有效项、500个含退役项。槽 ID 必须属于本池；`operator_id` 非空时须为同游戏 rarity=4/5 的图鉴密探（含照影SP），有效槽不得重复绑定同一图鉴密探。`pool_id`、游戏和已有槽 ID 保持稳定。省略旧槽会将其退役保留；`enabled=false` 停用卡池。停用/退役阻止普通新增结果，仍可读取、维护既有记录和恢复真实历史备份。绑定占位时无需改写个人历史。
 
 ## 写接口
 
