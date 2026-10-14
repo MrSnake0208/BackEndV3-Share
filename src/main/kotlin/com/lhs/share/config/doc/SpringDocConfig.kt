@@ -63,6 +63,21 @@ class SpringDocConfig(
     fun modelResolver(objectMapper: ObjectMapper) = ModelResolver(objectMapper)
 
     @Bean
+    fun shareNullableSchemaCustomizer(): OpenApiCustomizer = OpenApiCustomizer { openApi ->
+        mapOf(
+            "AccountShareResponse" to "share_code",
+            "StarShareResponse" to "updated_at",
+            "OperatorShareResponse" to "share_code",
+            "OperatorShareViewResponse" to "updated_at",
+        ).forEach { (name, property) ->
+            openApi.components.schemas[name]?.properties?.get(property)?.apply {
+                type = null
+                types = setOf("string", "null")
+            }
+        }
+    }
+
+    @Bean
     fun inventoryConditionalSchemaCustomizer(): OpenApiCustomizer = OpenApiCustomizer { openApi ->
         openApi.components.addSchemas(
             INVENTORY_SNAPSHOT_SCOPE_PRESENT_SCHEMA,
