@@ -54,6 +54,10 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         document.currentPoolId?.let { if (it !in pools) fail("当前卡池引用不存在") }
         document.pools.forEach {
             snapshot(it.snapshot, document.game)
+            if (it.wishAgentIds.isNotEmpty() && (it.wishAgentIds.size != 2 || it.wishAgentIds.distinct().size != 2)) {
+                fail("心愿密探必须为两位不同的绝密密探")
+            }
+            it.wishAgentIds.forEach(::id)
             it.progress?.let { count -> recruitmentCount(count, "progress") }
             it.mappedSnapshot?.let { mapped ->
                 snapshot(mapped, document.game)
@@ -130,6 +134,12 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         document.pools.forEach { pool ->
             val old = existingPools[pool.poolId]
             val reference = pool.mappedSnapshot ?: pool.snapshot
+            if (pool.wishAgentIds.isNotEmpty()) {
+                catalog.validateWishes(document.game, pool.wishAgentIds)
+                if (definitions[reference.catalogPoolId]?.allowCustomUp != true && pool.wishAgentIds != old?.wishAgentIds) {
+                    fail("该卡池未开放自选心愿UP，不能导入新的心愿选择")
+                }
+            }
             if (definitions[reference.catalogPoolId]?.hidden == true &&
                 (old == null || (old.mappedSnapshot ?: old.snapshot).catalogPoolId != reference.catalogPoolId)
             ) {
@@ -141,7 +151,11 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
             } else {
                 val definition = definitions[catalogId]
                 if (definition == null && old?.snapshot?.catalogPoolId != catalogId) fail("备份引用的管理员卡池不存在")
-                if (definition != null && pool.snapshot.upAgents.any { agent -> definition.upAgents.none { it.id == agent.id } }) {
+                if (definition != null && pool.snapshot.upAgents.any { agent ->
+                        definition.upAgents.none { it.id == agent.id } &&
+                            !(agent.id in pool.wishAgentIds && agent.operatorId == agent.id)
+                    }
+                ) {
                     fail("备份UP槽不属于该管理员卡池")
                 }
             }

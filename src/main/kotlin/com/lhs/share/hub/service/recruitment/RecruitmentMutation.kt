@@ -47,7 +47,7 @@ class RecruitmentMutation(
             "batch_create" -> read<RecruitmentBatchCreate>(data).poolId
             else -> null
         }
-        val current = if (poolId == null || archive.pools.any { it.poolId == poolId }) {
+        var current = if (poolId == null || archive.pools.any { it.poolId == poolId }) {
             archive
         } else {
             if (archive.pools.size >= 500) throw recruitmentInvalid("卡池档案已达500个上限")
@@ -90,6 +90,17 @@ class RecruitmentMutation(
             }
             "pool_records_save" -> {
                 val input = read<RecruitmentPoolRecordsSave>(data)
+                input.wishAgentIds?.let { ids ->
+                    val selected = pool(current, input.poolId)
+                    if (!catalog.personalSnapshot(selected).allowCustomUp) throw recruitmentInvalid("该卡池未开放自选心愿UP")
+                    catalog.validateWishes(current.gameSnapshot, ids)
+                    val wished = selected.copy(wishAgentIds = ids)
+                    val snapshot = catalog.personalSnapshot(wished)
+                    current = replacePool(
+                        current,
+                        if (wished.mappedSnapshot != null) wished.copy(mappedSnapshot = snapshot) else wished.copy(snapshot = snapshot),
+                    )
+                }
                 if (input.remainingPulls != null && input.remainingPulls !in 1..40 || input.entries.size > 120 ||
                     input.deletedEventIds.size > 120
                 ) {
@@ -131,7 +142,7 @@ class RecruitmentMutation(
                         byId.getValue(id).takeIf { it.sortOrder != slots[index] }?.copy(sortOrder = slots[index], updatedAt = now)
                     }
                 }
-                if (input.remainingPulls == null && modifiedEvents.isEmpty() && ordered == null) {
+                if (input.remainingPulls == null && modifiedEvents.isEmpty() && ordered == null && input.wishAgentIds == null) {
                     throw recruitmentInvalid("请修改出货记录、顺序或填写保底进度后保存")
                 }
                 val touchedBatches = (changed + removed).mapNotNull { it.batchId }.toSet()
@@ -339,8 +350,8 @@ class RecruitmentMutation(
         now: Instant,
     ): List<RecruitmentEvent> {
         val pool = pool(current, poolId)
-        val catalogId = pool.snapshot.catalogPoolId ?: throw recruitmentInvalid("旧临时卡池仅支持维护已有记录，请选择管理员卡池新增")
-        val poolSnapshot = catalog.snapshot(current.gameSnapshot, catalogId)
+        if (pool.snapshot.catalogPoolId == null) throw recruitmentInvalid("旧临时卡池仅支持维护已有记录，请选择管理员卡池新增")
+        val poolSnapshot = catalog.personalSnapshot(pool)
         if (entries.isEmpty() || entries.size > 120) throw recruitmentInvalid("每次请填写1至120条密探结果")
         val seen = HashSet<String>()
         return entries.mapIndexed { index, entry ->
@@ -369,7 +380,7 @@ class RecruitmentMutation(
         ) {
             old.agentSnapshot
         } else {
-            agent(current, old.poolSnapshot, entry.agentId, refreshCatalog = true)
+            agent(current, catalog.personalSnapshot(pool(current, old.poolId), requireEnabled = false), entry.agentId)
         }
         if (snapshot.rarity == 4 && entry.pullSpan != null) throw recruitmentInvalid("4星仅统计获得次数，不能填写绝密出货抽数")
         return old.copy(
@@ -384,23 +395,13 @@ class RecruitmentMutation(
         )
     }
 
-    internal fun agent(
-        current: RecruitmentArchive,
-        poolSnapshot: RecruitmentPoolSnapshot,
-        id: String,
-        refreshCatalog: Boolean = false,
-    ): RecruitmentAgentSnapshot {
-        val latest = if (refreshCatalog && poolSnapshot.catalogPoolId != null) {
-            catalog.snapshot(current.gameSnapshot, poolSnapshot.catalogPoolId, requireEnabled = false)
-        } else {
-            poolSnapshot
-        }
-        latest.upAgents.firstOrNull { it.id == id || it.active && it.operatorId == id }?.let { slot ->
+    internal fun agent(current: RecruitmentArchive, poolSnapshot: RecruitmentPoolSnapshot, id: String): RecruitmentAgentSnapshot {
+        poolSnapshot.upAgents.firstOrNull { it.id == id || it.active && it.operatorId == id }?.let { slot ->
             if (!slot.active) throw recruitmentInvalid("该UP密探已退役，不能新增选择")
             return RecruitmentAgentSnapshot(
                 slot.id,
                 slot.name,
-                catalogRevision = latest.catalogRevision,
+                catalogRevision = poolSnapshot.catalogRevision,
                 rarity = slot.operatorId?.let {
                     try {
                         catalog.operator(current.gameSnapshot, it).rarity

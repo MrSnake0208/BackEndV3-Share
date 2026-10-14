@@ -111,6 +111,33 @@ class RecruitmentCatalog(
             catalogRevision = "db:${pool.revision}:${pool.updatedAt}",
             poolType = pool.poolType,
             upAgents = slots,
+            allowCustomUp = pool.allowCustomUp,
+        )
+    }
+
+    fun validateWishes(game: String, ids: List<String>) {
+        if (ids.size != 2 || ids.distinct().size != 2) throw recruitmentInvalid("请选择两位不同的心愿密探")
+        if (ids.any { operator(game, it).rarity != 5 }) throw recruitmentInvalid("心愿密探只能选择当前游戏的绝密密探")
+    }
+
+    fun personalSnapshot(pool: RecruitmentPool, requireEnabled: Boolean = true): RecruitmentPoolSnapshot {
+        val reference = pool.mappedSnapshot ?: pool.snapshot
+        val latest = reference.catalogPoolId?.let { snapshot(reference.game, it, requireEnabled) } ?: reference
+        return withWishes(latest, pool.wishAgentIds, reference.upAgents.associate { it.id to it.name } + operatorNames())
+    }
+
+    private fun withWishes(snapshot: RecruitmentPoolSnapshot, ids: List<String>, names: Map<String, String>): RecruitmentPoolSnapshot {
+        if (!snapshot.allowCustomUp) return snapshot
+        val slots = ids.map { id ->
+            val existing = snapshot.upAgents.firstOrNull { it.operatorId == id }
+            RecruitmentUpAgent(existing?.id ?: id, names[id] ?: existing?.name ?: id, id)
+        }
+        return snapshot.copy(
+            upAgents = slots,
+            upAgentIds = ids,
+            upAgentNames = slots.map { it.name },
+            unmappedUpAgentNames = emptyList(),
+            upStatus = if (ids.size == 2) "verified" else "unknown",
         )
     }
 
@@ -169,7 +196,8 @@ class RecruitmentCatalog(
             val reference = pool.mappedSnapshot ?: pool.snapshot
             val snapshot = latest[reference.catalogPoolId]?.takeIf { it.game == reference.game }?.let { snapshotOf(it, names) }
                 ?: return@map pool
-            if (pool.mappedSnapshot != null) pool.copy(mappedSnapshot = snapshot) else pool.copy(snapshot = snapshot)
+            val personal = withWishes(snapshot, pool.wishAgentIds, reference.upAgents.associate { it.id to it.name } + names)
+            if (pool.mappedSnapshot != null) pool.copy(mappedSnapshot = personal) else pool.copy(snapshot = personal)
         }
     }
 
@@ -179,7 +207,16 @@ class RecruitmentCatalog(
         val names = operatorNames()
         return events.map { event ->
             val pool = latest[event.poolSnapshot.catalogPoolId]?.takeIf { it.game == event.poolSnapshot.game } ?: return@map event
-            val snapshot = snapshotOf(pool, names)
+            val latestSnapshot = snapshotOf(pool, names)
+            val snapshot = if (event.poolSnapshot.allowCustomUp) {
+                withWishes(
+                    latestSnapshot.copy(allowCustomUp = true),
+                    event.poolSnapshot.upAgentIds,
+                    event.poolSnapshot.upAgents.associate { it.id to it.name } + names,
+                )
+            } else {
+                latestSnapshot
+            }
             val slot = snapshot.upAgents.firstOrNull { it.id == event.agentSnapshot.agentId }
             val name = slot?.name ?: names[event.agentSnapshot.agentId] ?: event.agentSnapshot.name
             event.copy(poolSnapshot = snapshot, agentSnapshot = event.agentSnapshot.copy(name = name))
@@ -252,6 +289,9 @@ class RecruitmentCatalog(
     ): RecruitmentCatalogPool {
         if (!node.isObject) throw recruitmentInvalid("第${position}个卡池必须是JSON对象")
         if (node.has("hidden") && !node.get("hidden").isBoolean) throw recruitmentInvalid("第${position}个卡池hidden必须是布尔值")
+        if (node.has("allow_custom_up") && !node.get("allow_custom_up").isBoolean) {
+            throw recruitmentInvalid("第${position}个卡池allow_custom_up必须是布尔值")
+        }
         val poolId = requiredText(node, "pool_id", position)
         val game = requiredText(node, "game", position)
         requireGame(game)
@@ -295,6 +335,7 @@ class RecruitmentCatalog(
             sourcePages = sourcePages,
             sourceNote = sourceNote,
             hidden = optionalBoolean(node, "hidden", position, false),
+            allowCustomUp = optionalBoolean(node, "allow_custom_up", position, false),
         )
     }
 
@@ -473,6 +514,7 @@ class RecruitmentCatalog(
             sourcePages = current?.sourcePages.orEmpty(),
             sourceNote = current?.sourceNote,
             hidden = input.hidden ?: current?.hidden ?: false,
+            allowCustomUp = input.allowCustomUp ?: current?.allowCustomUp ?: false,
         )
         try {
             if (!repository.save(next, current != null)) throw recruitmentConflict("卡池已变化，请刷新后重试")

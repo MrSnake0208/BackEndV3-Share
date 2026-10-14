@@ -15,4 +15,5 @@ data class RecruitmentCatalogWriteRequest(
     val enabled: Boolean = true,
     val upAgents: List<RecruitmentUpAgent> = emptyList(),
     val hidden: Boolean? = null,
+    val allowCustomUp: Boolean? = null,
 )

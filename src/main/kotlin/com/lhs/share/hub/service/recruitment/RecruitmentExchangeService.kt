@@ -52,10 +52,14 @@ class RecruitmentExchangeService(
                 pools = current.pools.map { pool ->
                     val latest = projected.getValue(pool.poolId)
                     pool.copy(
-                        snapshot = pool.snapshot.copy(upAgents = latest.snapshot.upAgents),
+                        snapshot = pool.snapshot.copy(
+                            upAgents = latest.snapshot.upAgents,
+                            allowCustomUp = latest.snapshot.allowCustomUp,
+                        ),
                         mappedSnapshot = pool.mappedSnapshot?.copy(
                             upAgents =
                             latest.mappedSnapshot?.upAgents ?: pool.mappedSnapshot.upAgents,
+                            allowCustomUp = latest.mappedSnapshot?.allowCustomUp ?: pool.mappedSnapshot.allowCustomUp,
                         ),
                     )
                 },

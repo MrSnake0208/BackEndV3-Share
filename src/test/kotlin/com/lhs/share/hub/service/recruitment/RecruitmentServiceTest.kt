@@ -104,6 +104,49 @@ class RecruitmentServiceTest {
         state =
             it.archive
     }
+
+    @Test fun `wishlist-only save persists two gold operators and subsequent events keep canonical identities`() {
+        every { catalogStore.find("catalog_p") } returns managed.copy(allowCustomUp = true)
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[],"wish_agent_ids":["char_001_yangxiu","char_002_jiaxu"]}""",
+        )
+        assertEquals(listOf("char_001_yangxiu", "char_002_jiaxu"), state.pools.single().wishAgentIds)
+        assertEquals(0L, state.pools.single().progress)
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"wish","agent_id":"char_001_yangxiu","pull_span":17,"up_status":"up"}]}""",
+        )
+        assertEquals("char_001_yangxiu", events.getValue("wish").agentSnapshot.agentId)
+        assertEquals(state.pools.single().wishAgentIds, events.getValue("wish").poolSnapshot.upAgentIds)
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[],"wish_agent_ids":["char_002_jiaxu","char_003_sunshangxiang"]}""",
+        )
+        assertEquals("up", events.getValue("wish").upStatus)
+        assertEquals(listOf("char_001_yangxiu", "char_002_jiaxu"), events.getValue("wish").poolSnapshot.upAgentIds)
+    }
+
+    @Test fun `wishlist rejects fixed pools duplicate missing wrong-game and four-star choices before writes`() {
+        val valid = """{"pool_id":"p","remaining_pulls":null,"entries":[],"wish_agent_ids":["char_001_yangxiu","char_002_jiaxu"]}"""
+        assertThrows(RecruitmentApiException::class.java) { command("pool_records_save", valid) }
+        every { catalogStore.find("catalog_p") } returns managed.copy(allowCustomUp = true)
+        listOf(
+            "[]",
+            "[\"char_001_yangxiu\"]",
+            "[\"char_001_yangxiu\",\"char_001_yangxiu\"]",
+            "[\"char_001_yangxiu\",\"char_043_xiaoqiao\"]",
+            "[\"char_001_yangxiu\",\"char_006_eshi\"]",
+        ).forEach { ids ->
+            assertThrows(RecruitmentApiException::class.java) {
+                command("pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"wish_agent_ids":$ids}""")
+            }
+        }
+        assertTrue(state.pools.single().wishAgentIds.isEmpty())
+        assertTrue(events.isEmpty())
+        verify(exactly = 0) { store.insertEvent(any()) }
+    }
+
     private fun count() = state.baseline + state.pools.sumOf { it.progress ?: 0 } +
         events.values.filter { it.deletedAt == null && it.batchId == null }.sumOf { it.pullSpan ?: 0 } +
         batches.values.filter { it.deletedAt == null }.sumOf { it.totalPullCount }

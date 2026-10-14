@@ -121,6 +121,49 @@ class RecruitmentMongoTest {
         command("pool_create", """{"pool_id":"p","catalog_pool_id":"catalog_p","progress":0}""")
     }
 
+    @Test fun `wishlist saves lazily with CAS and idempotency and isolates user and game account`() {
+        template.insert(RecruitmentCatalogPool("wishlist", "如鸢", "心愿池", allowCustomUp = true))
+        accounts.insert(SubAccount(userId = "other", accountId = "c", name = "C", game = "如鸢"))
+        val input = request(
+            0,
+            "pool_records_save",
+            """{"pool_id":"catalog:wishlist","remaining_pulls":null,"entries":[],"wish_agent_ids":["char_001_yangxiu","char_002_jiaxu"]}""",
+            "wish-request",
+        )
+        val response = service.command("u", input)
+        assertEquals(response, service.command("u", input))
+        assertEquals(1L, service.archive("u", "a").archiveRevision)
+        assertEquals(listOf("char_001_yangxiu", "char_002_jiaxu"), store.archive("u", "a")!!.pools.single().wishAgentIds)
+        val projected = service.archive("u", "a")
+        assertEquals(
+            listOf("char_001_yangxiu", "char_002_jiaxu"),
+            projected.pools.single {
+                it.poolId == "catalog:wishlist"
+            }.snapshot.upAgentIds,
+        )
+        assertEquals(
+            mapOf("char_001_yangxiu" to 0L, "char_002_jiaxu" to 0L),
+            projected.poolSummaries.getValue("catalog:wishlist").upAgentCounts,
+        )
+        assertTrue(service.archive("u", "b").pools.all { it.wishAgentIds.isEmpty() })
+        assertTrue(service.archive("other", "c").pools.all { it.wishAgentIds.isEmpty() })
+        assertThrows(RecruitmentApiException::class.java) { service.command("u", input.copy(requestId = "stale")) }
+        assertThrows(InventoryApiException::class.java) { service.command("other", input.copy(requestId = "foreign")) }
+        assertNull(store.archive("other", "a"))
+        assertThrows(RecruitmentApiException::class.java) {
+            service.command(
+                "u",
+                request(
+                    1,
+                    "pool_records_save",
+                    """{"pool_id":"catalog:wishlist","remaining_pulls":1,"entries":[{"event_id":"bad","agent_id":"char_001_yangxiu","pull_span":17}],"wish_agent_ids":["char_001_yangxiu","char_043_xiaoqiao"]}""",
+                ),
+            )
+        }
+        assertEquals(1L, store.archive("u", "a")!!.archiveRevision)
+        assertNull(store.event("u", "a", "bad"))
+    }
+
     @Test fun `four star summary counts acquisitions without unknown interval or pity changes and isolates accounts`() {
         initialize()
         command("progress_set", """{"pool_id":"p","progress":9}""")
