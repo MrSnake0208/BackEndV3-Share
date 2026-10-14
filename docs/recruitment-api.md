@@ -25,6 +25,13 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 
 `pool_summaries[pool_id].up_agent_counts` 为 `{UP槽id: 获得次数}`，例如 `{"catalog_p:up:A":2,"catalog_p:up:B":0}`。键使用 `up_agents[].id`，不是 `operator_id`：占位绑定图鉴后仍统计原有记录。服务端在当前用户/账号范围一次聚合所有未删除事件，按池和原始 agent_id 分组，再按当前投影快照的有效 UP 槽筛选；兼容同一密探旧图鉴 ID，重复出货累加，批次每条事件算一次，不依赖 pull_span/up_status。退役或非 UP 结果不输出。历史池、未保存公共池同口径，当前有效槽无结果也明确返回0；目录缺失回退已保存快照。全局 summary 此字段为null。GET不写个人状态、不返回完整events、不逐池查询。字段或某槽键缺失表示摘要未知，客户端必须显示“—”等未知状态，不能自行补0；并行目录更新新增了尚未包含在archive中的槽时也遵循此规则。此字段仅为读摘要，不改备份协议或Mongo持久化结构。
 
+`pool_summaries[pool_id]` 新增两个可空数值（全局 `summary` 均为 null）：
+- `average_gold_pulls`：未删除5星事件中正整数 `pull_span` 的均值，四舍五入保留一位小数。包含批次中已知单条间隔，不使用批次总量、不包含当前垫抽，缺少有效样本为 null。
+- `small_pity_win_rate`：每池首条5星默认小保底，按 `sortOrder,eventId` 升序推演，小保底UP成功后重置、非UP失败后转大保底，大保底UP不进入分子分母并重置。结果为百分数（如66.7），与抽数无关；4星和删除记录不推进状态。无样本、未知UP/稀有度或大保底非UP的矛盾顺序为 null，有样本但无成功为0。常驻池的适用性沿用前端卡池分类规则，不展示该比例。
+
+这两个值在首次 archive 请求中计算完整历史，独立于 events 分页。服务端在原有账号校验及读取事务内，一次打开当前 userId/accountId、未删除且非4星的有序游标，只投影 poolId、agentSnapshot.rarity、pullSpan、upStatus；按池保存常数大小状态，关闭游标，不下载完整快照、不逐池查库、不写Mongo。响应不携带这些逐条投影数据，不新增接口、缓存或备份字段。保存后重新读取 archive 即得新值。
+
+
 ## 管理员目录
 
 以下接口须 JWT 与 `recruitment_catalog:write`，复用现有平台管理员/超级管理员权限；普通登录用户返回403。GET 不写入 Hub 数据库；经核对的静态目录是只读初值，管理员覆盖保存在 `recruitment_catalog`。

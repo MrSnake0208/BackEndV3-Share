@@ -17,6 +17,7 @@ import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.time.LocalDate
+import java.util.stream.Stream
 
 /** Explicit Hub template: no recruitment collection can fall back to MaaBackend. */
 @Repository
@@ -186,6 +187,21 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
             }
         }
 
+    /** Ordered, projected cursor: no portraits, snapshots or full history list for summary calculations. */
+    fun statisticEvents(userId: String, accountId: String): Stream<RecruitmentStatisticEvent> {
+        val query = owner(userId, accountId).addCriteria(Criteria.where("deletedAt").`is`(null))
+            .addCriteria(Criteria.where("agentSnapshot.rarity").ne(4)).with(Sort.by("sortOrder", "eventId"))
+        query.fields().include("poolId", "agentSnapshot.rarity", "pullSpan", "upStatus").exclude("_id")
+        return template.stream(query, Document::class.java, "recruitment_events").map { row ->
+            RecruitmentStatisticEvent(
+                row.getString("poolId"),
+                (row.get("agentSnapshot", Document::class.java)?.get("rarity") as? Number)?.toInt(),
+                (row["pullSpan"] as? Number)?.toLong(),
+                row.getString("upStatus"),
+            )
+        }
+    }
+
     private fun eventGroup(id: String?): Document {
         fun sum(expression: Any) = Document("\$sum", expression)
         val exact = Document("\$ne", listOf(Document("\$ifNull", listOf("\$pullSpan", null)), null))
@@ -264,3 +280,5 @@ data class RecruitmentTotals(
     val unknownCount: Long,
     val fourStarCount: Long = 0,
 )
+
+data class RecruitmentStatisticEvent(val poolId: String, val rarity: Int?, val pullSpan: Long?, val upStatus: String?)

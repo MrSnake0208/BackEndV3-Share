@@ -204,6 +204,62 @@ class RecruitmentMongoTest {
         )
     }
 
+    @Test fun `first archive computes all gold statistics with stable order isolation and no read writes`() {
+        initialize()
+        command(
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"seed","agent_id":"catalog_p:up:A","pull_span":39}]}""",
+        )
+        val seed = store.event("u", "a", "seed")!!
+        store.saveEvent(seed.copy(deletedAt = seed.createdAt))
+        template.insert(RecruitmentBatch("u:a:batch", "u", "a", "batch", "p", 999))
+        // Reverse insertion and duplicate sortOrder require the same eventId tie-break as event pagination.
+        (0 until 120).reversed().forEach { index ->
+            val id = "e" + index.toString().padStart(3, '0')
+            store.insertEvent(
+                seed.copy(
+                    id = "u:a:$id",
+                    eventId = id,
+                    sortOrder = (index / 2).toLong(),
+                    upStatus = if (index % 3 == 0) "non_up" else "up",
+                    pullSpan = when (index % 3) {
+                        0 -> 39
+                        1 -> 38
+                        else -> null
+                    },
+                    batchId = if (index % 3 == 1) "batch" else null,
+                ),
+            )
+        }
+        store.insertEvent(
+            seed.copy(id = "u:a:four", eventId = "four", agentSnapshot = seed.agentSnapshot.copy(rarity = 4), upStatus = "unknown"),
+        )
+        store.insertEvent(seed.copy(id = "u:b:foreign", accountId = "b", eventId = "foreign", upStatus = "unknown"))
+        store.insertEvent(seed.copy(id = "other:a:foreign", userId = "other", eventId = "foreign", upStatus = "unknown"))
+        store.insertEvent(seed.copy(id = "u:a:other-pool", eventId = "other-pool", poolId = "other-pool", upStatus = "unknown"))
+        val before = store.archive("u", "a")
+        val eventsBefore = store.exchangeEvents("u", "a", 1000)
+        val batchesBefore = store.exchangeBatches("u", "a", 1000)
+        repeat(2) {
+            val summary = service.archive("u", "a").poolSummaries.getValue("p")
+            assertEquals(38.5, summary.averageGoldPulls)
+            assertEquals(50.0, summary.smallPityWinRate)
+            assertEquals(121L, summary.eventCount)
+            assertEquals(1L, summary.fourStarCount)
+        }
+        assertEquals(before, store.archive("u", "a"))
+        assertEquals(eventsBefore, store.exchangeEvents("u", "a", 1000))
+        assertEquals(batchesBefore, store.exchangeBatches("u", "a", 1000))
+        val other = service.archive("u", "b").poolSummaries.values.single()
+        assertNull(other.averageGoldPulls)
+        assertNull(other.smallPityWinRate)
+        assertThrows(InventoryApiException::class.java) { service.archive("not-owner", "a") }
+        command("event_delete", """{"event_id":"e119"}""")
+        assertEquals(49.4, service.archive("u", "a").poolSummaries.getValue("p").smallPityWinRate)
+        command("event_restore", """{"event_id":"e119"}""")
+        assertEquals(50.0, service.archive("u", "a").poolSummaries.getValue("p").smallPityWinRate)
+    }
+
     @Test fun `dialog saves repeated agents counts and progress atomically and retries without duplication`() {
         initialize()
         command(
