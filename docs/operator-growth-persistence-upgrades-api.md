@@ -155,7 +155,8 @@ Content-Type: application/json
 
 - `level`：经验、突破材料和按从属选择的 70/80 级材料；服务端从六韬兵书/兵书全卷/兵书残卷中选择最小溢出且稳定的组合；
 - `elite`：按密探属性分为风火、水地、阴阳/其他三组；
-- `huaji`：只提升化极阶段，扣该密探自己的 agent 心纸；普通终点25、隐密24，24→25为80心纸，不扣装金玻璃。觉醒独立确认，扣料动作未开放；SP preview/execute 均返回422 `sp_huaji_upgrade_not_supported`，不得使用普通心纸表；
+- `huaji`：只提升化极阶段，扣该密探自己的 agent 心纸；普通终点25、隐密24，24→25为80心纸，不扣装金玻璃。觉醒使用独立维度，不作为第26或31阶段；SP preview/execute 均返回422 `sp_huaji_upgrade_not_supported`，不得使用普通心纸表；
+- `awakening`：`target=1`，preview `from=0,to=1`；仅普通紫/金（rarity=4/5）、已拥有、stage25且未确认已觉醒可执行，否则422 `awakening_not_available`。扣该密探心纸100与装金玻璃1；铜钱300000仅估算。保留stage25、设置awakened=true，观测面板标记stale；与库存、revision、correction和consumption_delta同一事务提交。catalog明确开放awakening_upgrade_supported=true；SP/隐密不开放。
 - `money_required` 仅展示五铢钱估算，绝不进入 requirements、库存校验或扣减。
 
 ## 原子执行

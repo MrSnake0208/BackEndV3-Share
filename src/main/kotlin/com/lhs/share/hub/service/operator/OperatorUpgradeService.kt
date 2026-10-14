@@ -113,7 +113,7 @@ class OperatorUpgradeService(
                         game = request.game,
                         operatorId = request.operatorId,
                         reason = "quick_upgrade",
-                        fields = setOf("level", "elite", "star_level"),
+                        fields = if (request.dimension == AWAKENING) setOf("huaji") else setOf("level", "elite", "star_level"),
                         level = savedEntry.level,
                         elite = savedEntry.elite,
                         starLevel = savedEntry.starLevel,
@@ -219,15 +219,22 @@ class OperatorUpgradeService(
         if (request.dimension == HUAJI && (!huaji.owned || huaji.stage == null)) {
             invalid("huaji_stage_unknown", "Confirm owned huaji stage before calculating materials")
         }
+        if (request.dimension == AWAKENING &&
+            (catalog.spOf != null || catalog.rarity !in 4..5 || !huaji.owned || huaji.stage != 25 || huaji.awakened == true)
+        ) {
+            invalid("awakening_not_available", "Awakening requires an owned ordinary five-star operator that is not already awakened")
+        }
         val from = when (request.dimension) {
             LEVEL -> entry.level
             ELITE -> entry.elite
             HUAJI -> checkNotNull(huaji.stage)
-            else -> invalid("invalid_upgrade_target", "dimension must be level, elite, or huaji")
+            AWAKENING -> 0
+            else -> invalid("invalid_upgrade_target", "dimension must be level, elite, huaji, or awakening")
         }
         val max = when (request.dimension) {
             LEVEL -> 100
             ELITE -> 17
+            AWAKENING -> 1
             else -> OperatorHuajiRules.maximum(catalog)
         }
         if (request.target !in (from + 1)..max) {
@@ -241,6 +248,7 @@ class OperatorUpgradeService(
         val baseCost = when (request.dimension) {
             LEVEL -> OperatorRequirementRules.level(from, request.target, growthCatalog, request.skipBreakthroughMaterials)
             ELITE -> OperatorRequirementRules.elite(from, request.target, growthCatalog)
+            AWAKENING -> OperatorRequirementRules.awakening()
             else -> OperatorRequirementRules.huaji(from, request.target)
         }
         val itemCurrent = inventoryCurrentRepository.findByUserIdAndAccountIdAndEntityType(userId, request.accountId, ITEM)
@@ -335,6 +343,13 @@ class OperatorUpgradeService(
         return when (dimension) {
             LEVEL -> entry.copy(level = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
             ELITE -> entry.copy(elite = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
+            AWAKENING -> entry.copy(
+                starLevel = checkNotNull(entry.huaji?.stage),
+                huaji = checkNotNull(entry.huaji).copy(awakened = true),
+                combatStats = staleStats,
+                revision = entry.revision + 1,
+                updatedAt = now,
+            )
             else -> entry.copy(
                 starLevel = target,
                 huaji = (entry.huaji ?: com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, null)).copy(stage = target),
@@ -411,6 +426,7 @@ class OperatorUpgradeService(
         private const val LEVEL = "level"
         private const val ELITE = "elite"
         private const val HUAJI = "huaji"
+        private const val AWAKENING = "awakening"
         private const val ITEM = "item"
         private const val AGENT = "agent"
         const val CONSUMPTION_DELTA = "consumption_delta"
