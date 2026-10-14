@@ -146,6 +146,7 @@ class SecurityConfig(
                 "/v1/reports/public",
                 "/v1/reports/public/**",
                 "/v1/operator/share/view/**",
+                "/v1/star/share/view/**",
                 "/avatar/**",
                 "/media/**",
                 "/user/open-api/permissions",

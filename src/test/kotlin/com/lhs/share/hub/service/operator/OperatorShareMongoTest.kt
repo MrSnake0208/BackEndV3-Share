@@ -22,7 +22,7 @@ import java.time.Instant
 /** Field-only share writes must not undo recruitment's lifecycle fence or resurrect deleted accounts. */
 @Tag("integration")
 class OperatorShareMongoTest {
-    private val database = TestMongo.database("operator_share")
+    private val database = TestMongo.database("op_share")
     private val client = TestMongo.client()
     private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
     private val repository = SubAccountRepositoryImpl(template)
@@ -45,6 +45,20 @@ class OperatorShareMongoTest {
     }
 
     private fun owner(accountId: String) = Query.query(Criteria.where("userId").`is`("u").and("accountId").`is`(accountId))
+
+    @Test
+    fun `scope CAS rejects stale scopes even when token is unchanged`() {
+        val enabled = repository.updateShareAuthorization("u", "a", "old-a", null, "old-a", listOf("operator", "star"), now)!!
+        assertEquals(listOf("operator", "star"), enabled.shareScopes)
+        assertNull(repository.updateShareAuthorization("u", "a", "old-a", null, null, emptyList(), now))
+        assertNull(repository.updateShareAuthorization("other", "a", "old-a", enabled.shareScopes, null, emptyList(), now))
+        val starOnly = repository.updateShareAuthorization("u", "a", "old-a", enabled.shareScopes, "old-a", listOf("star"), now)!!
+        assertEquals(listOf("star"), starOnly.shareScopes)
+        assertNotNull(repository.updateShareAuthorization("u", "a", "old-a", starOnly.shareScopes, null, emptyList(), now))
+        assertNull(template.findOne(owner("a"), SubAccount::class.java)!!.shareToken)
+        template.remove(owner("a"), SubAccount::class.java)
+        assertNull(repository.updateShareAuthorization("u", "a", null, emptyList(), "late", listOf("star"), now))
+    }
 
     @Test
     fun `late share mutation preserves current game name and recruitment fence`() {

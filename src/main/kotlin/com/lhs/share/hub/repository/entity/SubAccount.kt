@@ -30,6 +30,14 @@ data class SubAccount(
     val updatedAt: Instant = Instant.now(),
     @Indexed(name = "idx_sub_share_token_unique", unique = true, sparse = true)
     val shareToken: String? = null,
+    /** Missing scopes on a legacy token mean operator-only; an explicit empty list grants nothing. */
+    val shareScopes: List<String>? = null,
     // A write fence shared by recruitment mutations and account lifecycle transactions.
     val recruitmentFence: Long = 0,
 )
+
+fun SubAccount.effectiveShareScopes(): List<String> = if (shareToken.isNullOrBlank()) {
+    emptyList()
+} else {
+    (shareScopes ?: listOf("operator")).filter { it in setOf("operator", "star") }.distinct().sorted()
+}
