@@ -1,6 +1,16 @@
 # 招募档案 API（MVP）
 
-个人路径 `/v1/recruitment`，管理员目录路径 `/v1/admin/recruitment-catalog`。成功沿用 `{status_code:200,data:...}`；错误使用真实 HTTP 状态与 `{error:{code,message}}`。除 GET `/catalog` 外个人接口须 JWT、全站内测资格及账号所有权，由 `BetaAccessPolicy` 统一校验。独立招募授权/模式已退役，历史数据及遗留管理 API 保留，不再控制当前招募或账号接口准入。个人读取不创建档案，不播种目录；响应 `Cache-Control: no-store`。卡池定义和 UP 名单仅由管理员维护。
+## 个人心愿 UP
+
+管理员卡池与快照新增 `allow_custom_up:boolean`，默认 `false`，与 `pool_type` 独立；只有管理员明确开启的池允许个人自选。管理员创建/编辑支持该字段，编辑时省略保留原值，显式 null 或非布尔值拒绝；目录 JSON 导入也支持。公开目录不包含任何用户选择。
+
+个人池新增 `wish_agent_ids:string[]`，默认空数组。通过 `pool_records_save` 的可选同名字段保存，必须恰好两位不同、当前游戏图鉴中 rarity=5 的密探；未开放、隐藏或停用池不允许修改心愿。仅修改心愿时可发送 `entries:[]`、`remaining_pulls:null`。沿用用户/账号隔离、archive revision CAS、request_id 幂等和账号事务；不创建公共 UP 槽。省略字段保留当前选择。
+
+开启心愿的池，archive 投影的 UP 名单由个人选择组成，operator_id 使用图鉴 ID；已有同密探管理员槽时复用其稳定 id（兼容历史次数），其余槽 id 使用图鉴 ID。未选择时 UP 为空、状态 unknown，不回退管理员固定名单。前端以个人选择推导后续手工录入的 UP 状态。修改选择不改写已有事件的 `up_status` 或历史心愿快照。
+
+完整 v1 备份新增可选 `pools[].wish_agent_ids` 与快照 `allow_custom_up`；旧备份默认未选。空档案恢复或显式 `use_backup` 状态策略可恢复心愿；`keep_current` 和普通记录导入不替换已选心愿。存在心愿的档案不视为可自动覆盖的空档案；备份不能自行开放普通池。历史事件保留当时 UP 状态。
+
+个人路径 `/v1/recruitment`，管理员目录路径 `/v1/admin/recruitment-catalog`。成功沿用 `{status_code:200,data:...}`；错误使用真实 HTTP 状态与 `{error:{code,message}}`。除 GET `/catalog` 外个人接口须 JWT、全站内测资格及账号所有权，由 `BetaAccessPolicy` 统一校验。独立招募授权/模式已退役，历史数据及遗留管理 API 保留，不再控制当前招募或账号接口准入。个人读取不创建档案，不播种目录；响应 `Cache-Control: no-store`。卡池定义和固定 UP 名单由管理员维护；明确开启心愿模式的池，个人 UP 由用户选择。
 
 ## 读接口
 

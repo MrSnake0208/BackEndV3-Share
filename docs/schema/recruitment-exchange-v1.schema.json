@@ -208,6 +208,9 @@
             }
           ]
         },
+        "allow_custom_up": {
+          "type": "boolean"
+        },
         "up_agents": {
           "type": "array",
           "items": {
@@ -284,6 +287,14 @@
               "type": "null"
             }
           ]
+        },
+        "wish_agent_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+          "uniqueItems": true,
+          "oneOf": [{ "maxItems": 0 }, { "minItems": 2 }],
+          "minItems": 0,
+          "maxItems": 2
         },
         "mapped_snapshot": {
           "anyOf": [

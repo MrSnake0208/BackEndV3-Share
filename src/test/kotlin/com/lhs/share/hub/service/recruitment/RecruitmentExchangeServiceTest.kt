@@ -66,6 +66,28 @@ class RecruitmentExchangeServiceTest {
         options: RecruitmentImportOptions = RecruitmentImportOptions(),
     ) = recruitmentExchangePlan(current, records, batches, backup, options)
 
+    @Test fun `wishlist round trips and keep-current imports do not erase or silently replace it`() {
+        val ids = listOf("char_001_yangxiu", "char_002_jiaxu")
+        val wished = state.copy(pools = listOf(state.pools.single().copy(wishAgentIds = ids)))
+        val backup = exchangeDocument(wished, emptyList(), emptyList(), now)
+        val read = RecruitmentExchangeValidation(mapper).read(mapper.valueToTree(backup))
+        assertEquals(ids, read.pools.single().wishAgentIds)
+        assertThrows(RecruitmentApiException::class.java) {
+            RecruitmentExchangeValidation(mapper).validate(read.copy(pools = read.pools.map { it.copy(wishAgentIds = listOf(ids[0])) }))
+        }
+        val restored = plan(current = RecruitmentArchive("u:b", "u", "b", "如鸢"), backup = read)
+        assertEquals(ids, restored.archive.pools.single().wishAgentIds)
+        val kept = plan(current = wished, backup = document())
+        assertEquals(ids, kept.archive.pools.single().wishAgentIds)
+        val changed = plan(current = wished, backup = document(), options = RecruitmentImportOptions("use_backup", true))
+        assertTrue(changed.archive.pools.single().wishAgentIds.isEmpty())
+        val onlyWishes = wished.copy(baseline = 0, currentPoolId = null, pools = wished.pools.map { it.copy(progress = 0) })
+        assertEquals(ids, plan(current = onlyWishes, backup = document()).archive.pools.single().wishAgentIds)
+        val legacy = mapper.valueToTree<ObjectNode>(backup)
+        (legacy.path("pools")[0] as ObjectNode).remove("wish_agent_ids")
+        assertTrue(RecruitmentExchangeValidation(mapper).read(legacy).pools.single().wishAgentIds.isEmpty())
+    }
+
     @Test fun `empty target restores managed slot snapshots unknown progress batch and tombstones`() {
         val batch = RecruitmentBatch("u:a:B", "u", "a", "B", "p", 80, now)
         val dead = record("D", null, 2).copy(deletedAt = now, deletedRevision = 9)

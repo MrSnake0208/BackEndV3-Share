@@ -48,6 +48,49 @@ class RecruitmentCatalogTest {
         every { operators.count() } returns 0L
     }
 
+    @Test fun `personal wishlist projects independently from fixed catalog and other accounts without writes`() {
+        saved["wish"] = RecruitmentCatalogPool("wish", "如鸢", "心愿池", allowCustomUp = true)
+        val personal = RecruitmentPool(
+            "personal",
+            RecruitmentPoolSnapshot("旧名", "如鸢", catalogPoolId = "wish"),
+            wishAgentIds = listOf("char_001_yangxiu", "char_002_jiaxu"),
+        )
+        val projected = catalog.projectPools(listOf(personal)).single()
+        assertEquals(personal.wishAgentIds, projected.snapshot.upAgentIds)
+        assertEquals(personal.wishAgentIds, projected.snapshot.upAgents.map { it.id })
+        assertEquals("verified", projected.snapshot.upStatus)
+        assertTrue(catalog.projectPools(listOf(personal.copy(wishAgentIds = emptyList()))).single().snapshot.upAgents.isEmpty())
+        assertTrue(catalog.catalog("如鸢").path("pools").first().path("up_agents").isEmpty)
+        saved["wish"] = saved.getValue("wish").copy(
+            upAgents = listOf(RecruitmentUpAgent("wish:up:legacy", "杨修", "char_001_yangxiu")),
+        )
+        assertEquals(
+            listOf("wish:up:legacy", "char_002_jiaxu"),
+            catalog.projectPools(listOf(personal)).single().snapshot.upAgents.map {
+                it.id
+            },
+        )
+        val updated = catalog.update("admin", "wish", RecruitmentCatalogWriteRequest("wish", "如鸢", "新名", 0))
+        assertTrue(updated.allowCustomUp)
+        verify(exactly = 1) { repository.save(any(), any()) }
+    }
+
+    @Test fun `catalog import accepts explicit wishlist mode but rejects non-boolean mode`() {
+        catalog.importCatalog(
+            "admin",
+            mapper.readTree("""{"pools":[{"pool_id":"wish-import","game":"如鸢","name":"心愿池","allow_custom_up":true}]}"""),
+        )
+        assertTrue(saved.getValue("wish-import").allowCustomUp)
+        listOf("null", "\"true\"", "1").forEach { value ->
+            assertThrows(RecruitmentApiException::class.java) {
+                catalog.importCatalog(
+                    "admin",
+                    mapper.readTree("""{"pools":[{"pool_id":"bad","game":"如鸢","name":"错误池","allow_custom_up":$value}]}"""),
+                )
+            }
+        }
+    }
+
     @Test
     fun `four star and movie recruits retain catalog rarity and game eligibility`() {
         assertEquals(5, catalog.operator("如鸢", "char_084_chendengsp").rarity)

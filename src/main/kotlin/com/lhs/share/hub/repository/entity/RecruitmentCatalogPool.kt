@@ -32,4 +32,5 @@ data class RecruitmentCatalogPool(
     val sourcePages: List<RecruitmentCatalogSourcePage> = emptyList(),
     val sourceNote: String? = null,
     val hidden: Boolean = false,
+    val allowCustomUp: Boolean = false,
 )

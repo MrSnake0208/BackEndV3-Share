@@ -37,6 +37,7 @@ data class RecruitmentPoolSnapshot(
     val catalogRevision: String? = null,
     val poolType: String? = null,
     val upAgents: List<RecruitmentUpAgent> = emptyList(),
+    val allowCustomUp: Boolean = false,
 )
 
 /** Stable pool-owned identity. Binding a placeholder never changes its id. */
@@ -52,6 +53,7 @@ data class RecruitmentPool(
     val snapshot: RecruitmentPoolSnapshot,
     val progress: Long? = null,
     val mappedSnapshot: RecruitmentPoolSnapshot? = null,
+    val wishAgentIds: List<String> = emptyList(),
 )
 
 data class RecruitmentTemporaryAgent(

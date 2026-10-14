@@ -143,6 +143,24 @@ class RecruitmentControllerContractTest {
             .andExpect(jsonPath("$.data.event_ids[0]").value("B"))
     }
 
+    @Test fun `wishlist-only save forwards canonical choices and authenticated account scope`() {
+        every { helper.requireUserId() } returns "u"
+        every {
+            service.command(
+                "u",
+                match {
+                    it.accountId == "a" && it.operation == "pool_records_save" &&
+                        it.data.path("wish_agent_ids").map { id -> id.asText() } == listOf("char_001_yangxiu", "char_002_jiaxu")
+                },
+            )
+        } returns RecruitmentCommandResponse(2)
+        mvc.perform(
+            post("/v1/recruitment/commands").contentType(MediaType.APPLICATION_JSON).content(
+                """{"account_id":"a","expected_revision":1,"request_id":"wish","operation":"pool_records_save","data":{"pool_id":"p","remaining_pulls":null,"entries":[],"wish_agent_ids":["char_001_yangxiu","char_002_jiaxu"]}}""",
+            ),
+        ).andExpect(status().isOk).andExpect(jsonPath("$.data.archive_revision").value(2))
+    }
+
     @Test fun `pool dialog forwards per result spans remaining pulls and stable record IDs`() {
         every { helper.requireUserId() } returns "u"
         every {
