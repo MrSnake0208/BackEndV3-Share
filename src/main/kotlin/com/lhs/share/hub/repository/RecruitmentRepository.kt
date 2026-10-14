@@ -191,13 +191,22 @@ class RecruitmentRepository(@param:Qualifier("hubMongoTemplate") private val tem
     fun statisticEvents(userId: String, accountId: String): Stream<RecruitmentStatisticEvent> {
         val query = owner(userId, accountId).addCriteria(Criteria.where("deletedAt").`is`(null))
             .addCriteria(Criteria.where("agentSnapshot.rarity").ne(4)).with(Sort.by("sortOrder", "eventId"))
-        query.fields().include("poolId", "agentSnapshot.rarity", "pullSpan", "upStatus").exclude("_id")
+        query.fields().include(
+            "poolId",
+            "agentSnapshot.rarity",
+            "agentSnapshot.agentId",
+            "agentSnapshot.name",
+            "pullSpan",
+            "upStatus",
+        ).exclude("_id")
         return template.stream(query, Document::class.java, "recruitment_events").map { row ->
             RecruitmentStatisticEvent(
                 row.getString("poolId"),
                 (row.get("agentSnapshot", Document::class.java)?.get("rarity") as? Number)?.toInt(),
                 (row["pullSpan"] as? Number)?.toLong(),
                 row.getString("upStatus"),
+                row.get("agentSnapshot", Document::class.java)?.getString("agentId"),
+                row.get("agentSnapshot", Document::class.java)?.getString("name"),
             )
         }
     }
@@ -281,4 +290,11 @@ data class RecruitmentTotals(
     val fourStarCount: Long = 0,
 )
 
-data class RecruitmentStatisticEvent(val poolId: String, val rarity: Int?, val pullSpan: Long?, val upStatus: String?)
+data class RecruitmentStatisticEvent(
+    val poolId: String,
+    val rarity: Int?,
+    val pullSpan: Long?,
+    val upStatus: String?,
+    val agentId: String? = null,
+    val agentName: String? = null,
+)

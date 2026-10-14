@@ -714,6 +714,10 @@ class RecruitmentServiceTest {
             assertEquals(0, visible.summary.unknownProgressCount)
             assertEquals(managed.upAgents.associate { it.id to 0L }, visible.poolSummaries.values.single().upAgentCounts)
             assertNull(visible.summary.upAgentCounts)
+            assertNull(visible.summary.averageGoldPulls)
+            assertEquals(0L, visible.summary.permanentKnownTotalPulls)
+            assertEquals(emptyList<Any>(), visible.summary.mostObtainedGoldAgents)
+            assertEquals(emptyList<Any>(), visible.summary.mostNonUpGoldAgents)
             assertNull(visible.poolSummaries.values.single().averageGoldPulls)
             assertNull(visible.poolSummaries.values.single().smallPityWinRate)
             assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
@@ -721,10 +725,11 @@ class RecruitmentServiceTest {
         every { readStore.archive("u", "a") } returns state
         every { readStore.statisticEvents("u", "a") } answers {
             listOf(
-                RecruitmentStatisticEvent("p", 5, 39, "non_up"),
-                RecruitmentStatisticEvent("other", 5, 1, "unknown"),
-                RecruitmentStatisticEvent("p", 5, 38, "up"),
-                RecruitmentStatisticEvent("p", 5, null, "up"),
+                RecruitmentStatisticEvent("p", 5, 39, "non_up", "gold", "绝密"),
+                RecruitmentStatisticEvent("other", 5, 1, "unknown", "other-gold", "其他绝密"),
+                RecruitmentStatisticEvent("p", 5, 38, "up", "gold", "绝密"),
+                RecruitmentStatisticEvent("p", 5, null, "up", "gold", "绝密"),
+                RecruitmentStatisticEvent("p", 4, 100, "up", "gold", "四星"),
             ).stream().onClose { closedStreams++ }
         }
         every { catalogStore.all() } returns listOf(
@@ -747,9 +752,25 @@ class RecruitmentServiceTest {
         // A missing directory keeps the stored snapshot authoritative, including placeholders.
         every { catalogStore.all() } returns emptyList()
         every { readStore.archive("u", "a") } returns state.copy(
-            pools = listOf(state.pools.single().copy(snapshot = state.pools.single().snapshot.copy(upAgents = managed.upAgents))),
+            baseline = 1000,
+            pools = listOf(
+                state.pools.single().copy(snapshot = state.pools.single().snapshot.copy(upAgents = managed.upAgents)),
+                RecruitmentPool("standard", RecruitmentPoolSnapshot("绣衣天下", "如鸢", poolType = "常驻"), progress = 7),
+                RecruitmentPool("standard-history", RecruitmentPoolSnapshot("绣衣天下", "如鸢", poolType = "standard")),
+            ),
         )
-        val poolSummary = service.archive("u", "a").poolSummaries.getValue("p")
+        every { readStore.poolTotals("u", "a") } returns mapOf(
+            "standard" to RecruitmentTotals(20, 50, 3, 2, 1),
+            "standard-history" to RecruitmentTotals(11, 0, 1, 1, 0),
+            "p" to RecruitmentTotals(900, 0, 1, 1, 0),
+        )
+        val archive = service.archive("u", "a")
+        assertEquals(26.0, archive.summary.averageGoldPulls)
+        assertEquals(88L, archive.summary.permanentKnownTotalPulls)
+        assertEquals("gold", archive.summary.mostObtainedGoldAgents?.single()?.agentId)
+        assertEquals(3L, archive.summary.mostObtainedGoldAgents?.single()?.count)
+        assertEquals(1L, archive.summary.mostNonUpGoldAgents?.single()?.count)
+        val poolSummary = archive.poolSummaries.getValue("p")
         assertEquals(2L, poolSummary.upAgentCounts?.get("catalog_p:up:A"))
         assertEquals(38.5, poolSummary.averageGoldPulls)
         assertEquals(50.0, poolSummary.smallPityWinRate)
