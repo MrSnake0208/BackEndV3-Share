@@ -131,10 +131,8 @@ class RecruitmentMutation(
                         byId.getValue(id).takeIf { it.sortOrder != slots[index] }?.copy(sortOrder = slots[index], updatedAt = now)
                     }
                 }
-                if (input.remainingPulls == null &&
-                    (modifiedEvents.any { it.agentSnapshot.rarity != 4 } || modifiedEvents.isEmpty() && ordered == null)
-                ) {
-                    throw recruitmentInvalid("维护5星记录时须提供真实保底；仅4星计次可留空保底")
+                if (input.remainingPulls == null && modifiedEvents.isEmpty() && ordered == null) {
+                    throw recruitmentInvalid("请修改出货记录、顺序或填写保底进度后保存")
                 }
                 val touchedBatches = (changed + removed).mapNotNull { it.batchId }.toSet()
                 touchedBatches.forEach { id ->
