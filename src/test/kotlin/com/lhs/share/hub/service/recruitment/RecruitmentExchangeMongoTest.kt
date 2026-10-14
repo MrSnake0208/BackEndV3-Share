@@ -3,6 +3,7 @@ package com.lhs.share.hub.service.recruitment
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.recruitment.request.RecruitmentCommandRequest
@@ -150,6 +151,85 @@ class RecruitmentExchangeMongoTest {
             preview.targetRevision,
             UUID.randomUUID().toString(),
         )
+    }
+
+    private fun simpleRecords(): JsonNode = mapper.readTree(
+        """{"schema":"yuanhub.recruitment.import.v1","game":"如鸢","events":[{"event_id":"550e8400-e29b-41d4-a716-446655440000","catalog_pool_id":"test_pool","agent_id":"test_pool:up:A","pull_span":17}]}""",
+    )
+
+    @Test fun `minimal records append to existing pool without replacing state and repeat safely`() {
+        initialize("b")
+        command("b", "baseline_set", """{"baseline":10}""")
+        val before = service.export("u", "b")
+        val node = simpleRecords()
+        val blocked = service.preview("u", RecruitmentImportPreviewRequest("b", node))
+        assertEquals("count_overlap", blocked.items.single().status)
+        assertEquals(false, blocked.canCommit)
+        assertTrue(blocked.items.single().displayName!!.contains("占位A"))
+        assertThrows(RecruitmentApiException::class.java) {
+            service.preview("u", RecruitmentImportPreviewRequest("b", node, RecruitmentImportOptions("use_backup", true)))
+        }
+        val options = RecruitmentImportOptions(confirmCountChange = true)
+        val input = prepared(node, options = options)
+        assertThrows(InventoryApiException::class.java) { service.commit("foreign", input) }
+        service.commit("u", input)
+        val imported = service.export("u", "b")
+        assertEquals(27L, core.archive("u", "b").summary.knownTotalPulls)
+        assertEquals(before.baseline, imported.baseline)
+        assertEquals(before.currentPoolId, imported.currentPoolId)
+        assertEquals(before.pools.map { it.progress }, imported.pools.map { it.progress })
+        assertEquals("p", imported.events.single().poolId)
+        assertTrue(imported.events.single().createdAt > Instant.EPOCH)
+        assertEquals("unknown", imported.events.single().upStatus)
+        val repeated = service.preview("u", RecruitmentImportPreviewRequest("b", node))
+        assertEquals(1, repeated.stats.duplicates)
+        assertEquals(0, repeated.stats.added)
+        service.commit("u", prepared(node))
+        assertEquals(1, store.exchangeEvents("u", "b", 20_001).size)
+        assertTrue(store.exchangeEvents("u", "a", 20_001).isEmpty())
+    }
+
+    @Test fun `record import binds resolved directory and batch totals count once`() {
+        val node = simpleRecords() as ObjectNode
+        val input = prepared(node)
+        val old = directory.find("test_pool")!!
+        assertTrue(directory.save(old.copy(name = "新名称", revision = old.revision + 1)))
+        assertThrows(RecruitmentApiException::class.java) { service.commit("u", input) }
+        assertTrue(store.exchangeEvents("u", "b", 20_001).isEmpty())
+        val batchId = "550e8400-e29b-41d4-a716-446655440001"
+        (node.path("events")[0] as ObjectNode).put("batch_id", batchId)
+        node.set<JsonNode>("batches", mapper.readTree("""[{"batch_id":"$batchId","catalog_pool_id":"test_pool","total_pull_count":100}]"""))
+        service.commit("u", prepared(node))
+        assertEquals(100L, core.archive("u", "b").summary.knownTotalPulls)
+        assertEquals(17L, service.export("u", "b").events.single().pullSpan)
+        service.commit("u", prepared(node))
+        assertEquals(100L, core.archive("u", "b").summary.knownTotalPulls)
+        assertEquals(1, store.exchangeBatches("u", "b", 20_001).size)
+    }
+
+    @Test fun `source-free import stays bound to authorized target and exports its new provenance`() {
+        initialize()
+        historical()
+        val original = service.export("u", "a")
+        val node = backup() as ObjectNode
+        node.remove("source_account")
+        val input = prepared(node)
+        assertThrows(InventoryApiException::class.java) { service.commit("foreign", input) }
+        assertEquals(
+            "recruitment_preview_mismatch",
+            assertThrows(RecruitmentApiException::class.java) { service.commit("u", input.copy(accountId = "a")) }.code,
+        )
+        assertTrue(store.exchangeEvents("u", "b", 20_001).isEmpty())
+        service.commit("u", input)
+        val restored = service.export("u", "b")
+        assertEquals("b", restored.sourceAccount?.accountId)
+        assertEquals(listOf("E"), restored.events.map { it.eventId })
+        assertEquals(17L, core.archive("u", "b").summary.knownTotalPulls)
+        node.putNull("source_account")
+        service.commit("u", prepared(node))
+        assertEquals(1, store.exchangeEvents("u", "b", 20_001).size)
+        assertEquals(original.archiveRevision, service.export("u", "a").archiveRevision)
+        assertEquals(original.events, service.export("u", "a").events)
     }
 
     @Test fun `dialog reordered history roundtrips with sort slots unknown values and batch totals`() {

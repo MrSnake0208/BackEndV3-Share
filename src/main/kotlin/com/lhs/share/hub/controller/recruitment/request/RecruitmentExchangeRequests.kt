@@ -13,7 +13,7 @@ import java.time.LocalDate
 data class RecruitmentExchangeDocument(
     val schema: String,
     val exportedAt: Instant,
-    val sourceAccount: RecruitmentExchangeAccount,
+    val sourceAccount: RecruitmentExchangeAccount? = null,
     val game: String,
     @param:JsonProperty(required = true) val archiveRevision: Long,
     @param:JsonProperty(required = true) val baseline: Long,
