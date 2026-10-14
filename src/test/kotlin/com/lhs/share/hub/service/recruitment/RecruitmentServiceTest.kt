@@ -137,7 +137,7 @@ class RecruitmentServiceTest {
         assertEquals(20L, count())
     }
 
-    @Test fun `four star pool dialog saves with unknown pity while five star still requires explicit remaining pulls`() {
+    @Test fun `four and five star pool dialog saves preserve unknown pity when remaining pulls is null`() {
         state = state.copy(pools = listOf(state.pools.single().copy(progress = null)))
         command(
             "pool_records_save",
@@ -145,11 +145,35 @@ class RecruitmentServiceTest {
         )
         assertNull(state.pools.single().progress)
         assertEquals(4, events.getValue("four").agentSnapshot.rarity)
-        assertThrows(RecruitmentApiException::class.java) {
+        command(
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"five","agent_id":"char_084_chendengsp","pull_span":17}]}""",
+        )
+        assertNull(state.pools.single().progress)
+        assertEquals(5, events.getValue("five").agentSnapshot.rarity)
+        assertEquals(17L, count())
+    }
+
+    @Test fun `five star create edit and delete with null remaining pulls preserve known and unknown pity`() {
+        listOf(null, 7L).forEach { progress ->
+            state = state.copy(pools = listOf(state.pools.single().copy(progress = progress)))
             command(
                 "pool_records_save",
-                """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"five","agent_id":"char_084_chendengsp","pull_span":17}]}""",
+                """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"five","agent_id":"catalog_p:up:A","pull_span":null}]}""",
             )
+            assertEquals(progress, state.pools.single().progress)
+            assertNull(events.getValue("five").pullSpan)
+            assertEquals(progress ?: 0L, count())
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"five","agent_id":"catalog_p:up:A","pull_span":20}]}""",
+            )
+            assertEquals(progress, state.pools.single().progress)
+            assertEquals((progress ?: 0L) + 20L, count())
+            command("pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"deleted_event_ids":["five"]}""")
+            assertEquals(progress, state.pools.single().progress)
+            assertEquals(progress ?: 0L, count())
+            events.clear()
         }
     }
 

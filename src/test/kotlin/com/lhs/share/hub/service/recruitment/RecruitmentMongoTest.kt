@@ -286,6 +286,31 @@ class RecruitmentMongoTest {
         assertEquals(12L, store.event("u", "a", "B")!!.pullSpan)
     }
 
+    @Test fun `dialog null pity saves five star results without inventing progress and retries without duplication`() {
+        initialize()
+        command("progress_set", """{"pool_id":"p","progress":null}""")
+        val input = request(
+            store.archive("u", "a")!!.archiveRevision,
+            "pool_records_save",
+            """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"B","agent_id":"catalog_p:up:A","pull_span":null}]}""",
+            "optional-pity-retry",
+        )
+        val first = service.command("u", input)
+        assertEquals(first, service.command("u", input))
+        val archive = service.archive("u", "a")
+        assertNull(archive.pools.single().progress)
+        assertEquals(20L, archive.summary.knownTotalPulls)
+        assertEquals(2L, archive.summary.eventCount)
+        assertEquals(1L, archive.summary.unknownEventCount)
+        assertEquals(1, archive.summary.unknownProgressCount)
+        assertTrue(archive.summary.hasUnknown)
+        assertEquals(20.0, archive.poolSummaries.getValue("p").averageGoldPulls)
+        assertEquals(first.archiveRevision, archive.archiveRevision)
+        assertTrue(store.poolEvents("u", "b", "p", 10).isEmpty())
+        assertThrows(InventoryApiException::class.java) { service.command("other", input) }
+        assertEquals(archive.archiveRevision, service.archive("u", "a").archiveRevision)
+    }
+
     @Test fun `dialog failure rolls back edits additions removals progress and account fence together`() {
         initialize()
         command(

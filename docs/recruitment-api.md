@@ -58,7 +58,7 @@ set_current_pool、progress_set、event_create、batch_create 可直接使用 ar
 | --- | --- |
 | pool_create | `{progress,pool_id?,catalog_pool_id}`，progress须显式null或非负整数；目录须为本游戏启用的管理员卡池，提供name或缺少目录ID拒绝422 |
 | set_current_pool | `{pool_id}` |
-| pool_records_save | `{pool_id,entries,remaining_pulls,deleted_event_ids?}`：每条entry须带event_id，修改/新增最多120条、删除最多120条；remaining_pulls严格整数1–40，同事务保存所有记录改动和progress=40-N |
+| pool_records_save | `{pool_id,entries,remaining_pulls,deleted_event_ids?}`：每条entry须带event_id，修改/新增最多120条、删除最多120条；remaining_pulls须显式整数1–40或null，有值时同事务保存所有记录改动和progress=40-N，null保留原进度（含未知） |
 | progress_set | `{pool_id,progress}`，非负整数或null；N由客户端按40-N换算 |
 | baseline_set | `{baseline}`，账号级非负整数 |
 | event_create | `{pool_id,mode,entries,tail_progress?,extract_from_baseline?}` |
@@ -80,7 +80,7 @@ entry=`{agent_id,pull_span,event_id?,up_status?,acquired_date?,note?}`，每次1
 {"pool_id":"p","remaining_pulls":19,"entries":[{"event_id":"lu","agent_id":"char_038_luxun","pull_span":null}],"deleted_event_ids":[],"ordered_event_ids":["A","lu","B"]}
 ```
 
-顺序意图与出货字段、删除、保底、revision CAS、账号写入fence和requestId回执处于同一个Hub事务；任何失败整体回滚。只分配本池保存后有效记录原有及新增的全局sort_order槽，不改其他池或tombstone的槽，不重新计算pull_span、日期、UP/稀有度、基准、批次成员或总量。纯排序可提供`remaining_pulls:null`以保留原保底（含未知）；维护5星字段或新增5星仍需明确真实保底。已有`event_reorder`完整集契约保持不变。
+顺序意图与出货字段、删除、保底、revision CAS、账号写入fence和requestId回执处于同一个Hub事务；任何失败整体回滚。只分配本池保存后有效记录原有及新增的全局sort_order槽，不改其他池或tombstone的槽，不重新计算pull_span、日期、UP/稀有度、基准、批次成员或总量。排序以及4星/5星记录的新增、编辑或删除均可提供`remaining_pulls:null`以保留原保底（含未知）。已有`event_reorder`完整集契约保持不变。
 
 客户端须以同revision完整分页核对预期ID顺序，不能把HTTP200当作已确认；回读失败沿原回执重读，网络提交结果未知沿原request_id/expected_revision及相同内容重试，409保留草稿并重新核对。JSON v1保持sort_order及null，CSV沿导出事件顺序输出；本次不改变备份格式。
 
@@ -131,7 +131,7 @@ CSV由前端使用同一完整export文档生成，标准CSV转义并处理所�
 
 `pool_records_save` 维护某个池的每次出货，同一agent_id允许重复，身份按event_id区分。entries仅包含改动或新增；存在ID更新原记录（保留排序和批次归属），新ID新增独立事件（按请求顺序追加），deleted_event_ids明确软删除指定有效节点。两组ID唯一且互不重叠，不能修改/删除其他池或已删除节点。未知span须显式null，已知span为正整数，未提交的历史不覆盖。新增/换密探沿用目录、游戏/稀有度、固定UP槽校验，停用池仍可改已有抽数和删除但不能新增。
 
-remaining_pulls按40抽口径替换当前进度0–39；span和尾抽各计一次，不额外消费或累加旧进度，不自动从基准拆出。改单条独立事件只替换其抽数贡献；删一条不改相邻跨度。批次内节点编辑/删除不改变批次总量，所有变更完成后的有效span之和须≤批次total。整次请求复用账号fence/CAS/幂等账本和Hub事务，任一校验或请求记录存储失败全部回滚；提交后才发SSE。旧current/historical命令、JSON/CSV备份和数据库结构不变。
+remaining_pulls有值时按40抽口径替换当前进度0–39；null保留原进度（含未知），不清除原值。null且没有记录或顺序修改的空请求拒绝422。span和尾抽各计一次，不额外消费或累加旧进度，不自动从基准拆出。改单条独立事件只替换其抽数贡献；删一条不改相邻跨度。批次内节点编辑/删除不改变批次总量，所有变更完成后的有效span之和须≤批次total。整次请求复用账号fence/CAS/幂等账本和Hub事务，任一校验或请求记录存储失败全部回滚；提交后才发SSE。旧current/historical命令、JSON/CSV备份和数据库结构不变。
 
 ```json
 {"account_id":"a","expected_revision":1,"request_id":"dialog-1","operation":"pool_records_save","data":{"pool_id":"p","entries":[{"event_id":"E","agent_id":"catalog_p:up:A","pull_span":17}],"deleted_event_ids":[],"remaining_pulls":19}}
@@ -166,7 +166,7 @@ preview 与 commit 均重新检查隐藏状态。隐藏池备份只允许目标�
 
 图鉴名称唯一匹配且属于当前游戏的导入占位会自动绑定，保留池ID与UP槽ID；未知/重名保持占位，显式ID仍严格校验。4星事件的 `pull_span` 必须为 null，只累计 `event_count`、`four_star_count` 与对应UP次数，不计绝密间隔，也不制造未知间隔。`exact_event_count/unknown_event_count` 仅包含5星，`event_count-four_star_count` 为5星条数。仅4星的 current 录入不会读取/覆盖保底；混合录入按首个5星校验旧进度。照影SP按图鉴5星参与原有规则。显式批次总抽数仍只累计一次。备份4星必须为空间隔且稀有度与图鉴一致；旧记录保留原始稀有度和身份。
 
-`pool_records_save.remaining_pulls` 仍必填；仅维护4星时可显式null，表示保留当前进度（含未知）。涉及5星的修改仍须填写1–40的真实剩余保底。
+`pool_records_save.remaining_pulls` 字段仍须显式提供；维护4星或5星均可传null，表示保留当前进度（含未知）。用户界面的当前保底为选填，有值时仍须为1–40整数。
 
 兼容历史：曾以占位槽录入的原始5星快照，即使该槽后来绑定到4星，备份仍按固定槽身份与原始稀有度恢复。新录入由图鉴派生稀有度；新4星快照须与图鉴一致，原历史不回写。
 
