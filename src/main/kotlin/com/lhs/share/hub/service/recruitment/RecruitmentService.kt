@@ -43,6 +43,10 @@ class RecruitmentService(
             val totals = store.totals(userId, accountId)
             val byPool = store.poolTotals(userId, accountId)
             val agentCounts = store.poolAgentCounts(userId, accountId)
+            val goldStatistics = mutableMapOf<String, RecruitmentGoldStatistics>()
+            store.statisticEvents(userId, accountId).use { records ->
+                records.forEach { record -> goldStatistics.getOrPut(record.poolId) { RecruitmentGoldStatistics() }.add(record) }
+            }
             val progress = current.pools.sumOf { it.progress ?: 0 }
             val unknownProgress = current.pools.count { it.progress == null }
             RecruitmentArchiveResponse(
@@ -76,6 +80,8 @@ class RecruitmentService(
                             }
                         },
                         count?.fourStarCount ?: 0,
+                        averageGoldPulls = goldStatistics[pool.poolId]?.averageGoldPulls,
+                        smallPityWinRate = goldStatistics[pool.poolId]?.smallPityWinRate,
                     )
                 },
                 mutation.poolStates(pools),
