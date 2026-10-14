@@ -44,8 +44,14 @@ class RecruitmentService(
             val byPool = store.poolTotals(userId, accountId)
             val agentCounts = store.poolAgentCounts(userId, accountId)
             val goldStatistics = mutableMapOf<String, RecruitmentGoldStatistics>()
+            val accountGoldStatistics = RecruitmentGoldStatistics()
+            val agentStatistics = RecruitmentAgentStatistics(pools, current.temporaryAgents)
             store.statisticEvents(userId, accountId).use { records ->
-                records.forEach { record -> goldStatistics.getOrPut(record.poolId) { RecruitmentGoldStatistics() }.add(record) }
+                records.forEach { record ->
+                    goldStatistics.getOrPut(record.poolId) { RecruitmentGoldStatistics() }.add(record)
+                    accountGoldStatistics.add(record)
+                    agentStatistics.add(record)
+                }
             }
             val progress = current.pools.sumOf { it.progress ?: 0 }
             val unknownProgress = current.pools.count { it.progress == null }
@@ -57,6 +63,12 @@ class RecruitmentService(
                     progress, totals.eventCount, totals.exactCount, totals.unknownCount, unknownProgress,
                     totals.unknownCount > 0 || unknownProgress > 0,
                     fourStarCount = totals.fourStarCount,
+                    averageGoldPulls = accountGoldStatistics.averageGoldPulls,
+                    permanentKnownTotalPulls = pools.filter { isPermanentRecruitmentPool(it.mappedSnapshot ?: it.snapshot) }.sumOf {
+                        (byPool[it.poolId]?.recordedPulls ?: 0) + (byPool[it.poolId]?.batchPulls ?: 0) + (it.progress ?: 0)
+                    },
+                    mostObtainedGoldAgents = agentStatistics.mostObtained,
+                    mostNonUpGoldAgents = agentStatistics.mostNonUp,
                 ),
                 current.gameSnapshot != account.game,
                 pools.associate { pool ->

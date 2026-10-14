@@ -7,6 +7,7 @@ import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.config.security.BetaAccessPolicy
 import com.lhs.share.handler.RecruitmentExceptionHandler
 import com.lhs.share.hub.controller.recruitment.RecruitmentController
+import com.lhs.share.hub.controller.recruitment.response.RecruitmentAgentCount
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentArchiveResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentCommandResponse
 import com.lhs.share.hub.controller.recruitment.response.RecruitmentEventPage
@@ -87,7 +88,14 @@ class RecruitmentControllerContractTest {
         every { helper.requireUserId() } returns "u"
         val summary = RecruitmentSummary(0, 0, 0, 0, 0, 0, 0, 0, false)
         every { service.archive("u", "a") } returns RecruitmentArchiveResponse(
-            "a", "如鸢", 0, 0, null, emptyList(), emptyList(), summary, false,
+            "a", "如鸢", 0, 0, null, emptyList(), emptyList(),
+            summary.copy(
+                averageGoldPulls = 23.4,
+                permanentKnownTotalPulls = 123,
+                mostObtainedGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 3), RecruitmentAgentCount("b", "乙", 3)),
+                mostNonUpGoldAgents = emptyList(),
+            ),
+            false,
             mapOf(
                 "p" to summary.copy(
                     upAgentCounts = mapOf("catalog_p:up:A" to 2L, "catalog_p:up:B" to 0L),
@@ -99,6 +107,13 @@ class RecruitmentControllerContractTest {
         )
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
             .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.summary.average_gold_pulls").value(23.4))
+            .andExpect(jsonPath("$.data.summary.permanent_known_total_pulls").value(123))
+            .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents.length()").value(2))
+            .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].agent_id").value("a"))
+            .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].name").value("甲"))
+            .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].count").value(3))
+            .andExpect(jsonPath("$.data.summary.most_non_up_gold_agents.length()").value(0))
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:A']").value(2))
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:B']").value(0))
             .andExpect(jsonPath("$.data.pool_summaries.p.average_gold_pulls").value(18.2))

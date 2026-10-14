@@ -254,7 +254,7 @@ class RecruitmentMongoTest {
             """{"pool_id":"p","mode":"historical","entries":[{"event_id":"seed","agent_id":"catalog_p:up:A","pull_span":39}]}""",
         )
         val seed = store.event("u", "a", "seed")!!
-        store.saveEvent(seed.copy(deletedAt = seed.createdAt))
+        store.saveEvent(seed.copy(pullSpan = 999, deletedAt = seed.createdAt))
         template.insert(RecruitmentBatch("u:a:batch", "u", "a", "batch", "p", 999))
         // Reverse insertion and duplicate sortOrder require the same eventId tie-break as event pagination.
         (0 until 120).reversed().forEach { index ->
@@ -277,14 +277,22 @@ class RecruitmentMongoTest {
         store.insertEvent(
             seed.copy(id = "u:a:four", eventId = "four", agentSnapshot = seed.agentSnapshot.copy(rarity = 4), upStatus = "unknown"),
         )
-        store.insertEvent(seed.copy(id = "u:b:foreign", accountId = "b", eventId = "foreign", upStatus = "unknown"))
-        store.insertEvent(seed.copy(id = "other:a:foreign", userId = "other", eventId = "foreign", upStatus = "unknown"))
-        store.insertEvent(seed.copy(id = "u:a:other-pool", eventId = "other-pool", poolId = "other-pool", upStatus = "unknown"))
+        store.insertEvent(seed.copy(id = "u:b:foreign", accountId = "b", eventId = "foreign", pullSpan = 99, upStatus = "unknown"))
+        store.insertEvent(seed.copy(id = "other:a:foreign", userId = "other", eventId = "foreign", pullSpan = 777, upStatus = "unknown"))
+        store.insertEvent(
+            seed.copy(id = "u:a:other-pool", eventId = "other-pool", poolId = "other-pool", pullSpan = 1, upStatus = "unknown"),
+        )
         val before = store.archive("u", "a")
         val eventsBefore = store.exchangeEvents("u", "a", 1000)
         val batchesBefore = store.exchangeBatches("u", "a", 1000)
         repeat(2) {
-            val summary = service.archive("u", "a").poolSummaries.getValue("p")
+            val archive = service.archive("u", "a")
+            assertEquals(38.0, archive.summary.averageGoldPulls)
+            assertEquals(0L, archive.summary.permanentKnownTotalPulls)
+            assertEquals("catalog_p:up:A", archive.summary.mostObtainedGoldAgents?.single()?.agentId)
+            assertEquals(121L, archive.summary.mostObtainedGoldAgents?.single()?.count)
+            assertEquals(40L, archive.summary.mostNonUpGoldAgents?.single()?.count)
+            val summary = archive.poolSummaries.getValue("p")
             assertEquals(38.5, summary.averageGoldPulls)
             assertEquals(50.0, summary.smallPityWinRate)
             assertEquals(121L, summary.eventCount)
@@ -293,7 +301,10 @@ class RecruitmentMongoTest {
         assertEquals(before, store.archive("u", "a"))
         assertEquals(eventsBefore, store.exchangeEvents("u", "a", 1000))
         assertEquals(batchesBefore, store.exchangeBatches("u", "a", 1000))
-        val other = service.archive("u", "b").poolSummaries.values.single()
+        val otherArchive = service.archive("u", "b")
+        assertEquals(99.0, otherArchive.summary.averageGoldPulls)
+        assertEquals(1L, otherArchive.summary.mostObtainedGoldAgents?.single()?.count)
+        val other = otherArchive.poolSummaries.values.single()
         assertNull(other.averageGoldPulls)
         assertNull(other.smallPityWinRate)
         assertThrows(InventoryApiException::class.java) { service.archive("not-owner", "a") }
