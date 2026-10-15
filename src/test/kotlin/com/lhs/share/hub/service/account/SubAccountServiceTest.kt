@@ -11,6 +11,7 @@ import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
+import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.OperatorScanReviewRepository
@@ -64,6 +65,7 @@ class SubAccountServiceTest {
     private val completionRepository = mockk<StarCompletionRepository>(relaxed = true)
     private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
+    private val organizationRepository = mockk<OperatorOrganizationRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
     private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
@@ -116,6 +118,7 @@ class SubAccountServiceTest {
         calendarSubscriptions = calendarSubscriptions,
         calendarPrivateItems = calendarPrivateItems,
         starCompletionRepository = completionRepository,
+        operatorOrganizationRepository = organizationRepository,
     )
 
     @Test
@@ -259,6 +262,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { calendarPrivateItems.deleteAccount("u1", "main") }
 
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { organizationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starStateRepository.deleteAllByUserIdAndAccountId("u1", "main") }
