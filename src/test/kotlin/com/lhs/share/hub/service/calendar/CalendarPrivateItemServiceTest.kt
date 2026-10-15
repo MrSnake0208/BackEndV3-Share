@@ -187,8 +187,15 @@ class CalendarPrivateItemServiceTest {
         assertEquals("END", legacy.reminderOn)
         assertEquals(1, legacy.reminderDaysBefore)
         val changed = service.update(
-            "owner", id,
-            configured.copy(reminderOn = "START", reminderDaysBefore = 0, expectedVersion = 0, reminderOnProvided = true, reminderDaysBeforeProvided = true),
+            "owner",
+            id,
+            configured.copy(
+                reminderOn = "START",
+                reminderDaysBefore = 0,
+                expectedVersion = 0,
+                reminderOnProvided = true,
+                reminderDaysBeforeProvided = true,
+            ),
         )
         assertEquals("START", changed.reminderOn)
         assertEquals(0, changed.reminderDaysBefore)

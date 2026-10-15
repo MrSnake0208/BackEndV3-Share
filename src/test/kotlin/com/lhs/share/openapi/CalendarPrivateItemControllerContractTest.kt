@@ -165,7 +165,11 @@ class CalendarPrivateItemControllerContractTest {
         ).forEach { invalid ->
             mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",$invalid}"))
                 .andExpect(status().isUnprocessableEntity)
-            mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",$invalid,\"expected_version\":0}"))
+            mvc.perform(
+                put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(
+                    body.dropLast(1) + ",$invalid,\"expected_version\":0}",
+                ),
+            )
                 .andExpect(status().isUnprocessableEntity)
         }
         verify { service wasNot io.mockk.Called }
@@ -182,9 +186,21 @@ class CalendarPrivateItemControllerContractTest {
             reminderOn = "END", reminderDaysBefore = 1,
         )
         every { service.create("owner", any()) } returns result
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"reminder_on\":\"END\",\"reminder_days_before\":1}"))
+        mvc.perform(
+            post(path).contentType(MediaType.APPLICATION_JSON).content(
+                body.dropLast(1) + ",\"reminder_on\":\"END\",\"reminder_days_before\":1}",
+            ),
+        )
             .andExpect(status().isOk).andExpect(jsonPath("$.data.reminder_on").value("END"))
             .andExpect(jsonPath("$.data.reminder_days_before").value(1))
-        verify { service.create("owner", match { it.reminderOn == "END" && it.reminderDaysBefore == 1 && it.reminderOnProvided && it.reminderDaysBeforeProvided }) }
+        verify {
+            service.create(
+                "owner",
+                match {
+                    it.reminderOn == "END" && it.reminderDaysBefore == 1 && it.reminderOnProvided &&
+                        it.reminderDaysBeforeProvided
+                },
+            )
+        }
     }
 }
