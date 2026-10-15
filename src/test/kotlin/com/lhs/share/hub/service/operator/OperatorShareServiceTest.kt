@@ -46,7 +46,8 @@ class OperatorShareServiceTest {
     fun `create is idempotent and regenerate replaces the old code`() {
         val withoutCode = account()
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returns withoutCode
-        every { accountRepository.updateShareToken("u1", "acc1", any(), any(), any()) } answers { account(args[3] as String?) }
+        every { accountRepository.updateShareAuthorization("u1", "acc1", any(), any(), any(), any(), any()) } answers
+            { account(args[4] as String?) }
 
         val created = service.create("u1", "acc1")
         assertTrue(created.active)
@@ -59,13 +60,13 @@ class OperatorShareServiceTest {
 
         assertEquals(created.shareCode, reused.shareCode)
         assertNotEquals(created.shareCode, regenerated.shareCode)
-        verify(exactly = 2) { accountRepository.updateShareToken("u1", "acc1", any(), any(), any()) }
+        verify(exactly = 2) { accountRepository.updateShareAuthorization("u1", "acc1", any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `revoke is idempotent and account ownership is enforced`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returns account("code")
-        every { accountRepository.updateShareToken("u1", "acc1", "code", null, any()) } returns account()
+        every { accountRepository.updateShareAuthorization("u1", "acc1", "code", any(), null, any(), any()) } returns account()
 
         val revoked = service.revoke("u1", "acc1")
         assertEquals(false, revoked.active)
@@ -154,13 +155,14 @@ class OperatorShareServiceTest {
     fun `share code collisions stop after a bounded number of attempts`() {
         val account = account()
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returns account
-        every { accountRepository.updateShareToken("u1", "acc1", null, any(), any()) } throws DuplicateKeyException("collision")
+        every { accountRepository.updateShareAuthorization("u1", "acc1", null, any(), any(), any(), any()) } throws
+            DuplicateKeyException("collision")
 
         val error = assertThrows(OperatorApiException::class.java) { service.create("u1", "acc1") }
 
         assertEquals(HttpStatus.CONFLICT, error.status)
         assertEquals("share_code_generation_failed", error.code)
-        verify(exactly = 3) { accountRepository.updateShareToken("u1", "acc1", null, any(), any()) }
+        verify(exactly = 3) { accountRepository.updateShareAuthorization("u1", "acc1", null, any(), any(), any(), any()) }
     }
 
     @Test
@@ -170,10 +172,10 @@ class OperatorShareServiceTest {
             "acc2" to account("other", accountId = "acc2"),
         )
         every { accountRepository.findByUserIdAndAccountId(any(), any()) } answers { accounts[secondArg()] }
-        every { accountRepository.updateShareToken(any(), any(), any(), any(), any()) } answers {
+        every { accountRepository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) } answers {
             accounts[secondArg()]?.takeIf {
                 it.userId == firstArg<String>() && it.shareToken == args[2]
-            }?.copy(shareToken = args[3] as String?)?.also {
+            }?.copy(shareToken = args[4] as String?, shareScopes = args[5] as List<String>)?.also {
                 accounts[it.accountId] =
                     it
             }
@@ -202,24 +204,25 @@ class OperatorShareServiceTest {
     @Test
     fun `concurrent create reuses the atomic winner while regenerate compares the latest token`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account(), account("winner"))
-        every { accountRepository.updateShareToken("u1", "acc1", null, any(), any()) } returns null
+        every { accountRepository.updateShareAuthorization("u1", "acc1", null, any(), any(), any(), any()) } returns null
         assertEquals("winner", service.create("u1", "acc1").shareCode)
 
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account("old"), account("winner"))
-        every { accountRepository.updateShareToken("u1", "acc1", "old", any(), any()) } returns null
-        every { accountRepository.updateShareToken("u1", "acc1", "winner", any(), any()) } answers { account(args[3] as String?) }
+        every { accountRepository.updateShareAuthorization("u1", "acc1", "old", any(), any(), any(), any()) } returns null
+        every { accountRepository.updateShareAuthorization("u1", "acc1", "winner", any(), any(), any(), any()) } answers
+            { account(args[4] as String?) }
         assertNotEquals("winner", service.regenerate("u1", "acc1").shareCode)
-        verify(exactly = 1) { accountRepository.updateShareToken("u1", "acc1", "winner", any(), any()) }
+        verify(exactly = 1) { accountRepository.updateShareAuthorization("u1", "acc1", "winner", any(), any(), any(), any()) }
     }
 
     @Test
     fun `stale revoke cannot remove a newly regenerated code and already revoked winner is idempotent`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account("old"), account("new"))
-        every { accountRepository.updateShareToken("u1", "acc1", "old", null, any()) } returns null
+        every { accountRepository.updateShareAuthorization("u1", "acc1", "old", any(), null, any(), any()) } returns null
         val changed = assertThrows(OperatorApiException::class.java) { service.revoke("u1", "acc1") }
         assertEquals("share_code_changed", changed.code)
         assertEquals(HttpStatus.CONFLICT, changed.status)
-        verify(exactly = 0) { accountRepository.updateShareToken("u1", "acc1", "new", null, any()) }
+        verify(exactly = 0) { accountRepository.updateShareAuthorization("u1", "acc1", "new", any(), null, any(), any()) }
 
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account("old"), account())
         assertEquals(false, service.revoke("u1", "acc1").active)
@@ -228,7 +231,7 @@ class OperatorShareServiceTest {
     @Test
     fun `late share create cannot revive an account deleted after the initial read`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account(), null)
-        every { accountRepository.updateShareToken("u1", "acc1", null, any(), any()) } returns null
+        every { accountRepository.updateShareAuthorization("u1", "acc1", null, any(), any(), any(), any()) } returns null
         val deleted = assertThrows(OperatorApiException::class.java) { service.create("u1", "acc1") }
         assertEquals("account_not_found", deleted.code)
     }
@@ -236,7 +239,7 @@ class OperatorShareServiceTest {
     @Test
     fun `late share regenerate and revoke cannot revive deleted accounts`() {
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account("old"), null)
-        every { accountRepository.updateShareToken("u1", "acc1", "old", any(), any()) } returns null
+        every { accountRepository.updateShareAuthorization("u1", "acc1", "old", any(), any(), any(), any()) } returns null
         assertEquals("account_not_found", assertThrows(OperatorApiException::class.java) { service.regenerate("u1", "acc1") }.code)
 
         every { accountRepository.findByUserIdAndAccountId("u1", "acc1") } returnsMany listOf(account("old"), null)

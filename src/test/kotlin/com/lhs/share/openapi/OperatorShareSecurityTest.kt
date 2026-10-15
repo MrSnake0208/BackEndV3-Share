@@ -11,6 +11,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -33,6 +34,27 @@ class OperatorShareSecurityTest {
 
     @MockitoBean
     lateinit var shareService: OperatorShareService
+
+    @MockitoBean
+    lateinit var starShares: com.lhs.share.hub.service.star.StarShareService
+
+    @Test
+    fun `star views are public but account share commands and private current state are not`() {
+        `when`(
+            starShares.view("star-code"),
+        ).thenReturn(com.lhs.share.hub.controller.star.response.StarShareResponse("如鸢", listOf("star"), false, null, emptyList()))
+        mockMvc.perform(get("/v1/star/share/view/star-code")).andExpect(status().isOk)
+        mockMvc.perform(get("/v1/accounts/share").param("account_id", "a")).andExpect(status().isUnauthorized)
+        mockMvc.perform(
+            patch(
+                "/v1/accounts/share",
+            ).param("account_id", "a").contentType("application/json").content("""{"scope":"star","enabled":true}"""),
+        ).andExpect(status().isUnauthorized)
+        mockMvc.perform(post("/v1/accounts/share/regenerate").param("account_id", "a")).andExpect(status().isUnauthorized)
+        mockMvc.perform(delete("/v1/accounts/share").param("account_id", "a")).andExpect(status().isUnauthorized)
+        mockMvc.perform(get("/v1/star-state/current").param("account_id", "a")).andExpect(status().isUnauthorized)
+        org.mockito.Mockito.verify(betaService, org.mockito.Mockito.never()).requireAccess(org.mockito.ArgumentMatchers.anyString())
+    }
 
     @Test
     fun `only the view path is public`() {

@@ -26,12 +26,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
         OperatorOrganizationController::class,
         OpenApiOperatorController::class,
         AdminOperatorCatalogController::class,
+        com.lhs.share.hub.controller.account.AccountShareController::class,
+        com.lhs.share.hub.controller.star.StarShareController::class,
     ],
 )
 class OperatorExceptionHandler {
     @ExceptionHandler(OperatorApiException::class)
     fun api(e: OperatorApiException) = ResponseEntity
-        .status(e.status).body(
+        .status(e.status).header("Cache-Control", "no-store").body(
             OperatorErrorResponse(OperatorError(e.code, e.message, e.recordId, e.entryId, e.operatorId, e.fieldPath)),
         )
 
