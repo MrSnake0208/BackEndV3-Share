@@ -22,4 +22,6 @@ data class CalendarPrivateItem(
     val updatedAt: Instant,
     @Version val version: Long? = null,
     val endDate: LocalDate? = null,
+    val reminderOn: String? = null,
+    val reminderDaysBefore: Int = 0,
 )

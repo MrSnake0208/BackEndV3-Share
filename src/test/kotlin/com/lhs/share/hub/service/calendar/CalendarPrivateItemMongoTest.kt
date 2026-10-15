@@ -118,6 +118,37 @@ class CalendarPrivateItemMongoTest {
     }
 
     @Test
+    fun `reminders persist preserve old clients and historical documents while retaining CAS and isolation`() {
+        val configured = request().copy(reminderOn = "END", reminderDaysBefore = 1, endDate = day.plusDays(5))
+        val created = service.create("owner", configured)
+        assertEquals("END", service.get("owner", "a", created.id).reminderOn)
+        assertEquals(1, service.list("owner", "a", day, day).items.single().reminderDaysBefore)
+        val legacy = service.update("owner", created.id, request().copy(endDate = day.plusDays(6), expectedVersion = 0))
+        assertEquals("END", legacy.reminderOn)
+        assertEquals(1, legacy.reminderDaysBefore)
+        assertEquals(409, assertThrows(ActivityCalendarApiException::class.java) {
+            service.update("owner", created.id, configured.copy(expectedVersion = 0, reminderOnProvided = true))
+        }.status.value())
+        assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) {
+            service.get("other", "c", created.id)
+        }.status.value())
+        val disabled = service.update(
+            "owner", created.id,
+            request().copy(endDate = day.plusDays(6), expectedVersion = 1, reminderOnProvided = true),
+        )
+        assertNull(disabled.reminderOn)
+        mongo.getCollection("activity_calendar_private_items").updateOne(
+            org.bson.Document("_id", created.id),
+            org.bson.Document("\$unset", org.bson.Document("reminderOn", "").append("reminderDaysBefore", "")),
+        )
+        val before = mongo.getCollection("activity_calendar_private_items").find().first()
+        val historical = service.get("owner", "a", created.id)
+        assertNull(historical.reminderOn)
+        assertEquals(0, historical.reminderDaysBefore)
+        assertEquals(before, mongo.getCollection("activity_calendar_private_items").find().first())
+    }
+
+    @Test
     fun `cross user account and game cannot read update or delete record and deleted read is 404`() {
         val a = service.create("owner", request())
         listOf("owner" to "b", "other" to "c", "other" to "a").forEach { (user, account) ->
