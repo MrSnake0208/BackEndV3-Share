@@ -548,7 +548,7 @@
         },
         "total_pull_count": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 1000000000
         },
         "created_at": {

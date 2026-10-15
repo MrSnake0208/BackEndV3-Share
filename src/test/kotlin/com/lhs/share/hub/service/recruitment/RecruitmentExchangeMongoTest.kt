@@ -283,6 +283,67 @@ class RecruitmentExchangeMongoTest {
         assertTrue(store.exchangeEvents("u", "a", 20_001).isEmpty())
     }
 
+    @Test fun `deleting imported batch spans is atomic scoped and durable retries never deduct twice`() {
+        listOf("a", "b").forEach { account ->
+            initialize(account)
+            command(
+                account,
+                "batch_create",
+                """{"pool_id":"p","mode":"historical","batch_id":"batch","total_pull_count":60,"entries":[{"event_id":"A","agent_id":"test_pool:up:A","pull_span":20},{"event_id":"B","agent_id":"test_pool:up:A","pull_span":37}]}""",
+            )
+        }
+        command("a", "baseline_set", """{"baseline":7}""")
+        command("a", "progress_set", """{"pool_id":"p","progress":5}""")
+        val before = store.archive("u", "a")!!
+        val beforeEvents = store.exchangeEvents("u", "a", 20_001)
+        val beforeBatches = store.exchangeBatches("u", "a", 20_001)
+        val foreign = service.export("u", "b")
+        val fence = accounts.findByUserIdAndAccountId("u", "a")!!.recruitmentFence
+        val input = RecruitmentCommandRequest(
+            "a",
+            before.archiveRevision,
+            "delete-batch-node",
+            "pool_records_save",
+            mapper.readTree("""{"pool_id":"p","remaining_pulls":null,"entries":[],"deleted_event_ids":["B"]}"""),
+        )
+        val failing = spyk(store)
+        every { failing.insertRequest(any()) } throws IllegalStateException("synthetic after deletion failure")
+        val broken =
+            RecruitmentService(failing, accountService, accounts, RecruitmentMutation(failing, catalog, mapper), publisher, mapper, tx)
+        assertThrows(IllegalStateException::class.java) { broken.command("u", input) }
+        assertEquals(before, store.archive("u", "a"))
+        assertEquals(beforeEvents, store.exchangeEvents("u", "a", 20_001))
+        assertEquals(beforeBatches, store.exchangeBatches("u", "a", 20_001))
+        assertEquals(fence, accounts.findByUserIdAndAccountId("u", "a")!!.recruitmentFence)
+        assertNull(store.request("u", "a", input.requestId))
+        val result = core.command("u", input)
+        assertEquals(result, core.command("u", input))
+        assertEquals(23L, store.batch("u", "a", "batch")!!.totalPullCount)
+        assertEquals(35L, core.archive("u", "a").summary.knownTotalPulls)
+        assertTrue(store.event("u", "a", "B")!!.batchCountDeducted)
+        assertEquals(foreign.events, service.export("u", "b").events)
+        assertEquals(foreign.batches, service.export("u", "b").batches)
+        command("a", "event_restore", """{"event_id":"B"}""")
+        assertEquals(72L, core.archive("u", "a").summary.knownTotalPulls)
+    }
+
+    @Test fun `zero remaining batch roundtrips full backup without reviving deleted gold history`() {
+        initialize()
+        command(
+            "a",
+            "batch_create",
+            """{"pool_id":"p","mode":"historical","batch_id":"batch","total_pull_count":40,"entries":[{"event_id":"A","agent_id":"test_pool:up:A","pull_span":17},{"event_id":"B","agent_id":"test_pool:up:A","pull_span":23}]}""",
+        )
+        command("a", "pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"deleted_event_ids":["A","B"]}""")
+        val node = backup()
+        assertEquals(0L, node.path("batches")[0].path("total_pull_count").asLong())
+        assertTrue(node.path("events").all { !it.has("batch_count_deducted") })
+        service.commit("u", prepared(node))
+        assertEquals(0L, core.archive("u", "b").summary.knownTotalPulls)
+        assertEquals(0L, core.archive("u", "b").summary.eventCount)
+        assertEquals(0L, store.batch("u", "b", "batch")!!.totalPullCount)
+    }
+
     @Test fun `record import binds resolved directory and batch totals count once`() {
         val node = simpleRecords() as ObjectNode
         val input = prepared(node)

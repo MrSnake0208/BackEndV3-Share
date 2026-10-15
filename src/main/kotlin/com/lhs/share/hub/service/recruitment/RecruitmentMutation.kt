@@ -149,19 +149,30 @@ class RecruitmentMutation(
                     throw recruitmentInvalid("请修改出货记录、顺序或填写保底进度后保存")
                 }
                 val touchedBatches = (changed + removed).mapNotNull { it.batchId }.toSet()
-                touchedBatches.forEach { id ->
+                val adjustedBatches = touchedBatches.map { id ->
                     val batch = liveBatch(current, id)
+                    val total =
+                        recruitmentCount(batch.totalPullCount - removed.filter { it.batchId == id }.sumOf { it.pullSpan ?: 0 }, "批次剩余")
                     val replacements = changed.associateBy { it.eventId }
                     val removedIds = removed.map { it.eventId }.toSet()
                     val spans = store.batchEvents(current.userId, current.accountId, id)
                         .filter { it.deletedAt == null && it.eventId !in removedIds }
                         .sumOf { (replacements[it.eventId] ?: it).pullSpan ?: 0 }
-                    if (spans > batch.totalPullCount) throw recruitmentInvalid("已知间隔之和超出批次总抽数，请核对记录")
+                    if (spans > total) throw recruitmentInvalid("已知间隔之和超出扣除已删除记录后的批次总抽数，请核对记录")
+                    batch.copy(totalPullCount = total)
                 }
+                adjustedBatches.forEach(store::saveBatch)
                 changed.forEach(store::saveEvent)
                 added.forEach(store::insertEvent)
                 removed.forEach {
-                    store.saveEvent(it.copy(deletedAt = now, deletedRevision = current.archiveRevision + 1, updatedAt = now))
+                    store.saveEvent(
+                        it.copy(
+                            deletedAt = now,
+                            deletedRevision = current.archiveRevision + 1,
+                            updatedAt = now,
+                            batchCountDeducted = it.batchId != null && it.pullSpan != null,
+                        ),
+                    )
                 }
                 // The full set was checked before any writes; slot changes share the same account-fenced transaction.
                 ordered?.forEach(store::saveEvent)
@@ -231,9 +242,17 @@ class RecruitmentMutation(
                     ) {
                         throw recruitmentConflict("撤销已过期，请重新读取档案")
                     }
-                    old.batchId?.let { liveBatch(current, it) }
                 } else if (old.deletedAt != null) {
                     throw recruitmentNotFound("event")
+                }
+                old.batchId?.let { id ->
+                    val batch = liveBatch(current, id)
+                    val delta = if (restoring) {
+                        if (old.batchCountDeducted) old.pullSpan ?: 0 else 0
+                    } else {
+                        -(old.pullSpan ?: 0)
+                    }
+                    store.saveBatch(batch.copy(totalPullCount = recruitmentCount(batch.totalPullCount + delta, "批次剩余")))
                 }
                 store.saveEvent(
                     old.copy(
@@ -245,6 +264,7 @@ class RecruitmentMutation(
                                 1
                         },
                         updatedAt = now,
+                        batchCountDeducted = !restoring && old.batchId != null && old.pullSpan != null,
                     ),
                 )
                 result = result.copy(eventIds = listOf(old.eventId))

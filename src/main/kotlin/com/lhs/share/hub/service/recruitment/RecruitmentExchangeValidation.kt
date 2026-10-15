@@ -76,7 +76,7 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         }
         document.batches.forEach {
             if (it.poolId !in pools) fail("批次引用的卡池不存在")
-            recruitmentCount(it.totalPullCount, "total_pull_count", true)
+            recruitmentCount(it.totalPullCount, "total_pull_count")
             tombstone(it.deletedAt, it.deletedRevision, it.createdAt, document.archiveRevision)
             metadata(it.importBatchId, it.importedAt)
         }

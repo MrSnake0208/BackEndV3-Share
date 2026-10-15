@@ -181,8 +181,8 @@ async function readStored(database, owner) {
   const scope = { userId: archives[0].userId, accountId: archives[0].accountId };
   return {
     archive: archives[0],
-    events: await (await database.getCollection("recruitment_events").find(scope)).limit(86).toArray(),
-    batches: await (await database.getCollection("recruitment_batches").find(scope)).limit(21).toArray(),
+    events: await (await database.getCollection("recruitment_events").find(scope)).limit(20_001).toArray(),
+    batches: await (await database.getCollection("recruitment_batches").find(scope)).limit(20_001).toArray(),
   };
 }
 
@@ -286,10 +286,72 @@ async function rollback(database, repairId) {
   });
 }
 
+async function reconcileDeletions(database, accountId, { apply = false, expectedRevision } = {}) {
+  assert.match(accountId, /^acc_[a-zA-Z0-9_-]+$/);
+  if (apply) assert(Number.isSafeInteger(expectedRevision) && expectedRevision >= 0, "正式补扣必须提供预演时的档案版本");
+  return transaction(database, async (tx) => {
+    const repairId = `deleted-batch-counts:${accountId}:${expectedRevision}`;
+    if (apply) {
+      const previous = await tx.getCollection(AUDIT).findOne({ _id: repairId });
+      if (previous) {
+        assert(!previous.rolledBackAt, "已回滚的补扣计划不能重新执行");
+        return { status: "already_applied", repairId };
+      }
+    }
+    const before = await readStored(tx, { accountId });
+    assert(before.events.length <= 20_000 && before.batches.length <= 20_000, "历史过多，停止自动补扣");
+    const revision = Number(before.archive.archiveRevision);
+    assert(Number.isSafeInteger(revision) && revision >= 0);
+    if (apply) assert.equal(revision, expectedRevision, "档案已变化，请重新预演");
+    const owner = { userId: before.archive.userId, accountId };
+    const account = await tx.getCollection("sub_accounts").findOne(owner);
+    assert(account && account.game === before.archive.gameSnapshot, "账号游戏或所有者不符");
+    const liveBatches = before.batches.filter((b) => b.deletedAt == null);
+    const corrections = liveBatches.map((batch) => {
+      // Revision-zero tombstones were imported, so their totals cannot be inferred as missed deductions.
+      const events = before.events.filter((event) => event.batchId === batch.batchId && event.deletedAt != null
+        && Number(event.deletedRevision) > 0 && event.batchCountDeducted !== true && Number(event.pullSpan) > 0);
+      assert(events.every((event) => event.poolId === batch.poolId), "批次与记录卡池不一致");
+      const deduction = sum(events.map((event) => event.pullSpan));
+      const remaining = Number(batch.totalPullCount) - deduction;
+      const spans = sum(before.events.filter((event) => event.batchId === batch.batchId && event.deletedAt == null).map((event) => event.pullSpan));
+      assert(remaining >= 0 && spans <= remaining, `批次 ${batch.batchId} 无法安全补扣，请核对当前备份`);
+      return { batchId: batch.batchId, poolId: batch.poolId, previous: Number(batch.totalPullCount), remaining, deduction,
+        eventIds: events.map((event) => event.eventId) };
+    }).filter((item) => item.deduction > 0);
+    const deduction = sum(corrections.map((item) => item.deduction));
+    const knownTotal = Number(before.archive.baseline ?? 0) + sum(before.archive.pools.map((p) => p.progress))
+      + sum(before.events.filter((e) => e.deletedAt == null && e.batchId == null).map((e) => e.pullSpan))
+      + sum(liveBatches.map((b) => b.totalPullCount));
+    const report = { status: apply ? "applied" : "dry_run", accountId, archiveRevision: revision,
+      afterRevision: revision + (deduction > 0 ? 1 : 0), knownTotalBefore: knownTotal, knownTotalAfter: knownTotal - deduction, deduction, corrections };
+    if (!apply || deduction === 0) return { ...report, status: deduction === 0 ? "no_changes" : report.status };
+    await fence(tx, owner, before.archive.gameSnapshot);
+    assert(Buffer.byteLength(JSON.stringify(before), "utf8") < 8 * 1024 * 1024, "原始档案过大，停止补扣");
+    const now = new Date();
+    await tx.getCollection(AUDIT).insertOne({ _id: repairId, ...owner, before, afterRevision: revision + 1, appliedAt: now, report });
+    for (const item of corrections) {
+      const batchResult = await tx.getCollection("recruitment_batches").updateOne({ ...owner, batchId: item.batchId, deletedAt: null }, {
+        $set: { totalPullCount: item.remaining },
+      });
+      assert.equal(batchResult.matchedCount, 1);
+      const eventResult = await tx.getCollection("recruitment_events").updateMany({ ...owner, eventId: { $in: item.eventIds } }, {
+        $set: { batchCountDeducted: true },
+      });
+      assert.equal(eventResult.matchedCount, item.eventIds.length);
+    }
+    const result = await tx.getCollection("recruitment_archives").updateOne({ ...owner, archiveRevision: revision }, {
+      $set: { archiveRevision: revision + 1, updatedAt: now },
+    });
+    assert.equal(result.matchedCount, 1);
+    return { ...report, repairId };
+  });
+}
+
 function readSource(filename) {
   const content = fs.readFileSync(filename, "utf8");
   assert(Buffer.byteLength(content, "utf8") <= 5 * 1024 * 1024, "源备份超过 5 MiB");
   return JSON.parse(content);
 }
 
-module.exports = { AUDIT, summary, buildPlan, transform, assertMatches, repair, rollback, readSource };
+module.exports = { AUDIT, summary, buildPlan, transform, assertMatches, repair, rollback, reconcileDeletions, readSource };
