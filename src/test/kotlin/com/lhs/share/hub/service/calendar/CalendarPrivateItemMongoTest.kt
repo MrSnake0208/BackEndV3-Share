@@ -126,14 +126,21 @@ class CalendarPrivateItemMongoTest {
         val legacy = service.update("owner", created.id, request().copy(endDate = day.plusDays(6), expectedVersion = 0))
         assertEquals("END", legacy.reminderOn)
         assertEquals(1, legacy.reminderDaysBefore)
-        assertEquals(409, assertThrows(ActivityCalendarApiException::class.java) {
-            service.update("owner", created.id, configured.copy(expectedVersion = 0, reminderOnProvided = true))
-        }.status.value())
-        assertEquals(404, assertThrows(ActivityCalendarApiException::class.java) {
-            service.get("other", "c", created.id)
-        }.status.value())
+        assertEquals(
+            409,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.update("owner", created.id, configured.copy(expectedVersion = 0, reminderOnProvided = true))
+            }.status.value(),
+        )
+        assertEquals(
+            404,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.get("other", "c", created.id)
+            }.status.value(),
+        )
         val disabled = service.update(
-            "owner", created.id,
+            "owner",
+            created.id,
             request().copy(endDate = day.plusDays(6), expectedVersion = 1, reminderOnProvided = true),
         )
         assertNull(disabled.reminderOn)
