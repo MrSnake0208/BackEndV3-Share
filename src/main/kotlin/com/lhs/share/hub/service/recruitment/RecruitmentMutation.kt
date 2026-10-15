@@ -68,6 +68,9 @@ class RecruitmentMutation(
                 if (input.name != null) throw recruitmentInvalid("卡池只能由管理员配置，请选择公共卡池")
                 val catalogId = input.catalogPoolId ?: throw recruitmentInvalid("请选择管理员配置的公共卡池")
                 val snapshot = catalog.snapshot(current.gameSnapshot, catalogId)
+                if (current.pools.any { (it.mappedSnapshot ?: it.snapshot).catalogPoolId == catalogId }) {
+                    throw recruitmentInvalid("该公共卡池已关联个人卡池，请维护已有卡池，不能重复创建")
+                }
                 next =
                     current.copy(
                         pools = current.pools + RecruitmentPool(id, snapshot, input.progress),

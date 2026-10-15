@@ -740,10 +740,15 @@ class RecruitmentMongoTest {
             mapper.createObjectNode().put("event_id", "e$index").put("agent_id", "catalog_p:up:A").put("pull_span", 1)
         }
         command("event_create", mapper.writeValueAsString(mapOf("pool_id" to "p", "mode" to "historical", "entries" to entries)))
-        command("pool_create", """{"pool_id":"q","catalog_pool_id":"catalog_p","progress":9}""")
+        val otherCatalog = catalogStore.find("catalog_p")!!.copy(
+            poolId = "catalog_q",
+            upAgents = listOf(RecruitmentUpAgent("catalog_q:up:A", "A")),
+        )
+        assertTrue(catalogStore.save(otherCatalog))
+        command("pool_create", """{"pool_id":"q","catalog_pool_id":"catalog_q","progress":9}""")
         command(
             "event_create",
-            """{"pool_id":"q","mode":"historical","entries":[{"event_id":"other","agent_id":"catalog_p:up:A","pull_span":7}]}""",
+            """{"pool_id":"q","mode":"historical","entries":[{"event_id":"other","agent_id":"catalog_q:up:A","pull_span":7}]}""",
         )
         val other = store.event("u", "a", "other")
         val old = service.page("u", "a", "p", null, 100, null, null, "asc")

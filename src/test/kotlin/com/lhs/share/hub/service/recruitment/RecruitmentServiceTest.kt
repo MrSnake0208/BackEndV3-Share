@@ -329,6 +329,7 @@ class RecruitmentServiceTest {
         ).forEach { input ->
             assertEquals(422, assertThrows(RecruitmentApiException::class.java) { command("pool_create", input) }.status.value())
         }
+        state = state.copy(pools = emptyList(), currentPoolId = null)
         command("pool_create", """{"pool_id":"unknown","catalog_pool_id":"catalog_p","progress":null}""")
         assertNull(state.pools.single { it.poolId == "unknown" }.progress)
         assertThrows(RecruitmentApiException::class.java) {
@@ -337,10 +338,37 @@ class RecruitmentServiceTest {
                 """{"pool_id":"unknown","mode":"current","tail_progress":0,"entries":[{"agent_id":"catalog_p:up:A","pull_span":17}]}""",
             )
         }
+        state = state.copy(pools = emptyList(), currentPoolId = null)
         command("pool_create", """{"pool_id":"zero","catalog_pool_id":"catalog_p","progress":0}""")
         assertEquals(0L, state.pools.single { it.poolId == "zero" }.progress)
+        state = state.copy(pools = emptyList(), currentPoolId = null)
         command("pool_create", """{"pool_id":"known","catalog_pool_id":"catalog_p","progress":13}""")
         assertEquals(13L, state.pools.single { it.poolId == "known" }.progress)
+    }
+
+    @Test fun `pool create rejects duplicate direct or mapped catalog association without changing personal facts`() {
+        val original = state
+        listOf(
+            original.pools.single(),
+            original.pools.single().copy(
+                snapshot = original.pools.single().snapshot.copy(catalogPoolId = null),
+                mappedSnapshot = original.pools.single().snapshot,
+            ),
+        ).forEach { pool ->
+            state = original.copy(pools = listOf(pool))
+            val before = state
+            val error = assertThrows(RecruitmentApiException::class.java) {
+                command("pool_create", """{"pool_id":"alias","catalog_pool_id":"catalog_p","progress":0}""")
+            }
+            assertEquals(422, error.status.value())
+            assertEquals(before, state)
+        }
+        assertTrue(events.isEmpty())
+        assertTrue(batches.isEmpty())
+        verify(exactly = 0) {
+            store.insertEvent(any())
+            store.insertBatch(any())
+        }
     }
 
     @Test fun `automatic pools can be calibrated selected and recorded without a pool create command`() {
