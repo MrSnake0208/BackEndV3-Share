@@ -63,6 +63,7 @@ internal class RecruitmentRecordImport(private val mapper: ObjectMapper, private
         }
         val batches = input.batches.map { batch ->
             uuid(batch.batchId)
+            recruitmentCount(batch.totalPullCount, "total_pull_count", true)
             RecruitmentExchangeBatch(batch.batchId, pools.getValue(batch.catalogPoolId).poolId, batch.totalPullCount, Instant.EPOCH)
         }
         // Fixed intermediate clocks make preview/commit resolution comparable; persistence supplies actual clocks.

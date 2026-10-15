@@ -19,7 +19,7 @@
 - `GET /catalog?game=如鸢|代号鸢` → `{catalog_revision,pools}`。池字段 `pool_id,game,name,pool_type,start_date,end_date,enabled,revision,up_agents`，兼容保留派生的 `up_agent_ids,up_agent_names,unmapped_up_agent_names,up_status`；未知日期为空。目录含停用池和退役槽以便解析历史，新增时服务端校验启用状态。
 - `GET /archive?account_id=...` → `{account_id,game_snapshot,archive_revision,baseline,current_pool_id,pools,temporary_agents,summary,pool_summaries,game_mismatch}`。pool_summaries为以pool_id为key的summary对象，不含账号baseline，基于服务端完整历史聚合；空档案 revision=0、baseline=0；pools 自动展示账号真实游戏的全部公共卡池（含停用池），合并已有个人池，保留其 ID 和进度。未保存的目录池使用响应中的稳定 pool_id，progress=null；读取不创建档案，summary 只统计实际保存的状态。游戏快照不一致时仅投影原个人池，保持只读。
 - `GET /events?account_id=...&pool_id=...&cursor=...&limit=50&order=desc&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` → `{items,next_cursor,archive_revision}`。limit 1–100，pool/date可省略；order为asc（从早到晚）或desc（从新到旧，默认），按用户录入/调整的顺序排序，不声称真实获得时刻排序。游标绑定作用域、筛选、方向和revision，修改后继续旧页返回409，应重新读首页，切换方向须从首页重读。日期筛选不包含未知日期。尚未保存的本游戏公共池也可筛选，返回空历史，不写入个人档案。
-- `GET /batches?account_id=...&pool_id=...&cursor=...&limit=50` → `{items,next_cursor,archive_revision}`，仅有效计数批次；pool/cursor可省略，limit1–100，按创建时间/ID倒序。包括节点已单独删完但计数仍有效的批次。游标绑定scope/pool/revision，旧页409。与archive/events组合时比较三者revision；同样支持未保存的本游戏公共池筛选。
+- `GET /batches?account_id=...&pool_id=...&cursor=...&limit=50` → `{items,next_cursor,archive_revision}`，仅有效计数批次；pool/cursor可省略，limit1–100，按创建时间/ID倒序。包括节点已单独删完但仍有未分配抽数或总量为零的批次。游标绑定scope/pool/revision，旧页409。与archive/events组合时比较三者revision；同样支持未保存的本游戏公共池筛选。
 
 `pools` 条目：`{pool_id,snapshot,progress,mapped_snapshot}`。snapshot=`{name,game,catalog_pool_id,start_date,end_date,up_agents,up_agent_ids,up_status,up_agent_names,unmapped_up_agent_names,catalog_revision}`；up_status目录枚举为verified/partial/selection/unknown，仅verified且名单非空时可辅助UP判断。`mapped_snapshot` 仅为旧用户临时池的存量兼容字段，不能再新建或映射临时池。progress=null表示未知。目录展示不等于用户已开始抽取；只有实际保存的未知进度计入账号 unknown_progress_count。显式使用兼容 pool_create 时必须提供初始进度：未知填null，确认没有尾抽填0，已知则填非负整数；不得将未确认的进度默认为0。已保存卡池的未知进度计入summary的unknown_progress_count，当前录入前需先校准。
 
@@ -105,7 +105,7 @@ entry=`{agent_id,pull_span,event_id?,up_status?,acquired_date?,note?}`，每次1
 
 `mode=current` 的独立精确事件要求旧进度已知、首条span大于旧进度、全部span已知、tail_progress显式提供（非负或null未知），提交同事务消费旧进度并设置尾抽；已知累计增量=sum(spans)-old_progress+已知tail。`mode=historical` 不改变进度；extract_from_baseline=true时同事务按本次明确计入量从基准扣除，余额不足拒绝。未知独立span不计入已知总数，不能单独从基准提取。
 
-`batch_create` 保存已知总量、最多120个绝密节点；span可部分未知，但已知span之和不得超出total_pull_count。批次总量不包括tail_progress。current模式要求旧进度已知、total大于旧进度，tail可为null表示未知；historical不改进度。更新批次内某个span不能导致已知span之和超出批次总量；累计仍只计批次total一次。删除批次中的单个节点只移除该结果，批次计数不变；只有整批删除才移除total。整批撤销只恢复此次批量删除的节点，不复活此前已删除节点。
+`batch_create` 保存已知总量、最多120个绝密节点；span可部分未知，但已知span之和不得超出total_pull_count。批次总量不包括tail_progress。current模式要求旧进度已知、total大于旧进度，tail可为null表示未知；historical不改进度。更新批次内某个span不能导致已知span之和超出批次总量；累计仍只计批次total一次。删除批次中的单个节点时，从批次 total 扣除该节点的已知 pull_span；未知 span 不猜测扣数，未分配给节点的剩余抽数保留。批次 total 可扣到零，备份可导出并恢复零总量批次；batch_create 和普通记录导入的新批次仍要求正整数。撤销本次删除加回实际扣除的抽数，兼容旧版本未扣数的删除，不重复加回。整批删除移除当前剩余 total。整批撤销只恢复此次批量删除的节点，不复活此前已删除节点。
 
 删除独立B31：A17+B31+C17→A17+C17，累计65→34；其他span/progress/baseline不变。撤销同ID，旧撤销409。所有真实写入原子CAS、请求记录和生命周期fence，SSE只在commit后发送`recruitment_changed`。
 
@@ -150,7 +150,7 @@ CSV由前端使用同一完整export文档生成，标准CSV转义并处理所�
 
 `pool_records_save` 维护某个池的每次出货，同一agent_id允许重复，身份按event_id区分。entries仅包含改动或新增；存在ID更新原记录（保留排序和批次归属），新ID新增独立事件（按请求顺序追加），deleted_event_ids明确软删除指定有效节点。两组ID唯一且互不重叠，不能修改/删除其他池或已删除节点。未知span须显式null，已知span为正整数，未提交的历史不覆盖。新增/换密探沿用目录、游戏/稀有度、固定UP槽校验，停用池仍可改已有抽数和删除但不能新增。
 
-remaining_pulls有值时按40抽口径替换当前进度0–39；null保留原进度（含未知），不清除原值。null且没有记录或顺序修改的空请求拒绝422。span和尾抽各计一次，不额外消费或累加旧进度，不自动从基准拆出。改单条独立事件只替换其抽数贡献；删一条不改相邻跨度。批次内节点编辑/删除不改变批次总量，所有变更完成后的有效span之和须≤批次total。整次请求复用账号fence/CAS/幂等账本和Hub事务，任一校验或请求记录存储失败全部回滚；提交后才发SSE。旧current/historical命令、JSON/CSV备份和数据库结构不变。
+remaining_pulls有值时按40抽口径替换当前进度0–39；null保留原进度（含未知），不清除原值。null且没有记录或顺序修改的空请求拒绝422。span和尾抽各计一次，不额外消费或累加旧进度，不自动从基准拆出。改单条独立事件只替换其抽数贡献；删一条不改相邻跨度。批次内节点纯编辑不改变批次总量；删除时扣减被删记录的已知 span，所有变更完成后的有效 span 之和须≤扣减后的批次 total。删除不改相邻记录或当前垫抽。整次请求复用账号fence/CAS/幂等账本和Hub事务，任一校验或请求记录存储失败全部回滚；提交后才发SSE。旧current/historical命令、JSON/CSV公开字段不变；内部 batchCountDeducted 标记只用于区分实际已扣数的删除，不对外导出。
 
 ```json
 {"account_id":"a","expected_revision":1,"request_id":"dialog-1","operation":"pool_records_save","data":{"pool_id":"p","entries":[{"event_id":"E","agent_id":"catalog_p:up:A","pull_span":17}],"deleted_event_ids":[],"remaining_pulls":19}}
@@ -219,6 +219,8 @@ preview 与 commit 均重新检查隐藏状态。隐藏池备份只允许目标�
 
 生产升级不需要数据库迁移、索引变更或前端同步更新，不会启动时扫描/修改历史。存量重复池继续可读、可导出、可维护，按原 ID 导入回同一账号仍可判重，但不能新增第三份；带重复个人身份的旧备份不能原样恢复到尚未保存这些身份的账号，需先人工核对整理。新增校验在事务写入之前执行；拒绝不会改变档案版本、抽数、事件、批次、成功请求账本或发送变更通知。并发写入继续使用账号 fence、档案 CAS 和事务，已成功请求的幂等重试仍优先返回持久化结果。
 
-本修复只阻止新增重复关联，不推断两份真实历史是否相同，也不自动清理旧数据。仅从备份删除池/事件再导入不会删除服务器存量。存量修复必须核对池身份、记录、删除标记、进度及批次总数；删除批次内出货明细不删除独立批次计数，不能据此断言抽数已经去重。上线后先用测试账号检查“正常普通导入/真实备份恢复成功、重复别名备份预览报错且原抽数不变”，再单独处理经用户确认的历史重叠。
+本修复只阻止新增重复关联，不推断两份真实历史是否相同，也不自动清理旧数据。仅从备份删除池/事件再导入不会删除服务器存量。存量修复必须核对池身份、记录、删除标记、进度及批次总数；旧版本删除批次内出货明细不会扣减批次计数，不能据此断言抽数已经去重；本次逐条删除同步扣减及历史补扣规则见上文和专用流程。上线后先用测试账号检查“正常普通导入/真实备份恢复成功、重复别名备份预览报错且原抽数不变”，再单独处理经用户确认的历史重叠。
 
 已确认六组相同历史、2673 -> 2340 的单账号案例使用[专用运维修复流程](recruitment-duplicate-pool-repair.md)：只读预演、原始 BSON 事务备份、定向合并和有版本保护的回滚。该工具由运维明确执行，不作为通用自动迁移，也不能用于未经核对的其他账号。
+
+旧版本已删除但未扣减的批次记录不会在读取时自动修改。定向补扣工具及预演、版本校验和回滚步骤见 [历史删除抽数补扣](recruitment-deleted-counts-repair.md)。

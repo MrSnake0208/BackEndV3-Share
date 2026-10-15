@@ -132,6 +132,9 @@ class RecruitmentRecordImportTest {
         assertEquals(100L, exchangeTotal(importer.read(input, current)))
         (input.path("batches")[0] as ObjectNode).put("total_pull_count", 36)
         assertThrows(RecruitmentApiException::class.java) { importer.read(input, current) }
+        input.set<JsonNode>("events", mapper.readTree("[]"))
+        (input.path("batches")[0] as ObjectNode).put("total_pull_count", 0)
+        assertThrows(RecruitmentApiException::class.java) { importer.read(input, current) }
     }
 
     @Test fun `ambiguous personal pools and hidden directory are not silently selected`() {

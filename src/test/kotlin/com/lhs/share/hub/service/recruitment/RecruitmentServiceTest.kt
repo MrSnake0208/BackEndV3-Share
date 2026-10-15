@@ -241,7 +241,7 @@ class RecruitmentServiceTest {
         assertEquals(5L, state.nextEventOrder)
     }
 
-    @Test fun `dialog batches retain their total and reject edited spans beyond that total before writing`() {
+    @Test fun `dialog batch edits keep total but deleting nodes deducts their spans before final validation`() {
         command(
             "batch_create",
             """{"pool_id":"p","mode":"historical","batch_id":"b","total_pull_count":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":20}]}""",
@@ -254,12 +254,22 @@ class RecruitmentServiceTest {
             )
         }
         assertEquals(before, events)
+        assertThrows(RecruitmentApiException::class.java) {
+            command(
+                "pool_records_save",
+                """{"pool_id":"p","remaining_pulls":null,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":25}],"deleted_event_ids":["B"]}""",
+            )
+        }
+        assertEquals(before, events)
+        assertEquals(40L, batches.getValue("b").totalPullCount)
         command(
             "pool_records_save",
-            """{"pool_id":"p","remaining_pulls":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":25}],"deleted_event_ids":["B"]}""",
+            """{"pool_id":"p","remaining_pulls":40,"entries":[],"deleted_event_ids":["B"]}""",
         )
-        assertEquals(40L, count())
+        assertEquals(20L, count())
         assertEquals("b", events.getValue("A").batchId)
+        assertEquals(17L, events.getValue("A").pullSpan)
+        assertTrue(events.getValue("B").batchCountDeducted)
     }
 
     @Test fun `stopped pool permits existing count edits removals and progress but rejects additions`() {
@@ -600,17 +610,55 @@ class RecruitmentServiceTest {
             """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":10,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":null},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":null}]}""",
         )
         assertEquals(10L, count())
+        command("event_delete", """{"event_id":"B"}""")
+        assertEquals(10L, count())
+        command("event_restore", """{"event_id":"B"}""")
+        assertEquals(10L, count())
         command("event_update", """{"event_id":"A","entry":{"agent_id":"catalog_p:up:A","pull_span":7}}""")
         assertEquals(10L, count())
         command("event_delete", """{"event_id":"A"}""")
-        command("event_update", """{"event_id":"B","entry":{"agent_id":"catalog_p:up:B","pull_span":10}}""")
-        assertEquals(10L, count())
-        command("batch_delete", """{"batch_id":"b","confirm_total_pull_count":10}""")
+        command("event_update", """{"event_id":"B","entry":{"agent_id":"catalog_p:up:B","pull_span":3}}""")
+        assertEquals(3L, count())
+        command("batch_delete", """{"batch_id":"b","confirm_total_pull_count":3}""")
         assertEquals(0L, count())
         command("batch_restore", """{"batch_id":"b"}""")
-        assertEquals(10L, count())
+        assertEquals(3L, count())
         assertTrue(events.getValue("A").deletedAt != null)
         assertNull(events.getValue("B").deletedAt)
+    }
+
+    @Test fun `batch event deletion deducts once undo adds back and legacy undo does not invent deductions`() {
+        command(
+            "batch_create",
+            """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":60,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":20},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":37}]}""",
+        )
+        command("progress_set", """{"pool_id":"p","progress":5}""")
+        command("event_delete", """{"event_id":"B"}""")
+        assertEquals(28L, count())
+        assertEquals(20L, events.getValue("A").pullSpan)
+        assertThrows(RecruitmentApiException::class.java) { command("event_delete", """{"event_id":"B"}""") }
+        assertEquals(28L, count())
+        command("event_restore", """{"event_id":"B"}""")
+        assertEquals(65L, count())
+        assertTrue(!events.getValue("B").batchCountDeducted)
+        events["B"] = events.getValue("B").copy(deletedAt = now, deletedRevision = state.archiveRevision)
+        command("event_restore", """{"event_id":"B"}""")
+        assertEquals(65L, count())
+    }
+
+    @Test fun `deleting exact batch history reaches zero without changing unrelated progress or old tombstones`() {
+        command(
+            "batch_create",
+            """{"batch_id":"b","pool_id":"p","mode":"historical","total_pull_count":40,"entries":[{"event_id":"A","agent_id":"catalog_p:up:A","pull_span":17},{"event_id":"B","agent_id":"catalog_p:up:B","pull_span":23}]}""",
+        )
+        command("event_delete", """{"event_id":"A"}""")
+        val tombstone = events.getValue("A")
+        command("pool_records_save", """{"pool_id":"p","remaining_pulls":null,"entries":[],"deleted_event_ids":["B"]}""")
+        assertEquals(0L, count())
+        assertEquals(0L, batches.getValue("b").totalPullCount)
+        assertEquals(tombstone, events.getValue("A"))
+        assertEquals(0L, state.pools.single().progress)
+        assertEquals(2, events.size)
     }
 
     @Test fun `dialog inserts historical results in middle earliest and latest without rewriting intervals`() {

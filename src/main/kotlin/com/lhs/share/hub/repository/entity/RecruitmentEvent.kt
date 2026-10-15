@@ -40,6 +40,8 @@ data class RecruitmentEvent(
     val deletedRevision: Long? = null,
     val importBatchId: String? = null,
     val importedAt: Instant? = null,
+    // Legacy deletions did not deduct batch counts; only new deductions may be added back by undo.
+    @JsonIgnore val batchCountDeducted: Boolean = false,
 )
 
 @Document("recruitment_batches")

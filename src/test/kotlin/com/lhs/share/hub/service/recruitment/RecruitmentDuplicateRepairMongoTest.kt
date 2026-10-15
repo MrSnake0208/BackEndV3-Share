@@ -40,7 +40,11 @@ class RecruitmentDuplicateRepairMongoTest {
             } finally {
                 if (process.isAlive) process.destroyForcibly()
             }
-            for (name in listOf("20261015-recruitment-duplicate-pools.js", "20261015-recruitment-duplicate-pools.run.js")) {
+            for (name in listOf(
+                "20261015-recruitment-duplicate-pools.js",
+                "20261015-recruitment-duplicate-pools.run.js",
+                "20261015-recruitment-deleted-counts.run.js",
+            )) {
                 Files.copy(Path.of("scripts/migrations/$name"), directory.resolve(name), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             }
             for ((action, status) in listOf(
@@ -62,6 +66,42 @@ class RecruitmentDuplicateRepairMongoTest {
                 } finally {
                     if (process.isAlive) process.destroyForcibly()
                 }
+            }
+            for ((action, status) in listOf(
+                "dry-run" to "dry_run",
+                "apply" to "applied",
+                "apply" to "already_applied",
+                "rollback" to "rolled_back",
+            )) {
+                val launcher = ProcessBuilder("mongosh", uri, "--quiet", "--file", "20261015-recruitment-deleted-counts.run.js")
+                    .directory(directory.toFile()).redirectErrorStream(true).redirectOutput(output.toFile())
+                launcher.environment()["YUANHUB_REPAIR_ACTION"] = action
+                launcher.environment()["YUANHUB_REPAIR_REVISION"] = "30"
+                val process = launcher.start()
+                try {
+                    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "count launcher timed out; see $output")
+                    val log = Files.readString(output)
+                    assertEquals(0, process.exitValue(), log)
+                    assertTrue(log.contains("\"status\": \"$status\""), log)
+                    if (action == "dry-run") assertTrue(log.contains("\"deduction\": 127"), log)
+                } finally {
+                    if (process.isAlive) process.destroyForcibly()
+                }
+            }
+            val scanScript = Path.of("scripts/migrations/20261015-recruitment-deleted-counts.scan.js").toAbsolutePath()
+            val scan = ProcessBuilder("mongosh", uri, "--quiet", "--file", scanScript.toString())
+                .redirectErrorStream(true).redirectOutput(output.toFile()).start()
+            try {
+                assertTrue(scan.waitFor(30, TimeUnit.SECONDS), "fleet scan timed out; see $output")
+                val log = Files.readString(output)
+                assertEquals(0, scan.exitValue(), log)
+                val summary = jacksonObjectMapper().readTree(log.trim().lineSequence().last())
+                assertEquals("summary", summary.path("type").asText())
+                assertEquals(3, summary.path("suspectedAccounts").asInt())
+                assertEquals(381, summary.path("candidateDeletedPulls").asInt())
+                assertTrue(summary.path("readOnly").asBoolean())
+            } finally {
+                if (scan.isAlive) scan.destroyForcibly()
             }
         } finally {
             TestMongo.client().use { TestMongo.dropDatabase(it, database) }
