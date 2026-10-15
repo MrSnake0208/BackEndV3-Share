@@ -128,12 +128,19 @@ internal class RecruitmentExchangeValidation(private val mapper: ObjectMapper) {
         val existingEvents = events.associateBy { it.eventId }
         val existingBatches = batches.associateBy { it.batchId }
         val pools = document.pools.associateBy { it.poolId }
+        val personalIdsByCatalog = (current.pools + document.pools)
+            .groupBy { (it.mappedSnapshot ?: it.snapshot).catalogPoolId }
+            .mapValues { (_, values) -> values.map { it.poolId }.toSet() }
         val definitions = document.pools.flatMap { listOfNotNull(it.snapshot.catalogPoolId, it.mappedSnapshot?.catalogPoolId) }.distinct()
             .associateWith { catalog.findPool(document.game, it) }
         val checkedOperators = mutableMapOf<String, com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot>()
         document.pools.forEach { pool ->
             val old = existingPools[pool.poolId]
             val reference = pool.mappedSnapshot ?: pool.snapshot
+            // Existing duplicate identities remain recoverable on their account; never create another alias.
+            if (old == null && reference.catalogPoolId != null && personalIdsByCatalog.getValue(reference.catalogPoolId).size > 1) {
+                fail("${reference.name}已关联其他个人卡池，不能通过备份新增重复卡池；外部记录请使用普通记录导入格式")
+            }
             if (pool.wishAgentIds.isNotEmpty()) {
                 catalog.validateWishes(document.game, pool.wishAgentIds)
                 if (definitions[reference.catalogPoolId]?.allowCustomUp != true && pool.wishAgentIds != old?.wishAgentIds) {

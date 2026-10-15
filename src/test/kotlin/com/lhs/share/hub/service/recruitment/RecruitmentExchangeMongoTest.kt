@@ -26,6 +26,7 @@ import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.testinfra.TestMongo
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
@@ -156,6 +157,99 @@ class RecruitmentExchangeMongoTest {
     private fun simpleRecords(): JsonNode = mapper.readTree(
         """{"schema":"yuanhub.recruitment.import.v1","game":"如鸢","events":[{"event_id":"550e8400-e29b-41d4-a716-446655440000","catalog_pool_id":"test_pool","agent_id":"test_pool:up:A","pull_span":17}]}""",
     )
+
+    @Test fun `duplicate backup alias and pool create leave persisted history revision requests and notifications unchanged`() {
+        initialize("b")
+        historical("b")
+        val before = store.archive("u", "b")
+        val records = store.exchangeEvents("u", "b", 20_001)
+        val batches = store.exchangeBatches("u", "b", 20_001)
+        val requests = template.findAll(RecruitmentRequestRecord::class.java)
+        val exported = service.export("u", "b")
+        val alias = exported.copy(
+            currentPoolId = "external",
+            pools = exported.pools.map { it.copy(poolId = "external") },
+            events = exported.events.map { it.copy(eventId = "external-event", poolId = "external") },
+        )
+        clearMocks(publisher, answers = false)
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                service.preview(
+                    "u",
+                    RecruitmentImportPreviewRequest("b", mapper.valueToTree(alias), RecruitmentImportOptions(confirmCountChange = true)),
+                )
+            }.status.value(),
+        )
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                command("b", "pool_create", """{"pool_id":"external","catalog_pool_id":"test_pool","progress":0}""")
+            }.status.value(),
+        )
+        assertEquals(before, store.archive("u", "b"))
+        assertEquals(records, store.exchangeEvents("u", "b", 20_001))
+        assertEquals(batches, store.exchangeBatches("u", "b", 20_001))
+        assertEquals(requests, template.findAll(RecruitmentRequestRecord::class.java))
+        assertEquals(17L, core.archive("u", "b").summary.knownTotalPulls)
+        assertNull(store.archive("u", "a"))
+        verify(exactly = 0) { publisher.publishChange(any(), any(), any(), any()) }
+    }
+
+    @Test fun `competing association after preview blocks commit and a new preview rejects the alias`() {
+        initialize()
+        historical()
+        val node = backup()
+        val input = prepared(node)
+        command("b", "pool_create", """{"pool_id":"existing","catalog_pool_id":"test_pool","progress":0}""")
+        val before = store.archive("u", "b")
+        assertEquals(409, assertThrows(RecruitmentApiException::class.java) { service.commit("u", input) }.status.value())
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                service.preview("u", RecruitmentImportPreviewRequest("b", node, RecruitmentImportOptions(confirmCountChange = true)))
+            }.status.value(),
+        )
+        assertEquals(before, store.archive("u", "b"))
+        assertTrue(store.exchangeEvents("u", "b", 20_001).isEmpty())
+        assertTrue(store.exchangeBatches("u", "b", 20_001).isEmpty())
+        assertNull(store.request("u", "b", input.requestId))
+    }
+
+    @Test fun `concurrent different personal IDs for the same catalog persist only one association`() {
+        val executor = Executors.newFixedThreadPool(2)
+        val start = CountDownLatch(1)
+        try {
+            val writes = (1..2).map { index ->
+                executor.submit(
+                    Callable {
+                        check(start.await(10, TimeUnit.SECONDS))
+                        runCatching {
+                            core.command(
+                                "u",
+                                RecruitmentCommandRequest(
+                                    "b",
+                                    0,
+                                    "create-$index",
+                                    "pool_create",
+                                    mapper.readTree("""{"pool_id":"alias-$index","catalog_pool_id":"test_pool","progress":0}"""),
+                                ),
+                            )
+                        }
+                    },
+                )
+            }
+            start.countDown()
+            assertEquals(1, writes.count { it.get(20, TimeUnit.SECONDS).isSuccess })
+            assertEquals(1, store.archive("u", "b")!!.pools.size)
+            assertEquals(1L, store.archive("u", "b")!!.archiveRevision)
+            assertEquals(1, template.findAll(RecruitmentRequestRecord::class.java).size)
+            assertNull(store.archive("u", "a"))
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
+    }
 
     @Test fun `minimal records append to existing pool without replacing state and repeat safely`() {
         initialize("b")

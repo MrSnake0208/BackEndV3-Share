@@ -16,6 +16,7 @@ import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
+import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentPool
 import com.lhs.share.hub.repository.entity.RecruitmentPoolSnapshot
@@ -649,6 +650,85 @@ class RecruitmentExchangeServiceTest {
             fixture.store.saveArchive(any(), any())
             fixture.fence.fenceRecruitmentWrite(any(), any(), any())
         }
+    }
+
+    @Test fun `backup cannot add a different personal identity for an already linked catalog even with count confirmation`() {
+        val fixture = fixture()
+        val source = document(record())
+        val alias = source.copy(
+            currentPoolId = "external",
+            pools = source.pools.map { it.copy(poolId = "external") },
+            events = source.events.map { it.copy(poolId = "external") },
+        )
+        listOf("keep_current", "use_backup").forEach { strategy ->
+            val error = assertThrows(RecruitmentApiException::class.java) {
+                fixture.service.preview(
+                    "u",
+                    RecruitmentImportPreviewRequest("a", mapper.valueToTree(alias), RecruitmentImportOptions(strategy, true)),
+                )
+            }
+            assertEquals(422, error.status.value())
+            assertTrue(error.message!!.contains("重复卡池"))
+        }
+        val mapped = state.pools.single().copy(snapshot = snapshot.copy(catalogPoolId = null), mappedSnapshot = snapshot)
+        every { fixture.store.archive("u", "a") } returns state.copy(pools = listOf(mapped))
+        assertThrows(RecruitmentApiException::class.java) {
+            fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(alias)))
+        }
+        verify(exactly = 0) {
+            fixture.store.saveArchive(any(), any())
+            fixture.store.insertEvent(any())
+            fixture.store.insertBatch(any())
+            fixture.store.insertRequest(any())
+            fixture.fence.fenceRecruitmentWrite(any(), any(), any())
+            fixture.publisher.publishChange(any(), any(), any(), any())
+        }
+    }
+
+    @Test fun `fresh target rejects two personal identities for one catalog inside a backup`() {
+        val fixture = fixture()
+        every { fixture.store.archive("u", "a") } returns state.copy(baseline = 0, currentPoolId = null, pools = emptyList())
+        val source = document(record())
+        val duplicate = source.copy(pools = source.pools + source.pools.single().copy(poolId = "external"))
+        assertEquals(
+            422,
+            assertThrows(RecruitmentApiException::class.java) {
+                fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(duplicate)))
+            }.status.value(),
+        )
+        verify(exactly = 0) { fixture.store.saveArchive(any(), any()) }
+    }
+
+    @Test fun `existing duplicate identities still export and dedupe but cannot gain another alias`() {
+        val fixture = fixture()
+        val legacy = state.copy(pools = state.pools + state.pools.single().copy(poolId = "external"))
+        val records = listOf(record(), record("B", order = 2).copy(poolId = "external"))
+        every { fixture.store.archive("u", "a") } returns legacy
+        every { fixture.store.exchangeEvents("u", "a", 20_001) } returns records
+        val exported = fixture.service.export("u", "a")
+        assertEquals(listOf("p", "external"), exported.pools.map { it.poolId })
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(exported)))
+        assertEquals(2, preview.items.count { it.entityType == "pool" && it.status == "duplicate" })
+        assertEquals(2, preview.items.count { it.entityType == "event" && it.status == "duplicate" })
+        assertEquals(preview.currentKnownTotal, preview.candidateKnownTotal)
+        assertTrue(preview.canCommit)
+        val expanded = exported.copy(pools = exported.pools + exported.pools.first().copy(poolId = "third"))
+        assertThrows(RecruitmentApiException::class.java) {
+            fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(expanded)))
+        }
+        verify(exactly = 0) { fixture.store.saveArchive(any(), any()) }
+    }
+
+    @Test fun `different catalog identities with identical names remain independently importable`() {
+        val fixture = fixture()
+        every { fixture.catalog.findPool("如鸢", "other") } returns RecruitmentCatalogPool("other", "如鸢", snapshot.name)
+        val source = document().copy(
+            currentPoolId = "external",
+            pools = listOf(RecruitmentPool("external", snapshot.copy(catalogPoolId = "other", upAgents = emptyList()), 0)),
+        )
+        val preview = fixture.service.preview("u", RecruitmentImportPreviewRequest("a", mapper.valueToTree(source)))
+        assertEquals("add", preview.items.single { it.entityType == "pool" }.status)
+        assertTrue(preview.canCommit)
     }
 
     private fun fixture(): Fixture {
