@@ -10,7 +10,7 @@ import java.time.Instant
 /**
  * Hub 库反馈工单实体(HubBackend.feedback_tickets)
  *
- * 嵌入消息列表 [messages],每一条消息可附带最多 3 张图片。
+ * 嵌入消息列表 [messages],每一条消息可附带最多 10 个附件(图片与普通文件合计)。
  * 状态机: OPEN → RESOLVED / DISMISSED
  *
  * @property id 工单 id: rpt_<hex>
