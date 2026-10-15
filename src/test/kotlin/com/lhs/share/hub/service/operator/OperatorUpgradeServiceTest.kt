@@ -365,6 +365,7 @@ class OperatorUpgradeServiceTest {
     fun `awakening missing either material blocks execution without writes`() {
         for ((heart, glass) in listOf(99L to 1L, 100L to 0L)) {
             operatorCurrent = current(starLevel = 25)
+            val operatorBefore = operatorCurrent
             inventoryCurrent["agent"] = stock("agent", mapOf("op1" to heart))
             inventoryCurrent["item"] = stock("item", mapOf("zhuangjinboli" to glass))
             val before = inventoryCurrent.toMap()
@@ -379,7 +380,7 @@ class OperatorUpgradeServiceTest {
             }
             assertEquals("insufficient_inventory", error.code)
             assertEquals(before, inventoryCurrent)
-            assertEquals(current(starLevel = 25), operatorCurrent)
+            assertEquals(operatorBefore, operatorCurrent)
             assertTrue(storedRecords.isEmpty())
             assertTrue(storedUpgrades.isEmpty())
             assertEquals(42, inventoryRevision)
