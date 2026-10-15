@@ -5,7 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.lhs.share.hub.repository.entity.DevelopmentCriterion
 import com.lhs.share.hub.repository.entity.DevelopmentGoal
+import com.lhs.share.hub.repository.entity.StarStateBag
+import com.lhs.share.hub.repository.entity.StarStateCurrent
+import com.lhs.share.hub.repository.entity.StarStateEntry
+import com.lhs.share.hub.repository.entity.StarStateExperience
+import com.lhs.share.hub.repository.entity.StarStatePlanTarget
 import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.beta.BetaApiException
 import com.lhs.share.hub.service.beta.BetaService
 import com.lhs.share.service.jwt.JwtService
 import com.lhs.share.testinfra.TestMongo
@@ -29,6 +35,7 @@ import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.index.MongoPersistentEntityIndexResolver
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
+import org.springframework.http.HttpStatus
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -158,7 +165,12 @@ class OpenApiSchemaHarnessTest {
         }
         val status = if (response.statusCode() >= 400) response.statusCode() else checkNotNull(businessStatus)
         val resourcePath = path.substringBefore('?')
-        val operationPath = if (resourcePath in setOf("/v1/accounts", "/v1/development-goals")) resourcePath else "/v1/accounts/{accountId}"
+        val operationPath = when {
+            spec.path("paths").has(resourcePath) -> resourcePath
+            resourcePath.startsWith("/v1/star/share/view/") -> "/v1/star/share/view/{code}"
+            resourcePath.startsWith("/v1/operator/share/view/") -> "/v1/operator/share/view/{shareCode}"
+            else -> "/v1/accounts/{accountId}"
+        }
         val responses = spec.path("paths").path(operationPath).path(method.lowercase()).path("responses")
         val declared = responses.path(response.statusCode().toString()).path("content").path("application/json").path("schema")
         val documented = !declared.isMissingNode
@@ -186,6 +198,94 @@ class OpenApiSchemaHarnessTest {
     private fun success(reply: Reply): JsonNode {
         assertEquals(200, reply.status, reply.body.toString())
         return reply.body.path("data")
+    }
+
+    @Test
+    fun `authenticated sharing commands still require beta while anonymous views bypass it`() {
+        val accountId = "share_${UUID.randomUUID()}"
+        val code = UUID.randomUUID().toString()
+        mongo.insert(
+            SubAccount(userId = owner, accountId = accountId, name = "beta-sharing", shareToken = code, shareScopes = listOf("star")),
+        )
+        org.mockito.Mockito.doThrow(BetaApiException(HttpStatus.FORBIDDEN, "beta_access_required", "Not admitted"))
+            .`when`(beta).requireAccess(owner)
+        val manage = "/v1/accounts/share?account_id=$accountId"
+        for ((method, path, body) in listOf(
+            Triple("GET", manage, null),
+            Triple("PATCH", manage, """{"scope":"star","enabled":false}"""),
+            Triple("POST", "/v1/accounts/share/regenerate?account_id=$accountId", null),
+            Triple("DELETE", manage, null),
+        )) {
+            assertEquals(403, call("beta rejects sharing $method", method, path, body).status)
+        }
+        success(call("public star bypasses beta", "GET", "/v1/star/share/view/$code", user = null))
+        org.mockito.Mockito.verify(beta, org.mockito.Mockito.times(4)).requireAccess(owner)
+        assertEquals(code, mongo.findOne(Query(Criteria.where("accountId").`is`(accountId)), SubAccount::class.java)!!.shareToken)
+    }
+
+    @Test
+    fun `account sharing HTTP lifecycle preserves private state ownership and legacy operator scopes`() {
+        val account = success(call("create sharing account", "POST", "/v1/accounts", """{"name":"sharing","game":"如鸢"}"""))
+        val id = account.path("id").asText()
+        val manage = "/v1/accounts/share?account_id=$id"
+        val rotate = "/v1/accounts/share/regenerate?account_id=$id"
+        assertFalse(success(call("sharing starts disabled", "GET", manage)).path("active").asBoolean())
+        val enabled = success(call("enable only star", "PATCH", manage, """{"scope":"star","enabled":true}"""))
+        val code = enabled.path("share_code").asText()
+        assertEquals(listOf("star"), enabled.path("scopes").map { it.asText() })
+        val star = "/v1/star/share/view/$code"
+        val operator = "/v1/operator/share/view/$code"
+        assertEquals(404, call("operator still private", "GET", operator, user = null).status)
+        assertFalse(success(call("missing star document", "GET", star, user = null)).path("has_state").asBoolean())
+        val saved = mongo.save(
+            StarStateCurrent(
+                userId = owner, accountId = id, generation = 1, revision = 2,
+                inventory = listOf(
+                    StarStateEntry("private-one", "main", "天府", "orange", 10),
+                    StarStateEntry("private-two", "main", "天府", "orange", 10),
+                ),
+                planTargets = listOf(StarStatePlanTarget("private-one", 60)),
+                experience = StarStateExperience(orange = 99), bag = StarStateBag(2, 100), updatedAt = Instant.EPOCH,
+            ),
+        )
+        val before = mongo.findById(saved.id!!, StarStateCurrent::class.java)
+        val accountBefore = mongo.findOne(Query(Criteria.where("accountId").`is`(id)), SubAccount::class.java)
+        repeat(2) {
+            val data = success(call("anonymous star read $it", "GET", "$star?account_id=foreign&generation=999", user = null))
+            assertEquals(setOf("game", "available_views", "has_state", "updated_at", "inventory"), data.fieldNames().asSequence().toSet())
+            assertEquals(2, data.path("inventory").size())
+            data.path("inventory").forEach { entry ->
+                assertEquals(setOf("kind", "name", "quality", "level"), entry.fieldNames().asSequence().toSet())
+            }
+        }
+        assertEquals(before, mongo.findById(saved.id, StarStateCurrent::class.java))
+        assertEquals(accountBefore, mongo.findOne(Query(Criteria.where("accountId").`is`(id)), SubAccount::class.java))
+        for ((method, path, body) in listOf(
+            Triple("GET", manage, null),
+            Triple("PATCH", manage, """{"scope":"operator","enabled":true}"""),
+            Triple("POST", rotate, null),
+            Triple("DELETE", manage, null),
+        )) {
+            assertEquals(404, call("foreign sharing $method", method, path, body, owner + "_foreign").status)
+        }
+        mongo.save(saved.copy(generation = 2, revision = 3, inventory = saved.inventory.map { it.copy(level = 20) }))
+        val latest = success(call("same code latest generation", "GET", star, user = null))
+        assertEquals(listOf(20, 20), latest.path("inventory").map { it.path("level").asInt() })
+        val legacy = "/v1/operator/share?account_id=$id"
+        assertEquals(code, success(call("legacy enable operator", "PUT", legacy)).path("share_code").asText())
+        success(call("operator now public", "GET", operator, user = null))
+        success(call("legacy revoke only operator", "DELETE", legacy))
+        assertEquals(listOf("star"), success(call("star scope survives", "GET", manage)).path("scopes").map { it.asText() })
+        success(call("star remains public", "GET", star, user = null))
+        val newCode = success(call("rotate shared code", "POST", rotate)).path("share_code").asText()
+        assertTrue(newCode != code && newCode.isNotBlank())
+        assertEquals(404, call("old star code revoked", "GET", star, user = null).status)
+        assertEquals(404, call("old operator code revoked", "GET", operator, user = null).status)
+        success(call("new star code works", "GET", "/v1/star/share/view/$newCode", user = null))
+        success(call("revoke all sharing", "DELETE", manage))
+        assertEquals(404, call("new code revoked", "GET", "/v1/star/share/view/$newCode", user = null).status)
+        assertFalse(mongo.getCollection("sub_accounts").find(org.bson.Document("accountId", id)).first()!!.containsKey("shareToken"))
+        assertEquals(2L, mongo.findById(saved.id, StarStateCurrent::class.java)!!.generation)
     }
 
     @Test

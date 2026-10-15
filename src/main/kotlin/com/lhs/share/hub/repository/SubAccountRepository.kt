@@ -32,6 +32,15 @@ interface SubAccountRepositoryCustom {
     fun fenceRecruitmentWrite(userId: String, accountId: String, expectedGame: String): Boolean
     fun updateDetails(userId: String, accountId: String, name: String, game: String, now: Instant)
     fun updateShareToken(userId: String, accountId: String, expectedToken: String?, newToken: String?, now: Instant): SubAccount?
+    fun updateShareAuthorization(
+        userId: String,
+        accountId: String,
+        expectedToken: String?,
+        expectedScopes: List<String>?,
+        newToken: String?,
+        newScopes: List<String>,
+        now: Instant,
+    ): SubAccount?
 }
 
 class SubAccountRepositoryImpl(@param:Qualifier("hubMongoTemplate") private val template: MongoTemplate) : SubAccountRepositoryCustom {
@@ -62,6 +71,27 @@ class SubAccountRepositoryImpl(@param:Qualifier("hubMongoTemplate") private val 
         if (newToken == null) update.unset("shareToken") else update.set("shareToken", newToken)
         return template.findAndModify(
             owner(userId, accountId).addCriteria(Criteria.where("shareToken").`is`(expectedToken)),
+            update,
+            FindAndModifyOptions.options().returnNew(true),
+            SubAccount::class.java,
+        )
+    }
+
+    override fun updateShareAuthorization(
+        userId: String,
+        accountId: String,
+        expectedToken: String?,
+        expectedScopes: List<String>?,
+        newToken: String?,
+        newScopes: List<String>,
+        now: Instant,
+    ): SubAccount? {
+        val update = Update().set("updatedAt", now).set("shareScopes", newScopes)
+        if (newToken == null) update.unset("shareToken") else update.set("shareToken", newToken)
+        return template.findAndModify(
+            owner(userId, accountId)
+                .addCriteria(Criteria.where("shareToken").`is`(expectedToken))
+                .addCriteria(Criteria.where("shareScopes").`is`(expectedScopes)),
             update,
             FindAndModifyOptions.options().returnNew(true),
             SubAccount::class.java,

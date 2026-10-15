@@ -1,5 +1,6 @@
 package com.lhs.share.hub.service.operator
 
+import com.lhs.share.hub.controller.account.response.AccountShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorShareCombatStats
 import com.lhs.share.hub.controller.operator.response.OperatorShareDisc
@@ -12,6 +13,7 @@ import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.repository.entity.effectiveShareScopes
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -27,28 +29,18 @@ class OperatorShareService(
 ) {
     fun get(userId: String, accountId: String): OperatorShareResponse = response(requireAccount(userId, accountId))
 
-    fun create(userId: String, accountId: String): OperatorShareResponse {
-        val account = requireAccount(userId, accountId)
-        if (account.activeShareToken() != null) return response(account)
-        return generate(account, reuseWinner = true)
-    }
+    fun create(userId: String, accountId: String): OperatorShareResponse =
+        response(change(userId, accountId) { it.effectiveShareScopes() + "operator" })
 
     fun regenerate(userId: String, accountId: String): OperatorShareResponse =
-        generate(requireAccount(userId, accountId), reuseWinner = false)
+        response(change(userId, accountId, rotate = true) { it.effectiveShareScopes() + "operator" })
 
     fun revoke(userId: String, accountId: String): OperatorShareResponse {
-        val account = requireAccount(userId, accountId)
-        if (account.activeShareToken() == null) return response(account)
-        accountRepository.updateShareToken(userId, accountId, account.shareToken, null, Instant.now())?.let { return response(it) }
-        val latest = requireAccount(userId, accountId)
-        if (latest.activeShareToken() == null) return response(latest)
-        throw OperatorApiException(HttpStatus.CONFLICT, "share_code_changed", "Share code changed; refresh before revoking it")
+        return response(change(userId, accountId, disabling = true) { it.effectiveShareScopes() - "operator" })
     }
 
     fun view(shareCode: String): OperatorShareViewResponse {
-        val account = accountRepository.findByShareToken(shareCode)
-            ?.takeIf { it.shareToken == shareCode && it.activeShareToken() != null }
-            ?: throw shareNotFound()
+        val account = sharedAccount(shareCode, "operator")
         val current = operatorService.current(account.userId, account.accountId, account.game).firstOrNull()
         val growthStates = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(account.userId, account.accountId)
             .associate { it.operatorId to it.growthState }
@@ -63,22 +55,79 @@ class OperatorShareService(
         )
     }
 
-    private fun generate(account: SubAccount, reuseWinner: Boolean): OperatorShareResponse {
-        var latest = account
+    fun getAccountShare(userId: String, accountId: String): AccountShareResponse = accountResponse(requireAccount(userId, accountId))
+
+    fun setScope(userId: String, accountId: String, scope: String, enabled: Boolean): AccountShareResponse {
+        if (scope !in
+            setOf("operator", "star")
+        ) {
+            throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "share_scope_invalid", "Unsupported share scope")
+        }
+        return accountResponse(
+            change(userId, accountId, disabling = !enabled) {
+                if (enabled) it.effectiveShareScopes() + scope else it.effectiveShareScopes() - scope
+            },
+        )
+    }
+
+    fun regenerateAccountShare(userId: String, accountId: String): AccountShareResponse =
+        accountResponse(change(userId, accountId, rotate = true) { it.effectiveShareScopes() })
+
+    fun revokeAccountShare(userId: String, accountId: String): AccountShareResponse =
+        accountResponse(change(userId, accountId, disabling = true) { emptyList() })
+
+    fun sharedAccount(shareCode: String, scope: String): SubAccount {
+        val account = accountRepository.findByShareToken(shareCode)
+            ?.takeIf { it.shareToken == shareCode && !it.shareToken.isNullOrBlank() }
+            ?: throw shareNotFound()
+        if (scope !in
+            account.effectiveShareScopes()
+        ) {
+            throw OperatorApiException(HttpStatus.NOT_FOUND, "share_not_authorized", "This share view is not enabled")
+        }
+        return account
+    }
+
+    /** Retry only the requested scope against the latest scopes; never replay a stale whole list. */
+    private fun change(
+        userId: String,
+        accountId: String,
+        rotate: Boolean = false,
+        disabling: Boolean = false,
+        scopes: (SubAccount) -> List<String>,
+    ): SubAccount {
+        var latest = requireAccount(userId, accountId)
+        val originalToken = latest.shareToken
         repeat(MAX_GENERATION_ATTEMPTS) {
+            val nextScopes = scopes(latest).distinct().sorted()
+            if (nextScopes == latest.effectiveShareScopes() && (!rotate || nextScopes.isEmpty())) return latest
+            if (disabling &&
+                latest.shareToken != originalToken
+            ) {
+                throw OperatorApiException(HttpStatus.CONFLICT, "share_code_changed", "Share code changed; refresh before revoking it")
+            }
+            val token = if (nextScopes.isEmpty()) {
+                null
+            } else if (rotate) {
+                UUID.randomUUID().toString()
+            } else {
+                latest.shareToken?.takeIf(String::isNotBlank)
+                    ?: UUID.randomUUID().toString()
+            }
             try {
-                accountRepository.updateShareToken(
+                accountRepository.updateShareAuthorization(
                     latest.userId,
                     latest.accountId,
                     latest.shareToken,
-                    UUID.randomUUID().toString(),
+                    latest.shareScopes,
+                    token,
+                    nextScopes,
                     Instant.now(),
-                )?.let { return response(it) }
+                )?.let { return it }
             } catch (_: DuplicateKeyException) {
                 // A unique-index collision retries with another token, without replacing the account document.
             }
-            latest = requireAccount(account.userId, account.accountId)
-            if (reuseWinner) latest.activeShareToken()?.let { return response(latest) }
+            latest = requireAccount(userId, accountId)
         }
         throw OperatorApiException(
             HttpStatus.CONFLICT,
@@ -96,8 +145,15 @@ class OperatorShareService(
 
     private fun response(account: SubAccount) = OperatorShareResponse(
         accountId = account.accountId,
-        active = account.activeShareToken() != null,
-        shareCode = account.activeShareToken(),
+        active = "operator" in account.effectiveShareScopes(),
+        shareCode = account.shareToken?.takeIf { "operator" in account.effectiveShareScopes() },
+    )
+
+    private fun accountResponse(account: SubAccount) = AccountShareResponse(
+        account.accountId,
+        account.effectiveShareScopes().isNotEmpty(),
+        account.shareToken?.takeIf { account.effectiveShareScopes().isNotEmpty() },
+        account.effectiveShareScopes(),
     )
 
     private fun shareNotFound() = OperatorApiException(
@@ -105,8 +161,6 @@ class OperatorShareService(
         "share_not_found",
         "Share not found",
     )
-
-    private fun SubAccount.activeShareToken(): String? = shareToken?.takeIf(String::isNotBlank)
 
     private fun OperatorCurrentEntryDto.toShareEntry(growthState: String) = OperatorShareEntryDto(
         level = level,
