@@ -437,11 +437,10 @@ class FeedbackReportServiceTest {
     }
 
     @Test
-    fun `媒体引用按请求顺序保存并在响应中转换为绝对 URL`() {
+    fun `创建反馈接受 10 张图片并按请求顺序返回绝对 URL`() {
         prepareCreate()
-        val first = media("med_first", "/media/med_first.png")
-        val second = media("med_second", "/media/med_second.webp")
-        every { mediaRepository.findAllById(listOf("med_second", "med_first")) } returns listOf(first, second)
+        val mediaIds = (1..10).map { "med_$it" }
+        every { mediaRepository.findAllById(mediaIds) } returns mediaIds.reversed().map { media(it) }
 
         val response = service.create(
             "user",
@@ -449,22 +448,19 @@ class FeedbackReportServiceTest {
                 type = "BUG",
                 category = "OPERATOR",
                 content = "带截图的问题",
-                mediaIds = listOf("med_second", "med_first"),
+                mediaIds = mediaIds,
             ),
         )
 
         assertEquals(
-            listOf("med_second", "med_first"),
+            mediaIds,
             response.messages.single().images.map { it.id },
         )
         assertEquals(
-            listOf(
-                "https://api.example.test/media/med_second.webp",
-                "https://api.example.test/media/med_first.png",
-            ),
+            mediaIds.map { "https://api.example.test/media/$it.webp" },
             response.messages.single().images.map { it.url },
         )
-        verify { mediaRepository.findAllById(listOf("med_second", "med_first")) }
+        verify { mediaRepository.findAllById(mediaIds) }
     }
 
     @Test
@@ -523,48 +519,46 @@ class FeedbackReportServiceTest {
     }
 
     @Test
-    fun `追加消息复用媒体归属校验并保留请求顺序`() {
+    fun `用户追加接受 10 张图片并保留请求顺序`() {
         val ticket = openTicket()
         every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
         every { ticketRepository.save(any()) } answers { firstArg() }
         every { accessService.canManage("user", any()) } returns false
         every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
-        val first = media("med_first", "/media/med_first.png")
-        val second = media("med_second", "/media/med_second.webp")
-        every { mediaRepository.findAllById(listOf("med_second", "med_first")) } returns listOf(first, second)
+        val mediaIds = (1..10).map { "med_$it" }
+        every { mediaRepository.findAllById(mediaIds) } returns mediaIds.reversed().map { media(it) }
 
         val response = service.appendMessage(
             "user",
             "rpt_1",
-            FeedbackMessageAppendRequest("补充截图", listOf("med_second", "med_first")),
+            FeedbackMessageAppendRequest("补充截图", mediaIds),
         )
 
         assertEquals(
-            listOf("med_second", "med_first"),
+            mediaIds,
             response.messages.last().images.map { it.id },
         )
     }
 
     @Test
-    fun `管理员追加消息也能携带图片并保存为管理员消息`() {
+    fun `管理员回复接受 10 张图片并保存为管理员消息`() {
         val ticket = openTicket()
         every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket)
         every { ticketRepository.save(any()) } answers { firstArg() }
         every { accessService.canManage("admin", any()) } returns true
         every { userInfoService.get("user") } returns MaaUserInfo("user", "用户")
         every { userInfoService.get("admin") } returns MaaUserInfo("admin", "管理员")
-        val first = media("med_first", "/media/med_first.png", owner = "admin")
-        val second = media("med_second", "/media/med_second.webp", owner = "admin")
-        every { mediaRepository.findAllById(listOf("med_first", "med_second")) } returns listOf(second, first)
+        val mediaIds = (1..10).map { "med_$it" }
+        every { mediaRepository.findAllById(mediaIds) } returns mediaIds.reversed().map { media(it, owner = "admin") }
 
         val response = service.appendMessage(
             "admin",
             "rpt_1",
-            FeedbackMessageAppendRequest("处理结果", listOf("med_first", "med_second")),
+            FeedbackMessageAppendRequest("处理结果", mediaIds),
         )
 
         assertEquals("ADMIN", response.messages.last().senderKind)
-        assertEquals(listOf("med_first", "med_second"), response.messages.last().images.map { it.id })
+        assertEquals(mediaIds, response.messages.last().images.map { it.id })
     }
 
     @Test
@@ -925,11 +919,13 @@ class FeedbackReportServiceTest {
                     type = "BUG",
                     category = "OPERATOR",
                     content = "图片太多",
-                    mediaIds = listOf("med_1", "med_2", "med_3", "med_4"),
+                    mediaIds = (1..11).map { "med_$it" },
                 ),
             )
         }
         assertEquals(400, tooManyException.statusCode)
+        verify(exactly = 0) { mediaRepository.findAllById(any()) }
+        verify(exactly = 0) { ticketRepository.save(any()) }
 
         every { mediaRepository.findAllById(listOf("med_missing")) } returns emptyList()
         val missingException = assertThrows(ApiResultException::class.java) {
@@ -950,6 +946,26 @@ class FeedbackReportServiceTest {
             )
         }
         assertEquals(400, deletedException.statusCode)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["REPORTER", "ADMIN"])
+    fun `用户追加和管理员回复超过 10 个附件时不读取媒体或写工单`(actorMode: String) {
+        val userId = if (actorMode == "ADMIN") "admin" else "user"
+        prepareTicket(openTicket(), userId, canManage = actorMode == "ADMIN")
+
+        val error = assertThrows(ApiResultException::class.java) {
+            service.appendMessage(
+                userId,
+                "rpt_1",
+                FeedbackMessageAppendRequest("附件太多", (1..11).map { "med_$it" }, actorMode),
+            )
+        }
+
+        assertEquals(400, error.statusCode)
+        verify(exactly = 0) { mediaRepository.findAllById(any()) }
+        verify(exactly = 0) { ticketRepository.save(any()) }
+        verify(exactly = 0) { queryRepository.saveIfUnchanged(any(), any()) }
     }
 
     @Test

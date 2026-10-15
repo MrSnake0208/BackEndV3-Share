@@ -20,6 +20,8 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
@@ -113,6 +115,44 @@ class FeedbackReportControllerContractTest {
                 "rpt_1",
                 match { it.status == "RESOLVED" && it.actorMode == "ADMIN" },
             )
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource("CREATE,10,200", "CREATE,11,400", "REPORTER,10,200", "REPORTER,11,400", "ADMIN,10,200", "ADMIN,11,400")
+    fun `attachment count accepts 10 and rejects 11 before calling the service`(actorMode: String, count: Int, expectedCode: Int) {
+        every { reportService.create("u1", any()) } returns response()
+        every { reportService.appendMessage("u1", "rpt_1", any()) } returns response()
+        val mediaIds = (1..count).map { "med_$it" }
+        val body = mutableMapOf<String, Any>("content" to "附件边界", "media_ids" to mediaIds)
+        val creating = actorMode == "CREATE"
+        if (creating) {
+            body["type"] = "BUG"
+            body["category"] = "OPERATOR"
+        } else {
+            body["actor_mode"] = actorMode
+        }
+
+        mockMvc.perform(
+            post(if (creating) "/v1/reports" else "/v1/reports/rpt_1/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jacksonObjectMapper().writeValueAsString(body)),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status_code").value(expectedCode))
+
+        verify(exactly = if (creating && expectedCode == 200) 1 else 0) {
+            reportService.create("u1", any())
+        }
+        verify(exactly = if (!creating && expectedCode == 200) 1 else 0) {
+            reportService.appendMessage("u1", "rpt_1", any())
+        }
+        if (expectedCode == 200) {
+            if (creating) {
+                verify { reportService.create("u1", match { it.mediaIds == mediaIds }) }
+            } else {
+                verify { reportService.appendMessage("u1", "rpt_1", match { it.mediaIds == mediaIds && it.actorMode == actorMode }) }
+            }
         }
     }
 

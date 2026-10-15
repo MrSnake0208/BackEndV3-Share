@@ -81,7 +81,7 @@ class FeedbackReportService(
         private const val PENDING_LIMIT = 3
 
         /** 消息中最多附件数 */
-        private const val MAX_MEDIA_PER_MESSAGE = 3
+        private const val MAX_MEDIA_PER_MESSAGE = 10
 
         /** 管理员可设的状态 */
         private val ADMIN_ALLOWED_STATUSES = setOf("OPEN", "RESOLVED", "DISMISSED")
@@ -887,7 +887,7 @@ class FeedbackReportService(
         }
 
     /**
-     * 校验媒体 id 列表: 最多 3 个附件, 必须是当前用户自己的未删除媒体
+     * 校验媒体 id 列表: 最多 10 个附件, 必须是当前用户自己的未删除媒体
      */
     private fun validateMediaIds(userId: String, mediaIds: List<String>): List<MediaAsset> {
         if (mediaIds.isEmpty()) return emptyList()
