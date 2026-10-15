@@ -154,4 +154,37 @@ class CalendarPrivateItemControllerContractTest {
         mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "0"))
             .andExpect(status().isConflict).andExpect(jsonPath("$.error.code").value("private_item_conflict"))
     }
+
+    @Test
+    fun `reminder contract validates strict types tracks omissions and returns snake case settings`() {
+        listOf(
+            "\"reminder_on\":\"OTHER\"", "\"reminder_on\":false", "\"reminder_on\":0",
+            "\"reminder_days_before\":null", "\"reminder_days_before\":\"1\"", "\"reminder_days_before\":true",
+            "\"reminder_days_before\":-1", "\"reminder_days_before\":2", "\"reminder_days_before\":1.0",
+            "\"reminder_days_before\":4294967296",
+        ).forEach { invalid ->
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",$invalid}"))
+                .andExpect(status().isUnprocessableEntity)
+            mvc.perform(put("$path/$id").contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",$invalid,\"expected_version\":0}"))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify { service wasNot io.mockk.Called }
+        val decoder = com.lhs.share.hub.controller.calendar.request.CalendarPrivateItemRequestDecoder
+        val omitted = decoder.decode(mapper.readTree(body), false)
+        org.junit.jupiter.api.Assertions.assertFalse(omitted.reminderOnProvided)
+        org.junit.jupiter.api.Assertions.assertFalse(omitted.reminderDaysBeforeProvided)
+        val disabled = decoder.decode(mapper.readTree(body.dropLast(1) + ",\"reminder_on\":null}"), false)
+        org.junit.jupiter.api.Assertions.assertTrue(disabled.reminderOnProvided)
+        org.junit.jupiter.api.Assertions.assertNull(disabled.reminderOn)
+        val now = Instant.parse("2026-10-10T04:00:00Z")
+        val result = CalendarPrivateItemResponse(
+            id, "a", "如鸢", "私人内容", LocalDate.parse("2026-10-15"), null, "", 0, now, now,
+            reminderOn = "END", reminderDaysBefore = 1,
+        )
+        every { service.create("owner", any()) } returns result
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"reminder_on\":\"END\",\"reminder_days_before\":1}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.reminder_on").value("END"))
+            .andExpect(jsonPath("$.data.reminder_days_before").value(1))
+        verify { service.create("owner", match { it.reminderOn == "END" && it.reminderDaysBefore == 1 && it.reminderOnProvided && it.reminderDaysBeforeProvided }) }
+    }
 }

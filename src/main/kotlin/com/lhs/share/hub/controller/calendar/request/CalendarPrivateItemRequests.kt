@@ -15,12 +15,16 @@ data class CalendarPrivateItemRequest(
     val endDate: LocalDate? = null,
     val timeProvided: Boolean = true,
     val noteProvided: Boolean = true,
+    val reminderOn: String? = null,
+    val reminderDaysBefore: Int = 0,
+    val reminderOnProvided: Boolean = false,
+    val reminderDaysBeforeProvided: Boolean = false,
 )
 
 object CalendarPrivateItemRequestDecoder {
     fun decode(node: JsonNode, update: Boolean): CalendarPrivateItemRequest {
         val required = setOf("account_id", "title") + if (update) setOf("expected_version") else emptySet()
-        val allowed = required + setOf("date", "start_date", "end_date", "time", "note")
+        val allowed = required + setOf("date", "start_date", "end_date", "time", "note", "reminder_on", "reminder_days_before")
         if (!node.isObject || required.any { !node.has(it) } || node.fieldNames().asSequence().any { it !in allowed }) {
             throw calendarInvalid("私人事项请求字段不正确")
         }
@@ -35,6 +39,16 @@ object CalendarPrivateItemRequestDecoder {
             if (!it.isTextual || !it.asText().matches(Regex("([01][0-9]|2[0-3]):[0-5][0-9]"))) throw calendarInvalid("时间须为HH:mm", "time")
             it.asText()
         }
+        val reminderOn = node.get("reminder_on")?.takeUnless { it.isNull }?.let {
+            if (!it.isTextual || it.asText() !in setOf("START", "END")) throw calendarInvalid("提醒日期须为START或END，关闭请用null", "reminder_on")
+            it.asText()
+        }
+        val reminderDaysBefore = node.get("reminder_days_before")?.let {
+            if (!it.isIntegralNumber || !it.canConvertToInt() || it.intValue() !in 0..1) {
+                throw calendarInvalid("仅支持当天或提前一天提醒", "reminder_days_before")
+            }
+            it.intValue()
+        } ?: 0
         val version = if (update) {
             val value = node.get("expected_version")
             if (!value.isIntegralNumber || !value.canConvertToLong()) throw calendarInvalid("expected_version不正确")
@@ -52,6 +66,10 @@ object CalendarPrivateItemRequestDecoder {
             endDate,
             node.has("time"),
             node.has("note"),
+            reminderOn,
+            reminderDaysBefore,
+            node.has("reminder_on"),
+            node.has("reminder_days_before"),
         )
     }
 

@@ -165,9 +165,35 @@ class CalendarPrivateItemServiceTest {
             request().copy(time = "24:00"),
             request().copy(time = "8:30"),
             request().copy(expectedVersion = 0),
+            request().copy(reminderOn = "OTHER"),
+            request().copy(reminderDaysBefore = -1),
+            request().copy(reminderDaysBefore = 2),
         ).forEach { value -> failure(422) { service.create("owner", value) } }
         failure(422) { service.update("owner", id, request()) }
         failure(422) { service.delete("owner", "a", id, -1) }
         verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `reminder settings default off persist and survive legacy updates until explicitly disabled`() {
+        assertNull(service.create("owner", request()).reminderOn)
+        val configured = request().copy(reminderOn = "END", reminderDaysBefore = 1, endDate = day.plusDays(5))
+        val created = service.create("owner", configured)
+        assertEquals("END", created.reminderOn)
+        assertEquals(1, created.reminderDaysBefore)
+        every { repository.find("owner", "a", "如鸢", id) } returns
+            record().copy(reminderOn = "END", reminderDaysBefore = 1)
+        val legacy = service.update("owner", id, request().copy(expectedVersion = 0))
+        assertEquals("END", legacy.reminderOn)
+        assertEquals(1, legacy.reminderDaysBefore)
+        val changed = service.update(
+            "owner", id,
+            configured.copy(reminderOn = "START", reminderDaysBefore = 0, expectedVersion = 0, reminderOnProvided = true, reminderDaysBeforeProvided = true),
+        )
+        assertEquals("START", changed.reminderOn)
+        assertEquals(0, changed.reminderDaysBefore)
+        val disabled = service.update("owner", id, request().copy(expectedVersion = 0, reminderOnProvided = true))
+        assertNull(disabled.reminderOn)
+        assertEquals(1, disabled.reminderDaysBefore)
     }
 }

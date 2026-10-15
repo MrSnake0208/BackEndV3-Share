@@ -17,6 +17,8 @@ data class CalendarPrivateItemResponse(
     val timeZone: String = "Asia/Shanghai",
     val startDate: LocalDate = date,
     val endDate: LocalDate = date,
+    val reminderOn: String? = null,
+    val reminderDaysBefore: Int = 0,
 )
 
 data class CalendarPrivateItemsResponse(val items: List<CalendarPrivateItemResponse>)

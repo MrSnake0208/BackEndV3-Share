@@ -310,6 +310,25 @@ Mongo测试必须使用项目TestMongo管理的自有临时容器，不连接已
 
 ## 私人日历事项 API（2026-10-10）
 
+### 提醒设置（2026-10-15）
+
+POST／PUT 可选新增 `reminder_on: "START" | "END" | null`（开始日／截止日／关闭）、`reminder_days_before: 0 | 1`（仅当天／提前一天并在当天再次提醒）；响应始终返回这两个 snake_case 字段。只接受对应字符串／整数；未知目标、数字字符串、浮点数、布尔、越界天数和显式 `reminder_days_before:null` 返回422。具体时间仍仅代表开始日时刻，提醒按 Asia/Shanghai 日历日触发。
+
+Mongo 对应可空 `reminderOn` 和整数 `reminderDaysBefore`。历史文档缺字段默认 null／0，读取不回写、不自动开启；旧 POST 省略时默认关闭。新前端表单明确提交 START／0 为新事项开启当天提醒。PUT 分别按字段是否出现决定更新，省略任一字段都保留已有值；显式 `reminder_on:null` 关闭，不清除其它私人数据。沿用原版本 CAS、账号归属校验、事务、级联删除和索引，无迁移／新定时任务。
+
+前端用既有 GET 列表查询今天至明天的重叠事项，筛选目标日为今天或开启提前一天的明天；长跨度事项可按结束日触发，不推断完成状态。关闭记忆属于浏览器本地状态，不写入服务端通知集合。**升级顺序：后端→前端**；旧后端严格解码会拒绝新提醒字段，不能先上前端。
+
+新增单元／契约／专属容器 Mongo 用例覆盖提醒字段校验、默认值、持久化、旧客户端更新保留、显式关闭、CAS及他人账号隔离。用户执行：
+
+```bash
+./gradlew test --tests '*CalendarPrivateItemServiceTest' --tests '*CalendarPrivateItemControllerContractTest' --console=plain
+./gradlew integrationTest --tests '*CalendarPrivateItemMongoTest' --console=plain
+```
+
+Mongo 用例只使用 TestMongo 创建的专属临时容器；不得连接现有开发／生产数据库。
+
+### 基础接口
+
 独立集合 `activity_calendar_private_items` 存储随机 `pci_UUID`、服务端定义的 user/account/game、title/date/endDate/time/note、`@Version`、createdAt/updatedAt（毫秒精度）。不写入公共事件/订阅集合，不进入导入、建议审核、公开聚合、RSS或分享URL，无迁移。索引 `(userId, accountId, game, date, _id)` 支持本人账号日期查询，`_id` 自带唯一约束。`date` 继续存开始日，`endDate` 存结束日；旧文档缺失/null时有效结束日等于date，读取不回写。保留原索引，无全量迁移；重叠查询使用owner/game索引前缀和date上界，再过滤endDate，不新增索引（超长历史积累时按实际explain评估）。
 
 所有接口在 `/v1/activity-calendar/private-items` 下，使用既有 snake_case ApiResult、JWT 及全站内测门禁。每次重新验证JWT用户拥有 `account_id`，游戏从账号推导，所有文档查询包含 user/account/game。不存在和非本人记录一致404；非本人账号使用同一 `account_not_found` 响应。管理员不能因此读取其他用户私人事项。

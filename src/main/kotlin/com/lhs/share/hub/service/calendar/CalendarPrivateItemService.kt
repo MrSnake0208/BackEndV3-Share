@@ -51,6 +51,8 @@ class CalendarPrivateItemService(
                     "pci_${UUID.randomUUID()}", userId, owner.accountId, owner.game,
                     request.title.trim(), request.date, request.time, request.note, now, now,
                     endDate = request.endDate ?: request.date,
+                    reminderOn = request.reminderOn,
+                    reminderDaysBefore = request.reminderDaysBefore,
                 ),
             ),
         )
@@ -75,6 +77,8 @@ class CalendarPrivateItemService(
                     endDate = request.endDate ?: request.date,
                     time = if (request.timeProvided) request.time else current.time,
                     note = if (request.noteProvided) request.note else current.note,
+                    reminderOn = if (request.reminderOnProvided) request.reminderOn else current.reminderOn,
+                    reminderDaysBefore = if (request.reminderDaysBeforeProvided) request.reminderDaysBefore else current.reminderDaysBefore,
                     updatedAt = clock.instant().truncatedTo(ChronoUnit.MILLIS),
                 ),
             ),
@@ -103,6 +107,10 @@ class CalendarPrivateItemService(
     }
 
     private fun validate(request: CalendarPrivateItemRequest) {
+        if (request.reminderOn != null && request.reminderOn !in setOf("START", "END")) {
+            throw calendarInvalid("提醒日期须为START或END", "reminder_on")
+        }
+        if (request.reminderDaysBefore !in 0..1) throw calendarInvalid("仅支持当天或提前一天提醒", "reminder_days_before")
         if (request.endDate != null && (request.endDate.year !in 1..9999 || request.endDate < request.date)) {
             throw calendarInvalid("结束日期不能早于开始日期，且须为有效日期", "end_date")
         }
@@ -117,6 +125,8 @@ class CalendarPrivateItemService(
         value.id, value.accountId, value.game, value.title, value.date, value.time, value.note,
         checkNotNull(value.version), value.createdAt, value.updatedAt,
         endDate = value.endDate ?: value.date,
+        reminderOn = value.reminderOn,
+        reminderDaysBefore = value.reminderDaysBefore,
     )
 
     private fun <T : Any> write(action: () -> T): T = try {
