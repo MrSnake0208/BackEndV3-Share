@@ -43,6 +43,15 @@ class FeedbackCategoryService(private val repository: FeedbackCategoryCatalogRep
         return existing to renamed
     }
 
+    fun setHidden(key: String, hidden: Boolean): Pair<FeedbackCategory, FeedbackCategory> {
+        val current = snapshot()
+        val existing = current.categories.find { it.key == key }
+            ?: throw ApiResultException(HttpStatus.NOT_FOUND.value(), "反馈板块不存在: $key")
+        val updated = existing.copy(hidden = hidden)
+        if (updated != existing) save(current.copy(categories = current.categories.map { if (it.key == key) updated else it }))
+        return existing to updated
+    }
+
     private fun snapshot(): FeedbackCategoryCatalog {
         val current = repository.findById("feedback").orElseGet {
             FeedbackCategoryCatalog(categories = FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) })

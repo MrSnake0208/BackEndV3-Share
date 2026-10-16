@@ -6,6 +6,7 @@ data class FeedbackAreaOptionResponse(
     val key: String,
     val label: String,
     val builtinKey: String? = null,
+    val hidden: Boolean = false,
 )
 
 data class FeedbackAssigneeResponse(
@@ -25,6 +26,7 @@ data class CurrentFeedbackAccessResponse(
     val receiveCategories: Set<String> = receiveAreas,
     val manageCategories: Set<String> = manageAreas,
     val availableCategories: List<FeedbackAreaOptionResponse> = availableAreas,
+    val categoryCatalog: List<FeedbackAreaOptionResponse> = availableAreas,
 )
 
 data class FeedbackAccessGrantResponse(

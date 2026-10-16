@@ -27,6 +27,7 @@ class FeedbackAccessController(
     private val helper: AuthenticationHelper,
 ) {
     data class FeedbackCategoryRequest(val label: String)
+    data class FeedbackCategoryVisibilityRequest(val hidden: Boolean)
 
     @GetMapping("/v1/reports/access")
     fun current(): ApiResult<CurrentFeedbackAccessResponse> = success(service.current(helper.requireUserId()))
@@ -41,6 +42,12 @@ class FeedbackAccessController(
     @PutMapping("/v1/admin/feedback-categories/{key}")
     fun renameCategory(@PathVariable key: String, @RequestBody request: FeedbackCategoryRequest): ApiResult<FeedbackAreaOptionResponse> =
         success(service.renameCategory(helper.requireUserId(), key, request.label))
+
+    @PutMapping("/v1/admin/feedback-categories/{key}/visibility")
+    fun setCategoryVisibility(
+        @PathVariable key: String,
+        @RequestBody request: FeedbackCategoryVisibilityRequest,
+    ): ApiResult<FeedbackAreaOptionResponse> = success(service.setCategoryHidden(helper.requireUserId(), key, request.hidden))
 
     @GetMapping("/v1/admin/feedback/{id}/assignees")
     fun assignees(@PathVariable id: String): ApiResult<List<FeedbackAssigneeResponse>> =
