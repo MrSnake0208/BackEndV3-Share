@@ -97,6 +97,8 @@ schedules 是 planId → 日程 PUT 正文，包含各自 expected_revision。�
 
 ## 事件与验证
 
+首页今日历练与独立完成记录使用新增 [每日历练待办 API](operator-daily-tasks.md)。它从已保存日程提取当天历练，显式加入，不修改已有日程或库存。
+
 成功提交后通过现有账号 SSE 发布 `operator_training_workspace`、`operator_stamina_schedule`；组合毕业另发 `operator_annotation`。data 含 account_id/revision 和日程的 plan_id。事件用于触发重新读取，不携带敏感快照；重连仍需要 GET 补齐状态。
 
 单元及 HTTP 契约测试：

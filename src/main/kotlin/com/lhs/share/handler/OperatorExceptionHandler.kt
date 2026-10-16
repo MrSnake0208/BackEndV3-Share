@@ -2,6 +2,7 @@ package com.lhs.share.handler
 
 import com.lhs.share.hub.controller.operator.AdminOperatorCatalogController
 import com.lhs.share.hub.controller.operator.OperatorController
+import com.lhs.share.hub.controller.operator.OperatorDailyTasksController
 import com.lhs.share.hub.controller.operator.OperatorOrganizationController
 import com.lhs.share.hub.controller.operator.OperatorPlannerController
 import com.lhs.share.hub.controller.operator.response.OperatorError
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
     assignableTypes = [
         OperatorController::class,
         OperatorPlannerController::class,
+        OperatorDailyTasksController::class,
         OperatorOrganizationController::class,
         OpenApiOperatorController::class,
         AdminOperatorCatalogController::class,
