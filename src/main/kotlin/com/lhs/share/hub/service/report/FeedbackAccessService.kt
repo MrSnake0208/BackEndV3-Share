@@ -46,7 +46,8 @@ class FeedbackAccessService(
     fun current(userId: String): CurrentFeedbackAccessResponse {
         val superAdmin = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)
         val grant = repository.findById(userId).orElse(null)
-        val availableAreas = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey) }
+        val catalog = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden) }
+        val availableAreas = catalog.filterNot { it.hidden }
         return CurrentFeedbackAccessResponse(
             superAdmin = superAdmin,
             receiveAreas = grant?.receiveAreas.orEmpty(),
@@ -56,6 +57,7 @@ class FeedbackAccessService(
             operatorAreas = authorizationService.operatorAreasFor(userId),
             developerAreas = authorizationService.developerAreasFor(userId),
             availableWorkAreas = availableAreas,
+            categoryCatalog = catalog,
         )
     }
 
@@ -132,7 +134,15 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val (before, renamed) = categories.rename(key, label)
         if (renamed != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_RENAMED, renamed, before)
-        return FeedbackAreaOptionResponse(renamed.key, renamed.label, renamed.builtinKey)
+        return FeedbackAreaOptionResponse(renamed.key, renamed.label, renamed.builtinKey, renamed.hidden)
+    }
+
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun setCategoryHidden(adminUserId: String, key: String, hidden: Boolean): FeedbackAreaOptionResponse {
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val (before, updated) = categories.setHidden(key, hidden)
+        if (updated != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_VISIBILITY_UPDATED, updated, before)
+        return FeedbackAreaOptionResponse(updated.key, updated.label, updated.builtinKey, updated.hidden)
     }
 
     private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {
@@ -141,8 +151,8 @@ class FeedbackAccessService(
                 actorUserId = actor,
                 action = action,
                 targetResource = "feedback_categories/${category.key}",
-                before = before?.let { AdminAuditSnapshot(feedbackCategoryLabel = it.label) },
-                after = AdminAuditSnapshot(feedbackCategoryLabel = category.label),
+                before = before?.let { AdminAuditSnapshot(feedbackCategoryLabel = it.label, feedbackCategoryHidden = it.hidden) },
+                after = AdminAuditSnapshot(feedbackCategoryLabel = category.label, feedbackCategoryHidden = category.hidden),
             ),
         )
     }

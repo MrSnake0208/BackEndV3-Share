@@ -4,7 +4,7 @@ import org.springframework.data.annotation.Id
 import org.springframework.data.annotation.Version
 import org.springframework.data.mongodb.core.mapping.Document
 
-data class FeedbackCategory(val key: String, val label: String, val builtinKey: String? = null)
+data class FeedbackCategory(val key: String, val label: String, val builtinKey: String? = null, val hidden: Boolean = false)
 
 @Document("feedback_category_catalog")
 data class FeedbackCategoryCatalog(

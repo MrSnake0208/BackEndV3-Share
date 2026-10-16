@@ -76,6 +76,35 @@ class FeedbackCategoryServiceTest {
     }
 
     @Test
+    fun `隐藏和恢复保留目录标识名称且重复设置不写库`() {
+        var stored = FeedbackCategoryCatalog(categories = listOf(FeedbackCategory("CUSTOM_CAL", "活动日历")), version = 3)
+        every { repository.findById("feedback") } answers { Optional.of(stored) }
+        every { repository.save(any()) } answers { firstArg<FeedbackCategoryCatalog>().also { stored = it } }
+
+        val hidden = service.setHidden("CUSTOM_CAL", true).second
+        assertTrue(hidden.hidden)
+        assertEquals(FeedbackArea.CALENDAR, hidden.builtinKey)
+        repeat(2) { assertEquals(hidden, service.setHidden("CUSTOM_CAL", true).second) }
+        assertEquals(setOf("CUSTOM_CAL"), service.keys())
+        assertEquals("活动日历", service.label("CUSTOM_CAL"))
+        assertEquals("CUSTOM_CAL", service.requireValid("CUSTOM_CAL"))
+        assertEquals(hidden, FeedbackCategoryService(repository).list().single())
+        assertEquals(hidden, service.rename("CUSTOM_CAL", "新日历名称").first)
+        assertTrue(service.list().single().hidden)
+        assertEquals(false, service.setHidden("CUSTOM_CAL", false).second.hidden)
+        verify(exactly = 3) { repository.save(any()) }
+    }
+
+    @Test
+    fun `未知板块与并发隐藏不会静默写入`() {
+        every { repository.findById("feedback") } returns Optional.empty()
+        assertEquals(404, assertThrows(ApiResultException::class.java) { service.setHidden("MISSING", true) }.statusCode)
+        verify(exactly = 0) { repository.save(any()) }
+        every { repository.save(any()) } throws OptimisticLockingFailureException("stale")
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.setHidden(FeedbackArea.CALENDAR, true) }.statusCode)
+    }
+
+    @Test
     fun `并发修改返回冲突而非覆盖`() {
         every { repository.findById("feedback") } returns Optional.empty()
         every { repository.save(any()) } throws OptimisticLockingFailureException("stale")

@@ -4,6 +4,7 @@ import com.lhs.share.hub.repository.FeedbackCategoryCatalogRepository
 import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackCategoryCatalog
 import com.lhs.share.testinfra.TestMongo
+import org.bson.Document
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -19,13 +20,33 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 class FeedbackCategoryMongoTest {
     private val database = TestMongo.database("feedbackcat")
     private val client = TestMongo.client()
-    private val repository = MongoRepositoryFactory(MongoTemplate(SimpleMongoClientDatabaseFactory(client, database)))
+    private val template = MongoTemplate(SimpleMongoClientDatabaseFactory(client, database))
+    private val repository = MongoRepositoryFactory(template)
         .getRepository(FeedbackCategoryCatalogRepository::class.java)
 
     @AfterEach
     fun cleanup() {
         TestMongo.dropDatabase(client, database)
         client.close()
+    }
+
+    @Test
+    fun `旧目录默认显示且隐藏状态重载可恢复并受版本冲突保护`() {
+        val category = FeedbackCategory("CUSTOM_TEST", "历史板块")
+        template.getCollection("feedback_category_catalog").insertOne(
+            Document("_id", "feedback")
+                .append("categories", listOf(Document("key", category.key).append("label", category.label)))
+                .append("version", 0L),
+        )
+        val stale = repository.findById("feedback").orElseThrow()
+        assertEquals(category, stale.categories.single())
+        val service = FeedbackCategoryService(repository)
+        service.setHidden(category.key, true)
+        assertEquals(category.copy(hidden = true), FeedbackCategoryService(repository).list().first { it.key == category.key })
+        assertEquals(category.label, service.label(category.key))
+        assertThrows(OptimisticLockingFailureException::class.java) { repository.save(stale) }
+        service.setHidden(category.key, false)
+        assertEquals(category, FeedbackCategoryService(repository).list().first { it.key == category.key })
     }
 
     @Test

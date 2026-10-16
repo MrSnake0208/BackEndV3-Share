@@ -83,6 +83,55 @@ class FeedbackAccessServiceTest {
     }
 
     @Test
+    fun `隐藏目录只影响可选项不移除既有授权或历史目录`() {
+        val hidden = FeedbackCategory("CUSTOM_HIDDEN", "历史板块", hidden = true)
+        every { categories.list() } returns listOf(hidden)
+        every { authorizationService.hasRole("user", AdminRole.SUPER_ADMIN) } returns false
+        every { repository.findById("user") } returns Optional.of(FeedbackAccessGrant(userId = "user", receiveAreas = setOf(hidden.key), updatedBy = "root"))
+        every { authorizationService.manageableAreasFor("user") } returns setOf(hidden.key)
+        every { authorizationService.feedbackRolesFor("user") } returns setOf("OPERATOR")
+        every { authorizationService.operatorAreasFor("user") } returns setOf(hidden.key)
+        every { authorizationService.developerAreasFor("user") } returns emptySet()
+
+        val current = service.current("user")
+        assertTrue(current.availableCategories.isEmpty())
+        assertTrue(current.availableAreas.isEmpty())
+        assertTrue(current.availableWorkAreas.isEmpty())
+        assertEquals(hidden.key, current.categoryCatalog.single().key)
+        assertTrue(current.categoryCatalog.single().hidden)
+        assertEquals(setOf(hidden.key), current.operatorAreas)
+        assertEquals(setOf(hidden.key), current.receiveAreas)
+        assertEquals(setOf(hidden.key), current.manageAreas)
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `隐藏和恢复沿用板块管理权限并审计前后状态`() {
+        every { authorizationService.requirePermission("manager", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } throws
+            ApiResultException(403, "权限不足")
+        assertEquals(403, assertThrows(ApiResultException::class.java) { service.setCategoryHidden("manager", "STAR", true) }.statusCode)
+        verify(exactly = 0) { categories.setHidden(any(), any()) }
+        every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
+        for (hidden in listOf(true, false)) {
+            val before = FeedbackCategory("STAR", "星石", hidden = !hidden)
+            val after = before.copy(hidden = hidden)
+            every { categories.setHidden("STAR", hidden) } returns (before to after)
+            assertEquals(hidden, service.setCategoryHidden("root", "STAR", hidden).hidden)
+            verify {
+                auditService.record(match<AdminAuditLog> {
+                    it.action == AdminAuditAction.FEEDBACK_CATEGORY_VISIBILITY_UPDATED &&
+                        it.before?.feedbackCategoryHidden == !hidden && it.after?.feedbackCategoryHidden == hidden
+                })
+            }
+        }
+        val unchanged = FeedbackCategory("STAR", "星石")
+        every { categories.setHidden("STAR", false) } returns (unchanged to unchanged)
+        service.setCategoryHidden("root", "STAR", false)
+        verify(exactly = 2) { auditService.record(any()) }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
     fun `日历工单仅日历运营可接单程序仅在交接后可看且不能控制`() {
         val ticket = FeedbackTicket(id = "rpt_cal", type = "EXPERIENCE", category = "CALENDAR", reporterUserId = "reporter", content = "测试")
         every { authorizationService.operatorAreasFor("operator") } returns setOf(FeedbackArea.CALENDAR)
