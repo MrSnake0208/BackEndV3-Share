@@ -139,9 +139,12 @@ class FeedbackPublicService(
 
     // ========== 内部方法 ==========
 
+    private fun isPublicTicket(ticket: FeedbackTicket): Boolean =
+        FeedbackVisibility.isPublic(ticket.visibility) && !FeedbackType.isReport(ticket.type, ticket.category)
+
     private fun requirePublicTicket(ticketId: String): FeedbackTicket {
         val ticket = ticketRepository.findById(ticketId).orElse(null)
-        if (ticket == null || !FeedbackVisibility.isPublic(ticket.visibility)) {
+        if (ticket == null || !isPublicTicket(ticket)) {
             // 不区分"不存在"和"私有",避免通过公开接口探测 PRIVATE 反馈。
             throw ApiResultException(HttpStatus.NOT_FOUND.value(), "反馈不存在")
         }
@@ -151,7 +154,7 @@ class FeedbackPublicService(
     private fun requirePublicMain(ticketId: String): FeedbackTicket {
         val ticket = requirePublicTicket(ticketId)
         val main = resolveMain(ticket)
-        if (main == null || !FeedbackVisibility.isPublic(main.visibility)) {
+        if (main == null || !isPublicTicket(main)) {
             throw ApiResultException(HttpStatus.NOT_FOUND.value(), "反馈不存在")
         }
         return main
@@ -200,7 +203,7 @@ class FeedbackPublicService(
     private fun toDetail(ticket: FeedbackTicket, currentUserId: String?): PublicFeedbackDetail {
         val mergedInto = ticket.mergedIntoId?.let { targetId ->
             val target = ticketRepository.findById(targetId).orElse(null)
-            if (target == null || !FeedbackVisibility.isPublic(target.visibility)) {
+            if (target == null || !isPublicTicket(target)) {
                 null
             } else {
                 PublicFeedbackDetail.MergedInto(id = checkNotNull(target.id), publicTitle = target.publicTitle)
