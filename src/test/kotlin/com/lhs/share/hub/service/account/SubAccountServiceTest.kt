@@ -10,6 +10,7 @@ import com.lhs.share.hub.repository.InventoryRevisionRepository
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
+import com.lhs.share.hub.repository.OperatorDailyTasksRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
@@ -67,6 +68,7 @@ class SubAccountServiceTest {
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
     private val organizationRepository = mockk<OperatorOrganizationRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
+    private val dailyTasksRepository = mockk<OperatorDailyTasksRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
     private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
     private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
@@ -119,6 +121,7 @@ class SubAccountServiceTest {
         calendarPrivateItems = calendarPrivateItems,
         starCompletionRepository = completionRepository,
         operatorOrganizationRepository = organizationRepository,
+        operatorDailyTasksRepository = dailyTasksRepository,
     )
 
     @Test
@@ -264,6 +267,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { trainingWorkspaceRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { organizationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { staminaScheduleRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { dailyTasksRepository.deleteAccount("u1", "main") }
         verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starStateRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starRecoveryRepository.deleteAllByUserIdAndAccountId("u1", "main") }
