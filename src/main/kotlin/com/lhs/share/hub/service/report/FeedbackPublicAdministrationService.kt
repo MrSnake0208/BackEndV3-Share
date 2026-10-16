@@ -42,6 +42,9 @@ class FeedbackPublicAdministrationService(
         val ticket = requireTicket(ticketId)
         requireManage(adminUserId, ticket)
         requireIndependent(ticket)
+        if (FeedbackType.isReport(ticket.type, ticket.category)) {
+            throw ApiResultException(403, "举报工单不能发布到反馈广场")
+        }
         if (!ticket.publicConsent) {
             throw ApiResultException(403, "用户未授权发布到反馈广场")
         }
@@ -127,6 +130,9 @@ class FeedbackPublicAdministrationService(
         if (FeedbackVisibility.isPublic(source.visibility) && !FeedbackVisibility.isPublic(target.visibility)) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "公开反馈不能合并到未公开反馈")
         }
+        if (FeedbackType.isReport(source.type, source.category) != FeedbackType.isReport(target.type, target.category)) {
+            throw ApiResultException(403, "举报与普通工单不能相互合并")
+        }
         val updated = queryRepository.setMergedInto(sourceId, targetId)
             ?: throw ApiResultException(HttpStatus.CONFLICT.value(), "来源已变化，请刷新后重试")
         queryRepository.incrementMergedCount(targetId)
@@ -142,6 +148,11 @@ class FeedbackPublicAdministrationService(
         requireManage(adminUserId, ticket)
         requireIndependent(ticket)
         val type = request.type.trim().uppercase()
+        if (FeedbackType.isReport(ticket.type, ticket.category) ||
+            (type == FeedbackType.REPORT && FeedbackVisibility.isPublic(ticket.visibility))
+        ) {
+            throw ApiResultException(403, "不能通过修改类型改变举报工单的隐私边界")
+        }
         if (type !in FeedbackType.all) {
             throw ApiResultException(
                 HttpStatus.BAD_REQUEST.value(),
@@ -220,7 +231,7 @@ class FeedbackPublicAdministrationService(
 
     /** 合并后若源提交人尚未支持主反馈,补一次支持;同一用户不重复计票。 */
     private fun autoSupport(root: FeedbackTicket, reporterUserId: String) {
-        if (!FeedbackVisibility.isPublic(root.visibility)) return
+        if (!FeedbackVisibility.isPublic(root.visibility) || FeedbackType.isReport(root.type, root.category)) return
         val rootId = checkNotNull(root.id)
         if (supportRepository.existsByFeedbackIdAndUserId(rootId, reporterUserId)) return
         try {

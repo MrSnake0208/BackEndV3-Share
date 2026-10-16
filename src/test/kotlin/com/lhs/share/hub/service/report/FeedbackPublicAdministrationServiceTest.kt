@@ -103,6 +103,77 @@ class FeedbackPublicAdministrationServiceTest {
     }
 
     @Test
+    fun `举报即使授权也不能公开或改类且不会写库`() {
+        allowManage()
+        for (report in listOf(
+            ticket("report").copy(type = FeedbackType.REPORT, publicConsent = true),
+            ticket("report").copy(type = FeedbackType.LEGACY_FEEDBACK, category = "REPORT", publicConsent = true),
+        )) {
+            every { ticketRepository.findById("report") } returns Optional.of(report)
+            assertEquals(
+                403,
+                assertThrows(ApiResultException::class.java) {
+                    service.publish("admin", "report", FeedbackPublishRequest(publicTitle = "标题"))
+                }.statusCode,
+            )
+            assertEquals(
+                403,
+                assertThrows(ApiResultException::class.java) {
+                    service.updateType("admin", "report", FeedbackTypeUpdateRequest("OTHER"))
+                }.statusCode,
+            )
+        }
+        verify(exactly = 0) { queryRepository.setPublicInfo(any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { queryRepository.setType(any(), any()) }
+    }
+
+    @Test
+    fun `举报与普通工单双向合并均不能绕过公开或关注限制`() {
+        allowManage()
+        for ((sourceType, targetType) in listOf("REPORT" to "OTHER", "OTHER" to "REPORT")) {
+            every { ticketRepository.findById("source") } returns Optional.of(ticket("source").copy(type = sourceType))
+            every { ticketRepository.findById("target") } returns Optional.of(
+                ticket("target", visibility = FeedbackVisibility.PUBLIC).copy(type = targetType),
+            )
+            assertEquals(
+                403,
+                assertThrows(ApiResultException::class.java) {
+                    service.merge("admin", "source", FeedbackMergeRequest("target"))
+                }.statusCode,
+            )
+        }
+        verify(exactly = 0) { queryRepository.setMergedInto(any(), any()) }
+        verify(exactly = 0) { supportRepository.save(any()) }
+    }
+
+    @Test
+    fun `举报之间仍可内部合并但不自动关注历史误公开目标`() {
+        allowManage()
+        val source = ticket("source").copy(type = "REPORT")
+        val target = ticket("target", visibility = FeedbackVisibility.PUBLIC).copy(type = "REPORT")
+        every { ticketRepository.findById("source") } returns Optional.of(source)
+        every { ticketRepository.findById("target") } returns Optional.of(target)
+        every { queryRepository.setMergedInto("source", "target") } returns source.copy(mergedIntoId = "target")
+        every { queryRepository.incrementMergedCount("target") } returns target.copy(mergedCount = 1)
+        assertEquals("target", service.merge("admin", "source", FeedbackMergeRequest("target")).mergedIntoId)
+        verify(exactly = 0) { supportRepository.save(any()) }
+        verify(exactly = 0) { queryRepository.incrementSupportCount(any()) }
+    }
+
+    @Test
+    fun `已公开普通工单不能通过改类变成公开举报`() {
+        allowManage()
+        every { ticketRepository.findById("public") } returns Optional.of(ticket("public", visibility = FeedbackVisibility.PUBLIC))
+        assertEquals(
+            403,
+            assertThrows(ApiResultException::class.java) {
+                service.updateType("admin", "public", FeedbackTypeUpdateRequest("REPORT"))
+            }.statusCode,
+        )
+        verify(exactly = 0) { queryRepository.setType(any(), any()) }
+    }
+
+    @Test
     fun `非管理员发布返回 403`() {
         every { ticketRepository.findById("rpt_1") } returns Optional.of(ticket("rpt_1").copy(publicConsent = true))
         every { accessService.canManage(any(), any()) } returns false

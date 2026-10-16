@@ -55,6 +55,27 @@ class FeedbackReportControllerContractTest {
     }
 
     @Test
+    fun `ordinary OTHER feedback accepts content and custom board without title or consent`() {
+        every { reportService.create("u1", any()) } answers { response().copy(type = secondArg<FeedbackReportCreateRequest>().type) }
+        mockMvc.perform(
+            post("/v1/reports").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"type":"OTHER","category":"CUSTOM_TEST","content":"普通反馈"}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.type").value("OTHER"))
+        verify {
+            reportService.create(
+                "u1",
+                match {
+                    it.type == "OTHER" && it.category == "CUSTOM_TEST" && it.title == null &&
+                        !it.publicConsent &&
+                        !it.clientInfoConsent
+                },
+            )
+        }
+    }
+
+    @Test
     fun `public_consent snake case binds independently and missing consent defaults to false`() {
         every { reportService.create("u1", any()) } answers {
             response().copy(publicConsent = secondArg<FeedbackReportCreateRequest>().publicConsent)

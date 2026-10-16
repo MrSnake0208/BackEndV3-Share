@@ -145,6 +145,7 @@ class FeedbackTicketQueryRepository(
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>(
             Criteria.where("visibility").`is`(FeedbackVisibility.PUBLIC),
+            nonReportCriteria(),
             Criteria.where("mergedIntoId").`is`(null),
         )
         type?.let { filters += typeCriteria(it) }
@@ -182,6 +183,7 @@ class FeedbackTicketQueryRepository(
         }
         val criteria = Criteria().andOperator(
             Criteria.where("visibility").`is`(FeedbackVisibility.PUBLIC),
+            nonReportCriteria(),
             Criteria.where("mergedIntoId").`is`(null),
             Criteria().orOperator(*tokenCriteria.toTypedArray()),
         )
@@ -221,7 +223,12 @@ class FeedbackTicketQueryRepository(
         publicUpdatedAt: Instant,
         completedAt: Instant? = null,
     ): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
+        Query(
+            Criteria().andOperator(
+                Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null),
+                if (visibility == FeedbackVisibility.PUBLIC) nonReportCriteria() else Criteria(),
+            ),
+        ),
         Update()
             .set("visibility", visibility)
             .set("publicTitle", publicTitle)
@@ -263,7 +270,13 @@ class FeedbackTicketQueryRepository(
 
     /** 定向修改反馈类型。 */
     fun setType(ticketId: String, type: String): FeedbackTicket? = template.findAndModify(
-        Query(Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null)),
+        Query(
+            Criteria().andOperator(
+                Criteria.where("_id").`is`(ticketId).and("mergedIntoId").`is`(null),
+                nonReportCriteria(),
+                if (type == FeedbackType.REPORT) Criteria.where("visibility").ne(FeedbackVisibility.PUBLIC) else Criteria(),
+            ),
+        ),
         Update().set("type", type),
         FindAndModifyOptions.options().returnNew(true),
         FeedbackTicket::class.java,
@@ -323,6 +336,15 @@ class FeedbackTicketQueryRepository(
             Criteria().andOperator(Criteria.where("workArea").`is`(null), categorySetCriteria(areas.intersect(knownAreas), knownAreas)),
         )
     }
+
+    /** 查询层排除举报，避免列表总数、相似召回和版本反查泄露历史误公开数据。 */
+    private fun nonReportCriteria(): Criteria = Criteria().norOperator(
+        Criteria.where("type").regex("^\\s*REPORT\\s*$", "i"),
+        Criteria().andOperator(
+            Criteria.where("type").regex("^\\s*FEEDBACK\\s*$", "i"),
+            Criteria.where("category").regex("^\\s*REPORT\\s*$", "i"),
+        ),
+    )
 
     private fun typeCriteria(type: String): Criteria {
         if (type == FeedbackType.LEGACY_FEEDBACK) {

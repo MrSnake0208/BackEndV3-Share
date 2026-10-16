@@ -12,4 +12,8 @@ object FeedbackType {
     const val LEGACY_FEEDBACK = "FEEDBACK"
 
     val all = linkedSetOf(BUG, EXPERIENCE, FEATURE, CONTENT, ACCOUNT, REPORT, OTHER)
+
+    /** 举报身份在旧 FEEDBACK/category 记录中同样有效。 */
+    fun isReport(type: String, category: String?): Boolean = type.trim().equals(REPORT, ignoreCase = true) ||
+        (type.trim().equals(LEGACY_FEEDBACK, ignoreCase = true) && category?.trim().equals(REPORT, ignoreCase = true))
 }

@@ -58,6 +58,30 @@ class FeedbackPublicServiceTest {
     )
 
     @Test
+    fun `历史误公开举报在详情和关注接口一律为不存在`() {
+        for (report in listOf(
+            ticket("report", type = "REPORT"),
+            ticket("report", type = " feedback ").copy(category = " report "),
+        )) {
+            every { ticketRepository.findById("report") } returns Optional.of(report)
+            assertEquals(404, assertThrows(ApiResultException::class.java) { service.getById(null, "report") }.statusCode)
+            assertEquals(404, assertThrows(ApiResultException::class.java) { service.support("user", "report") }.statusCode)
+            assertEquals(404, assertThrows(ApiResultException::class.java) { service.unsupport("user", "report") }.statusCode)
+        }
+        verify(exactly = 0) { supportRepository.save(any()) }
+        verify(exactly = 0) { supportRepository.deleteByFeedbackIdAndUserId(any(), any()) }
+    }
+
+    @Test
+    fun `合并跳转不会公开举报目标`() {
+        every { ticketRepository.findById("source") } returns Optional.of(ticket("source", mergedIntoId = "report"))
+        every { ticketRepository.findById("report") } returns Optional.of(ticket("report", type = "REPORT"))
+        assertEquals(null, service.getById(null, "source").mergedInto)
+        assertEquals(404, assertThrows(ApiResultException::class.java) { service.support("user", "source") }.statusCode)
+        verify(exactly = 0) { supportRepository.save(any()) }
+    }
+
+    @Test
     fun `匿名公开日历反馈仅显示目录板块和公开内容且每批只读一次目录`() {
         val publicTicket = ticket(
             "rpt_cal",
