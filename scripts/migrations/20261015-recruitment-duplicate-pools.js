@@ -348,10 +348,86 @@ async function reconcileDeletions(database, accountId, { apply = false, expected
   });
 }
 
+async function reconcileRemainders(database, plan, { apply = false, expectedRevision } = {}) {
+  const { accountId, game, corrections } = plan;
+  assert.match(accountId, /^acc_[a-zA-Z0-9_-]+$/);
+  assert.equal(corrections.length, 9, "仅处理已核对的九个批次");
+  assert.equal(new Set(corrections.map((item) => item.batchId)).size, 9);
+  assert(corrections.every((item) => Number.isSafeInteger(item.deduction) && item.deduction > 0 && item.importBatchId));
+  assert.equal(sum(corrections.map((item) => item.deduction)), 49, "仅扣除原导入已核对的49抽差额");
+  if (apply) assert(Number.isSafeInteger(expectedRevision) && expectedRevision >= 0, "正式修正必须提供预演版本");
+  return transaction(database, async (tx) => {
+    const repairId = `batch-remainders:${accountId}:${expectedRevision}`;
+    if (apply) {
+      const previous = await tx.getCollection(AUDIT).findOne({ _id: repairId });
+      if (previous) {
+        assert.deepEqual(previous.plan, plan, "同修复编号的核对计划不同");
+        assert(!previous.rolledBackAt, "已回滚的计划不能重新执行");
+        return { status: "already_applied", repairId };
+      }
+    }
+    const before = await readStored(tx, { accountId });
+    assert(before.events.length <= 20_000 && before.batches.length <= 20_000);
+    const revision = Number(before.archive.archiveRevision);
+    assert(Number.isSafeInteger(revision) && revision >= 0);
+    if (apply) assert.equal(revision, expectedRevision, "档案已变化，请重新预演");
+    const owner = { userId: before.archive.userId, accountId };
+    const account = await tx.getCollection("sub_accounts").findOne(owner);
+    assert(account && account.game === game && before.archive.gameSnapshot === game, "账号游戏或所有者不符");
+    const liveBatches = before.batches.filter((batch) => batch.deletedAt == null);
+    const standalone = before.events.filter((event) => event.deletedAt == null && event.batchId == null);
+    const poolTotal = (poolId) => sum(liveBatches.filter((batch) => batch.poolId === poolId).map((batch) => batch.totalPullCount))
+      + sum(standalone.filter((event) => event.poolId === poolId).map((event) => event.pullSpan))
+      + Number(before.archive.pools.find((pool) => pool.poolId === poolId)?.progress ?? 0);
+    const changes = corrections.map((item) => {
+      const batches = liveBatches.filter((batch) => batch.batchId === item.batchId);
+      assert.equal(batches.length, 1, `目标批次缺失或已删除：${item.batchId}`);
+      const batch = batches[0];
+      assert.equal(batch.poolId, item.poolId);
+      assert.equal(batch.importBatchId, item.importBatchId, "目标导入来源已变化");
+      assert(before.archive.pools.some((pool) => pool.poolId === item.poolId));
+      const events = before.events.filter((event) => event.batchId === item.batchId);
+      assert(events.every((event) => event.poolId === item.poolId), "批次记录所属池不一致");
+      assert(!events.some((event) => event.deletedAt != null && Number(event.deletedRevision) > 0
+        && event.batchCountDeducted !== true && Number(event.pullSpan) > 0), "请先完成旧删除记录补扣，再修正导入余量");
+      const live = events.filter((event) => event.deletedAt == null);
+      assert(live.every((event) => Number.isSafeInteger(Number(event.pullSpan)) && Number(event.pullSpan) > 0), "包含未知跨度，停止修正");
+      const remaining = sum(live.map((event) => event.pullSpan));
+      const previous = Number(batch.totalPullCount);
+      assert(Number.isSafeInteger(previous));
+      const deduction = previous - remaining;
+      assert(deduction === item.deduction || deduction === 0, `批次 ${item.batchId} 差额已变化，请核对新备份`);
+      return { ...item, deduction, previous, remaining, poolKnownBefore: poolTotal(item.poolId), poolKnownAfter: poolTotal(item.poolId) - deduction };
+    });
+    const deduction = sum(changes.map((item) => item.deduction));
+    assert(deduction === 49 || deduction === 0, "部分批次已变化，停止整包修正，请核对新备份");
+    const total = Number(before.archive.baseline ?? 0) + sum(before.archive.pools.map((pool) => pool.progress))
+      + sum(standalone.map((event) => event.pullSpan)) + sum(liveBatches.map((batch) => batch.totalPullCount));
+    const report = { status: deduction === 0 ? "no_changes" : apply ? "applied" : "dry_run", repairId, accountId, archiveRevision: revision,
+      afterRevision: revision + (deduction > 0 ? 1 : 0), knownTotalBefore: total, knownTotalAfter: total - deduction, deduction, corrections: changes };
+    if (!apply || deduction === 0) return report;
+    await fence(tx, owner, game);
+    assert(Buffer.byteLength(JSON.stringify(before), "utf8") < 8 * 1024 * 1024, "原始档案过大，停止修正");
+    const now = new Date();
+    await tx.getCollection(AUDIT).insertOne({ _id: repairId, ...owner, plan, before, afterRevision: revision + 1, appliedAt: now, report });
+    for (const item of changes) {
+      const result = await tx.getCollection("recruitment_batches").updateOne({ ...owner, batchId: item.batchId, deletedAt: null }, {
+        $set: { totalPullCount: item.remaining },
+      });
+      assert.equal(result.matchedCount, 1);
+    }
+    const result = await tx.getCollection("recruitment_archives").updateOne({ ...owner, archiveRevision: revision }, {
+      $set: { archiveRevision: revision + 1, updatedAt: now },
+    });
+    assert.equal(result.matchedCount, 1);
+    return report;
+  });
+}
+
 function readSource(filename) {
   const content = fs.readFileSync(filename, "utf8");
   assert(Buffer.byteLength(content, "utf8") <= 5 * 1024 * 1024, "源备份超过 5 MiB");
   return JSON.parse(content);
 }
 
-module.exports = { AUDIT, summary, buildPlan, transform, assertMatches, repair, rollback, reconcileDeletions, readSource };
+module.exports = { AUDIT, summary, buildPlan, transform, assertMatches, repair, rollback, reconcileDeletions, reconcileRemainders, readSource };
