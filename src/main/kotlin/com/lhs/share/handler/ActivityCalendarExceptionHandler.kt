@@ -9,6 +9,8 @@ import com.lhs.share.hub.controller.calendar.CalendarPrivateItemController
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarError
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarErrorResponse
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
+import com.lhs.share.hub.service.inventory.InventoryApiException
+import com.lhs.share.openapi.OpenApiCalendarController
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
@@ -27,11 +29,16 @@ import org.springframework.web.server.ResponseStatusException
         ActivityCalendarSubscriptionController::class,
         CalendarPrivateItemController::class,
         ActivityCalendarSuggestionController::class, AdminActivityCalendarSuggestionController::class,
+        OpenApiCalendarController::class,
     ],
 )
 class ActivityCalendarExceptionHandler {
     @ExceptionHandler(ActivityCalendarApiException::class)
     fun api(error: ActivityCalendarApiException) = response(error.status, error.code, error.message)
+
+    /** OpenAPI token 鉴权失败:缺失/无效 401,scope 不足 403。 */
+    @ExceptionHandler(InventoryApiException::class)
+    fun token(error: InventoryApiException) = response(error.status, error.code, error.message)
 
     @ExceptionHandler(
         HttpMessageNotReadableException::class,

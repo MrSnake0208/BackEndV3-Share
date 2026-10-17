@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.http.HttpStatus
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
@@ -243,6 +244,20 @@ class ActivityCalendarSubscriptionServiceTest {
             repository.save(any())
             accounts.fenceRecruitmentWrite(any(), any(), any())
         }
+    }
+
+    @Test
+    fun `widget window bound accepts exactly 180 days and rejects 181 with 422`() {
+        every { repository.list("user", "account") } returns listOf(record())
+
+        // 同一个 101 天窗口在缺省 maxWindowDays = 100 下会被拒(见上一个用例),180 天上限必须放行。
+        assertEquals(1, service.list("user", "account", day, day.plusDays(101), null, 180L).subscribedCount)
+        assertEquals(1, service.list("user", "account", day, day.plusDays(180), null, 180L).subscribedCount)
+
+        val rejected = assertThrows(ActivityCalendarApiException::class.java) {
+            service.list("user", "account", day, day.plusDays(181), null, 180L)
+        }
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, rejected.status)
     }
 
     @Test

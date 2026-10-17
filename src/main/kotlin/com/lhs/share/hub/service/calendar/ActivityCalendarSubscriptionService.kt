@@ -37,11 +37,23 @@ class ActivityCalendarSubscriptionService(
     private val zone = ZoneId.of("Asia/Shanghai")
     private fun today(): LocalDate = LocalDate.ofInstant(clock.instant(), zone)
 
-    fun list(userId: String, accountId: String, from: LocalDate?, to: LocalDate?, category: String?): CalendarSubscriptionsResponse {
+    /**
+     * [maxWindowDays] 是端点级窗口上限:网页端沿用 100 天,小组件 OpenAPI 端点放宽到 180 天。
+     */
+    fun list(
+        userId: String,
+        accountId: String,
+        from: LocalDate?,
+        to: LocalDate?,
+        category: String?,
+        maxWindowDays: Long = 100,
+    ): CalendarSubscriptionsResponse {
         val account = account(userId, accountId)
         val start = from ?: today()
         val end = to ?: start.plusDays(90)
-        if (end < start || ChronoUnit.DAYS.between(start, end) > 100) throw calendarInvalid("日期范围须在100天以内")
+        if (end < start || ChronoUnit.DAYS.between(start, end) > maxWindowDays) {
+            throw calendarInvalid("日期范围须在${maxWindowDays}天以内")
+        }
         val selected = category?.let { value ->
             ActivityCalendarCategory.entries.find { it.name == value } ?: throw calendarInvalid("不支持的活动类别")
         }

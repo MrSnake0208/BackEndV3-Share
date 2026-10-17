@@ -15,6 +15,8 @@ import com.lhs.share.hub.controller.operator.response.OperatorImportResult
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportCommitResponse
 import com.lhs.share.hub.controller.operator.response.OperatorV3ImportPreviewResponse
 import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.hub.service.operator.OperatorDailyTasksService
+import com.lhs.share.hub.service.operator.OperatorPlannerService
 import com.lhs.share.hub.service.operator.OperatorService
 import com.lhs.share.hub.service.operator.OperatorSubjectiveService
 import com.lhs.share.hub.service.operator.OperatorV3ImportService
@@ -25,7 +27,9 @@ import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import jakarta.validation.Valid
+import org.springframework.http.CacheControl
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -33,6 +37,9 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.Clock
+import java.time.LocalDate
+import java.time.ZoneId
 import io.swagger.v3.oas.annotations.parameters.RequestBody as SwaggerRequestBody
 
 @RestController
@@ -43,6 +50,9 @@ class OpenApiOperatorController(
     private val accountService: SubAccountService,
     private val v3ImportService: OperatorV3ImportService? = null,
     private val subjectiveService: OperatorSubjectiveService? = null,
+    private val plannerService: OperatorPlannerService? = null,
+    private val dailyTasksService: OperatorDailyTasksService? = null,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     @GetMapping("/account")
     fun account(@RequestHeader(value = "Authorization", required = false) authorization: String?): ApiResult<SubAccountResponse> {
@@ -146,5 +156,57 @@ class OpenApiOperatorController(
         )
         val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_EXPORT)
         return service.export(principal.userId, principal.accountId, null)
+    }
+
+    @Operation(
+        summary = "读取今日密探历练待办",
+        description = "需要 operator:read；账号由 Token 绑定，忽略客户端传入的 account_id/plan_id；无可用方案时返回空 tasks 与 no_schedule。",
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(responseCode = "200", content = [Content(schema = Schema(implementation = OpenApiDailyTasksResponse::class))]),
+            ApiResponse(responseCode = "401", content = [Content(schema = Schema(implementation = OperatorErrorResponse::class))]),
+            ApiResponse(responseCode = "403", content = [Content(schema = Schema(implementation = OperatorErrorResponse::class))]),
+            ApiResponse(responseCode = "422", content = [Content(schema = Schema(implementation = OperatorErrorResponse::class))]),
+        ],
+    )
+    @RequireOpenApiToken
+    @GetMapping("/daily-tasks")
+    fun dailyTasks(
+        @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false) authorization: String?,
+        @RequestParam(required = false) date: String?,
+    ): ResponseEntity<ApiResult<OpenApiDailyTasksResponse>> {
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_READ)
+        val day = date?.takeIf { it.isNotBlank() } ?: LocalDate.now(clock.withZone(ZoneId.of("Asia/Shanghai"))).toString()
+        val workspace = requireNotNull(plannerService).workspace(principal.userId, principal.accountId)
+        val plans = workspace.path("plans")
+        val active = workspace.path("active_plan_id").takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+        val plan = active?.let { id -> plans.firstOrNull { it.path("id").asText() == id } } ?: plans.firstOrNull()
+        val body = if (plan == null) {
+            OpenApiDailyTasksResponse(
+                accountId = principal.accountId,
+                planId = null,
+                planName = null,
+                date = day,
+                version = 0,
+                needsUpdate = false,
+                sourceStatus = "no_schedule",
+                tasks = emptyList(),
+            )
+        } else {
+            val planId = plan.path("id").asText()
+            val daily = requireNotNull(dailyTasksService).get(principal.userId, principal.accountId, planId, day)
+            OpenApiDailyTasksResponse(
+                accountId = principal.accountId,
+                planId = planId,
+                planName = plan.path("name").takeIf { it.isTextual }?.asText(),
+                date = day,
+                version = daily.version,
+                needsUpdate = daily.needsUpdate,
+                sourceStatus = daily.source.status,
+                tasks = daily.tasks.map { OpenApiDailyTask.of(it) },
+            )
+        }
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(success(body))
     }
 }
