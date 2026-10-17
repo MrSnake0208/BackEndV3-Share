@@ -82,7 +82,7 @@ class OpenApiOperatorController(
     }
 
     @Operation(
-        summary = "预览自动采集密探 v3 文档",
+        summary = "预览自动采集密探 v3/v4/v5 文档",
         description = "需要 operator:scan:write；只允许单来源 operator_snapshot、source_kind=scan、snapshot_scope=listed。来源账号始终映射到 token 绑定账号。",
     )
     @ApiResponses(
@@ -110,7 +110,7 @@ class OpenApiOperatorController(
     }
 
     @Operation(
-        summary = "提交自动采集密探 v3 文档",
+        summary = "提交自动采集密探 v3/v4/v5 文档",
         description = "与浏览器导入共用 Schema、preview、commit 和 current merge；不扣库存，不接受 annotation/full/manual。",
     )
     @ApiResponses(
@@ -142,7 +142,7 @@ class OpenApiOperatorController(
     ): OperatorExportResponse {
         response?.setHeader(
             "X-Operator-Exchange-Warning",
-            "v2 cannot encode independent stage and awakened (including unknown); use operator v4",
+            "v2 cannot encode independent huaji or level breakthrough (including unknown); use operator v5",
         )
         val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_EXPORT)
         return service.export(principal.userId, principal.accountId, null)

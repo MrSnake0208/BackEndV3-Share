@@ -1,5 +1,6 @@
 # 当前养成主观数据与快捷提升 API
 
+等级突破、采集快照与当前推荐完整备份见[operator v5](./operator-level-breakthrough-v5.md)；旧版本继续兼容。
 私人置顶、分组排序和自定义标签使用 [独立分类 API](./operator-organization-api.md)，不扩展本文养成标注或 MaaYuan 交换协议。
 
 实现版本：2026-10-05（SP 一致性修复）。所有接口均使用浏览器 JWT，`userId` 只从 JWT 获取；请求中的 `account_id` 必须属于当前用户。JSON 由全局 Jackson `SNAKE_CASE` 策略序列化。

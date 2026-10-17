@@ -52,14 +52,20 @@ class OperatorCoreInvariantTest {
     }
 
     @Test
-    fun `skipping breakthrough materials still preserves exactly the same experience`() {
-        for (target in 1..100) {
-            val standard = OperatorRequirementRules.level(0, target, TestFixtures.operator())
-            val experienceOnly = OperatorRequirementRules.level(0, target, TestFixtures.operator(), true)
-            assertEquals(standard.experience, experienceOnly.experience)
-            assertEquals(0L, experienceOnly.money)
-            assertEquals(emptyMap<String, Long>(), experienceOnly.items)
+    fun `completed starting breakthrough never skips later nodes or experience`() {
+        for (target in 11..100) {
+            val standard = OperatorRequirementRules.level(10, target, TestFixtures.operator())
+            val completed = OperatorRequirementRules.level(10, target, TestFixtures.operator(), false, 1)
+            val later = OperatorRequirementRules.level(11, target, TestFixtures.operator())
+            assertEquals(standard.experience, completed.experience)
+            assertEquals(later.money, completed.money)
+            assertEquals(later.items, completed.items)
+            assertEquals(standard, OperatorRequirementRules.level(10, target, TestFixtures.operator(), true, 0))
         }
+        assertEquals(
+            OperatorRequirementRules.level(9, 21, TestFixtures.operator()),
+            OperatorRequirementRules.level(9, 21, TestFixtures.operator(), true),
+        )
     }
 
     @Test

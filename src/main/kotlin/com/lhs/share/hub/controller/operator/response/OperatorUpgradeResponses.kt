@@ -37,6 +37,7 @@ data class OperatorUpgradeCurrentResponse(
     val starLevel: Int,
     val revision: Long,
     val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
+    val levelBreakthroughStage: Int? = null,
 )
 
 data class OperatorUpgradeExecuteResponse(
@@ -56,6 +57,10 @@ data class OperatorUpgradeExecuteResponse(
                 value.operatorStarLevel,
                 value.operatorRevision,
                 value.operatorHuaji,
+                com.lhs.share.hub.service.operator.OperatorLevelBreakthroughRules.read(
+                    value.operatorLevel,
+                    value.operatorLevelBreakthroughStage,
+                ),
             ),
             value.consumed,
             value.inventoryRevision,

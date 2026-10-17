@@ -82,13 +82,21 @@ object OperatorRequirementRules {
     )
     val bookValues = linkedMapOf("liutaobingshu" to 10_000L, "bingshuquanjuan" to 1_000L, "bingshucanjuan" to 100L)
 
-    fun level(from: Int, to: Int, catalog: OperatorCatalogEntity, skipBreakthroughMaterials: Boolean = false): Cost {
+    fun level(
+        from: Int,
+        to: Int,
+        catalog: OperatorCatalogEntity,
+        skipBreakthroughMaterials: Boolean = false,
+        levelBreakthroughStage: Int? = null,
+    ): Cost {
         var experience = 0L
         for (level in from + 1..to) experience += levelExp[level]
-        if (skipBreakthroughMaterials) return Cost(emptyMap(), experience = experience)
+        val stage = OperatorLevelBreakthroughRules.read(from, levelBreakthroughStage)
+        val skipStarting = from in 10..90 && from % 10 == 0 &&
+            (stage == from / 10 || (stage == null && skipBreakthroughMaterials))
         val items = linkedMapOf<String, Long>()
         var money = 0L
-        breakthroughs.filter { from <= it.level && to > it.level }.forEach { row ->
+        breakthroughs.filter { from <= it.level && to > it.level && !(skipStarting && it.level == from) }.forEach { row ->
             row.items.forEach { (id, count) -> items.add(id, count) }
             money += row.money
             val sub = catalog.subProf.firstOrNull()

@@ -299,26 +299,47 @@ class OperatorUpgradeServiceTest {
     }
 
     @Test
+    fun `confirmed breakthrough drives default preview and contradictory skip never consumes stock`() {
+        operatorCurrent = current(starLevel = 21).copy(
+            entries = mapOf("op1" to OperatorEntry(elite = 0, starLevel = 21, level = 90, revision = 7, levelBreakthroughStage = 9)),
+        )
+        inventoryCurrent["item"] = stock("item", mapOf("liutaobingshu" to 10000))
+        val preview = service.preview("u1", OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 95, 7))
+        assertTrue(preview.available)
+        assertEquals(0, preview.moneyRequired)
+        operatorCurrent =
+            operatorCurrent.copy(entries = operatorCurrent.entries.mapValues { (_, entry) -> entry.copy(levelBreakthroughStage = 8) })
+        val before = inventoryCurrent.toMap()
+        val error = assertThrows(OperatorApiException::class.java) {
+            service.preview("u1", OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 95, 7, skipBreakthroughMaterials = true))
+        }
+        assertEquals("level_breakthrough_conflict", error.code)
+        assertEquals(before, inventoryCurrent)
+        assertTrue(storedUpgrades.isEmpty())
+    }
+
+    @Test
     fun `already broken through preview and execute only consume experience books`() {
         operatorCurrent = current(starLevel = 21).copy(
-            entries = mapOf("op1" to OperatorEntry(elite = 0, starLevel = 21, level = 9, revision = 7)),
+            entries = mapOf("op1" to OperatorEntry(elite = 0, starLevel = 21, level = 10, revision = 7)),
         )
         inventoryCurrent["item"] = stock("item", mapOf("bingshucanjuan" to 2, "jianjia" to 1))
-        val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 11, 7, skipBreakthroughMaterials = true)
+        val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 12, 7, skipBreakthroughMaterials = true)
         assertFalse(service.preview("u1", request.copy(skipBreakthroughMaterials = false)).available)
         val preview = service.preview("u1", request)
         assertTrue(preview.available)
         assertEquals(0, preview.moneyRequired)
         assertEquals(listOf("bingshucanjuan"), preview.requirements.map { it.id })
         val execute = OperatorUpgradeExecuteRequest(
-            "a1", "如鸢", "op1", "level", 11, 7, 42, preview.previewToken, skipBreakthroughMaterials = true,
+            "a1", "如鸢", "op1", "level", 12, 7, 42, preview.previewToken, skipBreakthroughMaterials = true,
         )
         val mismatch = assertThrows(OperatorApiException::class.java) {
             service.execute("u1", "wrong-option", execute.copy(skipBreakthroughMaterials = false))
         }
         assertEquals("preview_expired", mismatch.code)
         val result = service.execute("u1", "books-only", execute)
-        assertEquals(11, result.operator.level)
+        assertEquals(12, result.operator.level)
+        assertEquals(1, result.operator.levelBreakthroughStage)
         assertEquals(listOf("bingshucanjuan"), result.consumed.map { it.id })
         assertEquals(0, inventoryCurrent.getValue("item").entries.getValue("bingshucanjuan").count)
         assertEquals(1, inventoryCurrent.getValue("item").entries.getValue("jianjia").count)

@@ -61,7 +61,7 @@ class OperatorController(
     @Operation(
         summary = "提交密探交换文档",
         description = "version=2 保持原有导入；version=3 与 preview 共用 Schema、账号映射和 current 局部合并规则。" +
-            "v3 使用 {document, account_mapping} 包装体，或在来源 id 就是本人账号 id 时直接提交文档。",
+            "v3/v4/v5 使用 {document, account_mapping} 包装体，或在来源 id 就是本人账号 id 时直接提交文档。",
     )
     @ApiResponses(
         value = [
@@ -83,7 +83,7 @@ class OperatorController(
         @RequestBody request: JsonNode,
     ): ApiResult<Any> {
         val document = request.path("document").takeUnless(JsonNode::isMissingNode) ?: request
-        return if (document.path("version").asInt() in setOf(3, 4)) {
+        return if (document.path("version").asInt() in setOf(3, 4, 5)) {
             success(requireNotNull(v3ImportService).commitBrowser(helper.requireUserId(), request))
         } else {
             val v2 = objectMapper.treeToValue(request, OperatorImportRequest::class.java)
@@ -92,8 +92,8 @@ class OperatorController(
     }
 
     @Operation(
-        summary = "预览密探 v3 导入",
-        description = "严格校验 v3 Schema、账号归属、公共图鉴和字段语义；返回逐密探差异、stale 与目标 revision，不写 current 或库存。",
+        summary = "预览密探 v3/v4/v5 导入",
+        description = "按版本严格校验 v3/v4/v5 Schema、账号归属、公共图鉴和字段语义；返回逐密探差异、stale 与目标 revision，不写 current 或库存。",
     )
     @ApiResponses(
         value = [
@@ -286,15 +286,15 @@ class OperatorController(
         2 -> {
             response?.setHeader(
                 "X-Operator-Exchange-Warning",
-                "v2 cannot encode independent stage and awakened (including unknown); use operator v4",
+                "v2 cannot encode independent huaji or level breakthrough (including unknown); use operator v5",
             )
             service.export(helper.requireUserId(), accountId, scope)
         }
-        3, 4 -> requireNotNull(v3ExportService).export(helper.requireUserId(), accountId, scope, version)
+        3, 4, 5 -> requireNotNull(v3ExportService).export(helper.requireUserId(), accountId, scope, version)
         else -> throw com.lhs.share.hub.service.operator.OperatorApiException(
             org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
             "unsupported_exchange_version",
-            "Export version must be 2, 3 or 4",
+            "Export version must be 2, 3, 4 or 5",
         )
     }
 

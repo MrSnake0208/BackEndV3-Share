@@ -13,15 +13,29 @@ object OperatorSharedGrowth {
     }
 
     fun synchronize(entries: MutableMap<String, OperatorEntry>, sourceId: String, catalog: OperatorCatalogService, now: Instant) {
-        val source = entries.getValue(sourceId)
-        members(sourceId, catalog).filter { it != sourceId }.forEach { id ->
+        val original = entries.getValue(sourceId)
+        val ids = members(sourceId, catalog)
+        val stage = OperatorLevelBreakthroughRules.read(original.level, original.levelBreakthroughStage)
+        val source = original.copy(levelBreakthroughStage = stage)
+        entries[sourceId] = source
+        ids.filter { it != sourceId }.forEach { id ->
             val existing = entries[id]
             entries[id] = if (existing == null) {
-                OperatorEntry(elite = source.elite, starLevel = 0, level = source.level, revision = 1, updatedAt = now)
-            } else if (existing.level != source.level || existing.elite != source.elite) {
+                OperatorEntry(
+                    elite = source.elite,
+                    starLevel = 0,
+                    level = source.level,
+                    revision = 1,
+                    updatedAt = now,
+                    levelBreakthroughStage = stage,
+                )
+            } else if (existing.level != source.level || existing.elite != source.elite ||
+                OperatorLevelBreakthroughRules.read(existing.level, existing.levelBreakthroughStage) != stage
+            ) {
                 existing.copy(
                     level = source.level,
                     elite = source.elite,
+                    levelBreakthroughStage = stage,
                     revision = existing.revision + 1,
                     updatedAt = now,
                     combatStats = existing.combatStats?.let { stats ->

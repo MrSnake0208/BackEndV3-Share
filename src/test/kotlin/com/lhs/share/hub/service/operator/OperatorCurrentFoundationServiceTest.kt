@@ -561,6 +561,7 @@ class OperatorCurrentFoundationServiceTest {
 
     @Test
     fun `scan can refresh only observed values without a signature`() {
+        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(level = 11)))
         val result = service.patchCurrent(
             "u1",
             "acc1",
@@ -622,6 +623,7 @@ class OperatorCurrentFoundationServiceTest {
         fun signature(
             level: Int = 10,
             elite: Int = 1,
+            breakthroughStage: Int = (level - 1) / 10,
             starLevel: Int = 3,
             attackOddity: Int = 100,
             firstType: String = "main1",
@@ -638,11 +640,13 @@ class OperatorCurrentFoundationServiceTest {
             val request = patch(
                 """
                 "level":$level,
+                "level_breakthrough_stage":$breakthroughStage,
                 "elite":$elite,
                 "star_level":$starLevel,
                 "star_stones":[${stones.joinToString()}],
                 "combat_stats":{
                   "observed_attack":4001,
+                  "observed_inputs":{"level":$level,"level_breakthrough_stage":$breakthroughStage},
                   "source":"scan",
                   "oddities":{
                     "attack":{"current":$attackOddity$max},
@@ -659,10 +663,11 @@ class OperatorCurrentFoundationServiceTest {
         }
 
         val baseline = signature()
-        assertEquals("sha256:ed11767e1909c3a450478fb2874f745bc88475fa0aa116e50cbc9af2d3cade34", baseline)
+        assertEquals("sha256:28172395b7096cfae13a58b8cb11575f1135e018b4ffb96f9856ec4716b41bb5", baseline)
         assertEquals(baseline, signature(reverseStones = true, includeOddityMax = true))
         specialOddityName = "增伤值（新展示名）"
         assertEquals(baseline, signature())
+        assertNotEquals(baseline, signature(breakthroughStage = 1))
         assertNotEquals(baseline, signature(level = 11))
         assertNotEquals(baseline, signature(elite = 2))
         assertNotEquals(baseline, signature(starLevel = 4))
@@ -882,6 +887,7 @@ class OperatorCurrentFoundationServiceTest {
 
     @Test
     fun `independent awakening changes signature and stale while legacy signature never becomes freshly verified`() {
+        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(level = 11)))
         val before = service.patchCurrent(
             "u1",
             "acc1",
@@ -1033,7 +1039,8 @@ class OperatorCurrentFoundationServiceTest {
             game = "代号鸢",
             operatorId = "op1",
             reason = "manual_correction",
-            fields = setOf("disc_loadouts", "star_stones", "combat_stats"),
+            fields = setOf("disc_loadouts", "star_stones", "combat_stats", "level_breakthrough_stage"),
+            levelBreakthroughStage = 1,
             discLoadouts = baseEntry().discLoadouts,
             starStones = baseEntry().starStones,
             combatStats = baseEntry().combatStats!!.copy(oddities = mapOf("special" to OperatorOddityValue(0.5))),
@@ -1060,6 +1067,7 @@ class OperatorCurrentFoundationServiceTest {
         assertEquals("main1", entry.starStones.single().type)
         assertEquals(1000, entry.combatStats?.observedAttack)
         assertEquals(0.5, entry.combatStats?.oddities?.get("special")?.current)
+        assertEquals(1, entry.levelBreakthroughStage)
         assertEquals(1, entry.revision)
     }
 
@@ -1090,6 +1098,132 @@ class OperatorCurrentFoundationServiceTest {
         service.deleteRecord("u1", "acc1", "remove")
 
         assertEquals(emptyMap<String, OperatorEntry>(), replayed!!.entries)
+    }
+
+    @Test
+    fun `boundary breakthrough preserves omission clears explicit null and invalidates old capture`() {
+        val inputs = com.lhs.share.hub.repository.entity.OperatorObservedInputs(level = 90, levelBreakthroughStage = 8)
+        stored = stored.copy(
+            entries = mapOf(
+                "op1" to baseEntry().copy(
+                    level = 90,
+                    levelBreakthroughStage = 8,
+                    combatStats = baseEntry().combatStats!!.copy(observedInputs = inputs),
+                ),
+            ),
+        )
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"elite\":2"))
+        assertEquals(8, stored.entries.getValue("op1").levelBreakthroughStage)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level_breakthrough_stage\":9", revision = 8))
+        assertEquals(9, stored.entries.getValue("op1").levelBreakthroughStage)
+        assertEquals("stale", stored.entries.getValue("op1").combatStats!!.observedStatus)
+        assertEquals(inputs, stored.entries.getValue("op1").combatStats!!.observedInputs)
+        assertEquals(9, lastCorrection!!.levelBreakthroughStage)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level_breakthrough_stage\":null", revision = 9))
+        assertNull(stored.entries.getValue("op1").levelBreakthroughStage)
+        assertEquals(setOf("level_breakthrough_stage"), lastCorrection!!.fields)
+    }
+
+    @Test
+    fun `level changes infer only uniquely implied stages and invalid stage never writes`() {
+        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(level = 90, levelBreakthroughStage = 9)))
+        val invalid = assertThrows(OperatorApiException::class.java) {
+            service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level_breakthrough_stage\":7"))
+        }
+        assertEquals("invalid_level_breakthrough", invalid.code)
+        assertNull(lastCorrection)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level\":91"))
+        assertEquals(9, stored.entries.getValue("op1").levelBreakthroughStage)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level\":80", revision = 8))
+        assertNull(stored.entries.getValue("op1").levelBreakthroughStage)
+    }
+
+    @Test
+    fun `unknown boundary observation stays unknown after current breakthrough confirmation`() {
+        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(level = 90)))
+        service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                "\"combat_stats\":{\"observed_attack\":1234,\"source\":\"scan\"}",
+            ),
+        )
+        assertEquals("unverified", stored.entries.getValue("op1").combatStats!!.observedStatus)
+        assertNull(stored.entries.getValue("op1").combatStats!!.observedInputs!!.levelBreakthroughStage)
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level_breakthrough_stage\":9", revision = 8))
+        assertNull(stored.entries.getValue("op1").combatStats!!.observedInputs!!.levelBreakthroughStage)
+        assertEquals("stale", stored.entries.getValue("op1").combatStats!!.observedStatus)
+    }
+
+    @Test
+    fun `v5 imported captures preserve overrides display mode and historical inputs`() {
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"level":90,"level_breakthrough_stage":9,"combat_stats":{
+            "source":"manual","observed_attack":1234,"manual_attack":321,"observed_status":"unverified",
+            "observed_inputs":{"level":90,"level_breakthrough_stage":null},"display_mode":{"attack":"auto"}}""",
+            ),
+        )
+        assertEquals(321, result.combatStats!!.manualAttack)
+        assertEquals(1234, result.combatStats.observedAttack)
+        assertEquals("auto", result.combatStats.displayMode!!.attack)
+        assertEquals("unverified", result.combatStats.observedStatus)
+        assertNull(result.combatStats.observedInputs!!.levelBreakthroughStage)
+        assertNull(result.combatStats.observedInputs!!.elite)
+    }
+
+    @Test
+    fun `new same-record boundary capture is valid and exact provided snapshots are retained`() {
+        val result = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"level":90,"level_breakthrough_stage":9,"combat_stats":{"source":"scan","observed_attack":1234}""",
+            ),
+        )
+        assertEquals("valid", result.combatStats!!.observedStatus)
+        assertEquals(9, result.combatStats.observedInputs!!.levelBreakthroughStage)
+        val inputs = """{"level":90,"level_breakthrough_stage":9,"huaji":{"owned":true,"stage":3,"awakened":null}}"""
+        val refreshed = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                "\"combat_stats\":{\"source\":\"scan\",\"observed_attack\":1235,\"observed_inputs\":$inputs}",
+                revision = 8,
+            ),
+        )
+        assertEquals("valid", refreshed.combatStats!!.observedStatus)
+        assertNull(refreshed.combatStats.observedInputs!!.elite)
+        assertEquals(9, refreshed.combatStats.observedInputs!!.levelBreakthroughStage)
+    }
+
+    @Test
+    fun `base and SP share breakthrough while capture and ownership stay form local`() {
+        every { catalogService.spFormsOf("op1") } returns listOf("sp1")
+        every { catalogService.getOperator("sp1") } returns catalog("sp1", 5, "op1")
+        stored = stored.copy(
+            entries = mapOf(
+                "op1" to baseEntry().copy(level = 90, levelBreakthroughStage = 8),
+                "sp1" to baseEntry().copy(level = 90, levelBreakthroughStage = 8, starLevel = 0),
+            ),
+        )
+        val spBefore = stored.entries.getValue("sp1")
+        service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch("\"level_breakthrough_stage\":9"))
+        val spAfter = stored.entries.getValue("sp1")
+        assertEquals(9, spAfter.levelBreakthroughStage)
+        assertEquals(spBefore.revision + 1, spAfter.revision)
+        assertEquals(0, spAfter.starLevel)
+        assertEquals(spBefore.combatStats!!.observedInputs, spAfter.combatStats!!.observedInputs)
     }
 
     private fun patch(

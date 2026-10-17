@@ -11,6 +11,8 @@ import java.time.Instant
 @Schema(name = "OperatorCurrentPatchRequest")
 data class OperatorCurrentPatchRequest(
     val level: Int? = null,
+    @field:Schema(description = "等级突破阶数0..9；缺失保留，显式null待确认；与等级组合校验", minimum = "0", maximum = "9", nullable = true)
+    val levelBreakthroughStage: Int? = null,
     val elite: Int? = null,
     @JsonProperty("star_level") val starLevel: Int? = null,
     @field:Schema(description = "独立化极事实；缺失子字段保留；stage/awakened可显式null表示未知")
@@ -80,6 +82,7 @@ data class OperatorObservedInputsPatchRequest(
     val odditiesSignature: String? = null,
     val equippedStarStonesSignature: String? = null,
     val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
+    val levelBreakthroughStage: Int? = null,
 )
 
 data class OperatorOddityPatchRequest(

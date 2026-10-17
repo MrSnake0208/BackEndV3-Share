@@ -339,6 +339,11 @@ class OperatorService(
             elite = request.elite,
             starLevel = request.starLevel,
             level = request.level,
+            levelBreakthroughStage = if (existing?.level == request.level) {
+                OperatorLevelBreakthroughRules.read(request.level, existing.levelBreakthroughStage)
+            } else {
+                OperatorLevelBreakthroughRules.inferred(request.level)
+            },
             discs = discs,
             starStones = stones,
             discLoadouts = loadouts,
@@ -378,6 +383,27 @@ class OperatorService(
 
     private fun normalizeSpRelations(next: MutableMap<String, OperatorEntry>, writtenIds: Set<String>, now: Instant) {
         writtenIds.filter { it in next }.distinctBy { OperatorSharedGrowth.baseId(it, catalogService) }.forEach { id ->
+            val source = next.getValue(id)
+            if (source.levelBreakthroughStage == null) {
+                val sharedStage = OperatorSharedGrowth.members(id, catalogService).asSequence().mapNotNull { next[it] }
+                    .filter {
+                        it.level == source.level
+                    }.mapNotNull { OperatorLevelBreakthroughRules.read(it.level, it.levelBreakthroughStage) }.firstOrNull()
+                if (sharedStage != null) {
+                    next[id] = source.copy(
+                        levelBreakthroughStage = sharedStage,
+                        revision = source.revision + 1,
+                        updatedAt = now,
+                        combatStats = source.combatStats?.let { stats ->
+                            if (stats.observedStatus != "unavailable" && (stats.observedAttack != null || stats.observedHp != null)) {
+                                stats.copy(observedStatus = "stale")
+                            } else {
+                                stats
+                            }
+                        },
+                    )
+                }
+            }
             OperatorSharedGrowth.synchronize(next, id, catalogService, now)
         }
     }
@@ -391,9 +417,15 @@ class OperatorService(
                     entry.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(entry.starLevel, "legacy_current"),
                     combatStats = entry.combatStats?.let { stats ->
                         if (stats.observedStatus == "valid" &&
-                            stats.observedInputs?.huaji == null
+                            (
+                                stats.observedInputs?.huaji == null ||
+                                    OperatorLevelBreakthroughRules.read(
+                                        stats.observedInputs?.level ?: 0,
+                                        stats.observedInputs?.levelBreakthroughStage,
+                                    ) == null
+                                )
                         ) {
-                            stats.copy(observedStatus = "stale")
+                            stats.copy(observedStatus = if (stats.observedInputs?.huaji == null) "stale" else "unverified")
                         } else {
                             stats
                         }
@@ -510,6 +542,7 @@ class OperatorService(
                     discLoadouts = prepared.merged.discLoadouts.takeIf { "disc_loadouts" in prepared.fields },
                     starStones = prepared.merged.starStones.takeIf { "star_stones" in prepared.fields },
                     combatStats = prepared.merged.combatStats.takeIf { "combat_stats" in prepared.fields },
+                    levelBreakthroughStage = prepared.merged.levelBreakthroughStage,
                     createdAt = prepared.now,
                 ),
             )
@@ -541,7 +574,8 @@ class OperatorService(
         rejectUnknown(
             request,
             setOf(
-                "level", "elite", "star_level", "huaji", "huaji_legacy", "disc_loadouts", "star_stones", "combat_stats",
+                "level", "level_breakthrough_stage", "elite", "star_level", "huaji", "huaji_legacy",
+                "disc_loadouts", "star_stones", "combat_stats",
                 "expected_revision", "reason",
             ),
             "schema_validation_failed",
@@ -613,17 +647,39 @@ class OperatorService(
             elite = shared?.elite ?: 0,
             starLevel = 0,
             level = shared?.level ?: 0,
+            levelBreakthroughStage = shared?.levelBreakthroughStage,
         )
         if (existing.revision != expectedRevision) revisionConflict(operatorId)
 
         val now = Instant.now()
         val fields = mutableSetOf<String>()
-        var merged = existing.copy(huaji = OperatorHuajiRules.read(existing, catalog))
+        val sharedStage = OperatorSharedGrowth.members(operatorId, catalogService).asSequence()
+            .mapNotNull { sourceCurrent.entries[it] }.filter { it.level == existing.level }
+            .mapNotNull { OperatorLevelBreakthroughRules.read(it.level, it.levelBreakthroughStage) }.firstOrNull()
+        var merged = existing.copy(
+            huaji = OperatorHuajiRules.read(existing, catalog),
+            levelBreakthroughStage = OperatorLevelBreakthroughRules.read(existing.level, existing.levelBreakthroughStage) ?: sharedStage,
+        )
         if (request.has("level")) {
             fields += "level"
             val level = requiredInt(request, "level", operatorId)
             if (level !in 0..100) invalid("level must be 0..100", operatorId, "level")
-            merged = merged.copy(level = level)
+            merged = merged.copy(
+                level = level,
+                levelBreakthroughStage = if (level ==
+                    existing.level
+                ) {
+                    merged.levelBreakthroughStage
+                } else {
+                    OperatorLevelBreakthroughRules.inferred(level)
+                },
+            )
+        }
+        if (request.has("level_breakthrough_stage")) {
+            fields += "level_breakthrough_stage"
+            val stage = optionalInt(request, "level_breakthrough_stage", operatorId, "level_breakthrough_stage")
+            OperatorLevelBreakthroughRules.requireValid(merged.level, stage, operatorId)
+            merged = merged.copy(levelBreakthroughStage = stage)
         }
         if (request.has("elite")) {
             fields += "elite"
@@ -702,7 +758,7 @@ class OperatorService(
         }
         if (fields.isEmpty()) invalid("At least one patch field is required", operatorId, "")
         merged = merged.normalized()
-        val freshObservation = hasFreshObservation(request.get("combat_stats"), merged)
+        val freshObservation = hasFreshObservation(request, merged)
         val legacySignedObservation = request.path("combat_stats").hasNonNull("combat_input_signature") &&
             !request.path("combat_stats").path("observed_inputs").has("huaji")
         val stale =
@@ -713,10 +769,15 @@ class OperatorService(
             legacySignedObservation &&
                 (request.path("combat_stats").hasNonNull("observed_attack") || request.path("combat_stats").hasNonNull("observed_hp")) ->
                 merged.withFreshObservationMetadata(request.path("combat_stats"), verified = false)
+            hasCombatPatch &&
+                (request.path("combat_stats").hasNonNull("observed_attack") || request.path("combat_stats").hasNonNull("observed_hp")) ->
+                merged.withFreshObservationMetadata(request.path("combat_stats"), verified = false)
             stale -> merged.markObservationStale()
             else -> merged
         }
         val sameFacts = entryExisted && existing.level == merged.level && existing.elite == merged.elite &&
+            OperatorLevelBreakthroughRules.read(existing.level, existing.levelBreakthroughStage) ==
+            OperatorLevelBreakthroughRules.read(merged.level, merged.levelBreakthroughStage) &&
             OperatorHuajiRules.read(existing, catalog) == merged.huaji && existing.discLoadouts == merged.discLoadouts &&
             existing.starStones == merged.starStones && existing.combatStats == merged.combatStats
         if (sameFacts) merged = merged.copy(starLevel = existing.starLevel, huajiLegacy = existing.huajiLegacy)
@@ -1105,7 +1166,15 @@ class OperatorService(
         val item = node as ObjectNode
         rejectUnknown(
             item,
-            setOf("level", "elite", "star_level", "huaji", "oddities_signature", "equipped_star_stones_signature"),
+            setOf(
+                "level",
+                "level_breakthrough_stage",
+                "elite",
+                "star_level",
+                "huaji",
+                "oddities_signature",
+                "equipped_star_stones_signature",
+            ),
             "invalid_combat_stats",
             operatorId,
             "combat_stats.observed_inputs",
@@ -1113,6 +1182,9 @@ class OperatorService(
         val level = optionalInt(item, "level", operatorId, "combat_stats.observed_inputs.level")
         val elite = optionalInt(item, "elite", operatorId, "combat_stats.observed_inputs.elite")
         val starLevel = optionalInt(item, "star_level", operatorId, "combat_stats.observed_inputs.star_level")
+        val breakthrough =
+            optionalInt(item, "level_breakthrough_stage", operatorId, "combat_stats.observed_inputs.level_breakthrough_stage")
+        if (breakthrough != null) OperatorLevelBreakthroughRules.requireValid(level ?: 0, breakthrough, operatorId)
         if (level != null && level !in 0..100) {
             invalid("observed level must be 0..100", operatorId, "combat_stats.observed_inputs.level", "invalid_combat_stats")
         }
@@ -1145,16 +1217,31 @@ class OperatorService(
             } else {
                 null
             },
+            breakthrough,
         )
     }
 
-    private fun hasFreshObservation(raw: JsonNode?, merged: OperatorEntry): Boolean = raw?.isObject == true &&
-        (raw.hasNonNull("observed_attack") || raw.hasNonNull("observed_hp")) &&
-        merged.combatStats?.source?.let { it in OBSERVATION_SOURCES } == true &&
-        (
-            !raw.hasNonNull("combat_input_signature") ||
-                (raw.path("observed_inputs").has("huaji") && merged.combatStats?.observedInputs?.huaji == merged.huaji)
-            )
+    private fun hasFreshObservation(request: ObjectNode, merged: OperatorEntry): Boolean {
+        val raw = request.path("combat_stats")
+        val stage = OperatorLevelBreakthroughRules.read(merged.level, merged.levelBreakthroughStage)
+        val inputs = merged.combatStats?.observedInputs
+        val sameCapture = if (raw.has("observed_inputs")) {
+            inputs != null && inputs.level == merged.level &&
+                OperatorLevelBreakthroughRules.read(merged.level, inputs.levelBreakthroughStage) == stage &&
+                (inputs.elite == null || inputs.elite == merged.elite) &&
+                (inputs.starLevel == null || inputs.starLevel == merged.starLevel)
+        } else {
+            OperatorLevelBreakthroughRules.inferred(merged.level) != null ||
+                (
+                    !raw.hasNonNull("combat_input_signature") && request.hasNonNull("level") &&
+                        request.hasNonNull("level_breakthrough_stage")
+                    )
+        }
+        return raw.isObject && raw.path("observed_status").asText() !in setOf("stale", "unverified", "unavailable") &&
+            (raw.hasNonNull("observed_attack") || raw.hasNonNull("observed_hp")) &&
+            merged.combatStats?.source in OBSERVATION_SOURCES && stage != null && sameCapture &&
+            (!raw.hasNonNull("combat_input_signature") || (raw.path("observed_inputs").has("huaji") && inputs?.huaji == merged.huaji))
+    }
 
     fun listRecords(
         userId: String,
@@ -1254,10 +1341,33 @@ class OperatorService(
         if (catalogService.getOperator(correction.operatorId) == null) return
         val shared = OperatorSharedGrowth.members(correction.operatorId, catalogService).firstNotNullOfOrNull { current.entries[it] }
         val existing = current.entries[correction.operatorId]?.normalized()
-            ?: OperatorEntry(shared?.elite ?: 0, 0, shared?.level ?: 0)
+            ?: OperatorEntry(shared?.elite ?: 0, 0, shared?.level ?: 0, levelBreakthroughStage = shared?.levelBreakthroughStage)
         val catalog = checkNotNull(catalogService.getOperator(correction.operatorId))
-        var merged = existing
-        if ("level" in correction.fields) merged = merged.copy(level = checkNotNull(correction.level))
+        val sharedStage = OperatorSharedGrowth.members(correction.operatorId, catalogService).asSequence()
+            .mapNotNull { current.entries[it] }.filter { it.level == existing.level }
+            .mapNotNull { OperatorLevelBreakthroughRules.read(it.level, it.levelBreakthroughStage) }.firstOrNull()
+        var merged = existing.copy(
+            levelBreakthroughStage =
+            OperatorLevelBreakthroughRules.read(existing.level, existing.levelBreakthroughStage) ?: sharedStage,
+        )
+        if ("level" in correction.fields) {
+            val level = checkNotNull(correction.level)
+            merged = merged.copy(
+                level = level,
+                levelBreakthroughStage = if (level ==
+                    existing.level
+                ) {
+                    merged.levelBreakthroughStage
+                } else {
+                    OperatorLevelBreakthroughRules.inferred(level)
+                },
+            )
+        }
+        if ("level_breakthrough_stage" in
+            correction.fields
+        ) {
+            merged = merged.copy(levelBreakthroughStage = correction.levelBreakthroughStage)
+        }
         if ("elite" in correction.fields) merged = merged.copy(elite = checkNotNull(correction.elite))
         if ("star_level" in correction.fields || "huaji" in correction.fields) {
             val catalog = checkNotNull(catalogService.getOperator(correction.operatorId))
@@ -1281,7 +1391,12 @@ class OperatorService(
         }
         merged = merged.copy(revision = existing.revision + 1, updatedAt = correction.createdAt).normalized()
         val entries = current.entries.toMutableMap().also { it[correction.operatorId] = merged }
-        normalizeSpRelations(entries, setOf(correction.operatorId), correction.createdAt)
+        OperatorSharedGrowth.synchronize(
+            entries,
+            correction.operatorId,
+            catalogService,
+            correction.createdAt,
+        )
         currentRepository.save(current.copy(entries = entries, updatedAt = correction.createdAt))
     }
 
@@ -1333,6 +1448,8 @@ class OperatorService(
         val before = beforeRaw.normalized()
         val after = afterRaw.normalized()
         return before.level != after.level ||
+            OperatorLevelBreakthroughRules.read(before.level, before.levelBreakthroughStage) !=
+            OperatorLevelBreakthroughRules.read(after.level, after.levelBreakthroughStage) ||
             before.elite != after.elite ||
             (before.huaji ?: before.starLevel) != (after.huaji ?: after.starLevel) ||
             normalizedStarStones(before) != normalizedStarStones(after) ||
@@ -1349,21 +1466,32 @@ class OperatorService(
         val displayMode = stats.displayMode ?: OperatorCombatDisplayMode()
         return normalized.copy(
             combatStats = stats.copy(
-                manualAttack = if (hasAttack) stats.observedAttack else stats.manualAttack,
-                manualHp = if (hasHp) stats.observedHp else stats.manualHp,
-                observedStatus = if (verified) "valid" else "stale",
+                manualAttack = if (hasAttack && !raw.has("manual_attack")) stats.observedAttack else stats.manualAttack,
+                manualHp = if (hasHp && !raw.has("manual_hp")) stats.observedHp else stats.manualHp,
+                observedStatus = when {
+                    verified -> "valid"
+                    raw.path("observed_status").asText() in setOf("stale", "unavailable") -> stats.observedStatus
+                    raw.hasNonNull("combat_input_signature") && !raw.path("observed_inputs").has("huaji") -> "stale"
+                    raw.hasNonNull("observed_inputs") && stats.observedInputs?.levelBreakthroughStage != null &&
+                        OperatorLevelBreakthroughRules.read(normalized.level, normalized.levelBreakthroughStage) !=
+                        stats.observedInputs.levelBreakthroughStage -> "stale"
+                    else -> "unverified"
+                },
                 combatInputSignature = if (!verified) {
-                    stats.combatInputSignature
+                    stats.combatInputSignature.takeIf { raw.hasNonNull("combat_input_signature") }
                 } else {
                     stats.combatInputSignature.takeIf {
                         raw.hasNonNull("combat_input_signature")
                     } ?: combatInputSignature(normalized)
                 },
-                observedInputs = if (!verified) {
-                    stats.observedInputs?.copy(huaji = null)
+                observedInputs = if (raw.has("observed_inputs")) {
+                    stats.observedInputs
+                } else if (!verified) {
+                    OperatorObservedInputs(level = normalized.level, huaji = null, levelBreakthroughStage = null)
                 } else {
                     OperatorObservedInputs(
                         level = normalized.level,
+                        levelBreakthroughStage = OperatorLevelBreakthroughRules.read(normalized.level, normalized.levelBreakthroughStage),
                         elite = normalized.elite,
                         starLevel = normalized.starLevel,
                         huaji = normalized.huaji,
@@ -1372,9 +1500,15 @@ class OperatorService(
                     )
                 },
                 displayMode = displayMode.copy(
-                    attack = if (hasAttack) "manual" else displayMode.attack,
-                    hp = if (hasHp) "manual" else displayMode.hp,
-                ),
+                    attack = if (hasAttack && !raw.has("manual_attack") &&
+                        !raw.path("display_mode").has("attack")
+                    ) {
+                        "manual"
+                    } else {
+                        displayMode.attack
+                    },
+                    hp = if (hasHp && !raw.has("manual_hp") && !raw.path("display_mode").has("hp")) "manual" else displayMode.hp,
+                ).takeIf { it.attack != null || it.hp != null } ?: stats.displayMode,
             ),
         )
     }
@@ -1383,6 +1517,8 @@ class OperatorService(
         val normalized = entry.normalized()
         val canonical = ObjectNode(JSON_NODE_FACTORY).apply {
             put("level", normalized.level)
+            val breakthrough = OperatorLevelBreakthroughRules.read(normalized.level, normalized.levelBreakthroughStage)
+            if (breakthrough == null) putNull("level_breakthrough_stage") else put("level_breakthrough_stage", breakthrough)
             put("elite", normalized.elite)
             put("star_level", normalized.starLevel)
             normalized.huaji?.let { huaji ->
@@ -1685,7 +1821,7 @@ class OperatorService(
         val ACCOUNT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         val CORRECTION_REASONS = setOf("manual_correction", "local_migration", "v3_import")
         val COMBAT_SOURCES = setOf("scan", "manual", "imported")
-        val OBSERVATION_SOURCES = setOf("scan", "imported")
+        val OBSERVATION_SOURCES = setOf("scan", "imported", "manual")
         val OBSERVED_STATUSES = setOf("valid", "stale", "unverified", "unavailable")
         val DISPLAY_MODES = setOf("auto", "manual")
         val ODDITY_KEYS = setOf("attack", "hp", "special")

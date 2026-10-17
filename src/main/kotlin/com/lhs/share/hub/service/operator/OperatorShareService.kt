@@ -178,6 +178,7 @@ class OperatorShareService(
 
     private fun OperatorCurrentEntryDto.toShareEntry(growthState: String) = OperatorShareEntryDto(
         level = level,
+        levelBreakthroughStage = OperatorLevelBreakthroughRules.read(level, levelBreakthroughStage),
         elite = elite,
         starLevel = starLevel,
         huaji = huaji,

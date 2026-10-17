@@ -17,6 +17,8 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Instant
 
 class OpenApiOperatorControllerContractTest {
@@ -85,11 +87,12 @@ class OpenApiOperatorControllerContractTest {
         verify { service.current("u1", "acc1", "代号鸢") }
     }
 
-    @Test
-    fun `scan preview requires dedicated scope and forwards token bound account`() {
+    @ParameterizedTest
+    @ValueSource(ints = [3, 4, 5])
+    fun `scan preview requires dedicated scope and forwards token bound account`(version: Int) {
         val v3 = mockk<OperatorV3ImportService>()
         val scanController = OpenApiOperatorController(tokenService, service, accountService, v3)
-        val document = jacksonObjectMapper().readTree("""{"version":3}""")
+        val document = jacksonObjectMapper().readTree("""{"version":$version}""")
         every { tokenService.validateAuthorization("Bearer scan", OpenApiPermission.OPERATOR_SCAN_WRITE) } returns
             OpenApiPrincipal("u1", "acc1")
         every { v3.previewScan("u1", "acc1", document) } returns
