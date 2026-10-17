@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 
 class AccountShareScopesTest {
     private val repository = mockk<SubAccountRepository>()
-    private val service = OperatorShareService(repository, mockk(), mockk(), mockk<OperatorAnnotationRepository>())
+    private val service = OperatorShareService(repository, mockk(), mockk(), mockk<OperatorAnnotationRepository>(), mockk())
     private var current = SubAccount(userId = "u", accountId = "a", name = "Account", shareToken = "legacy")
 
     private fun wire() {
@@ -27,6 +27,72 @@ class AccountShareScopesTest {
             current.takeIf { it.userId == args[0] && it.accountId == args[1] && it.shareToken == args[2] && it.shareScopes == args[3] }
                 ?.copy(shareToken = args[4] as String?, shareScopes = args[5] as List<String>)?.also { current = it }
         }
+    }
+
+    @Test
+    fun `tags need explicit owner consent and are cleared when operator sharing closes`() {
+        current = current.copy(shareScopes = listOf("star"))
+        wire()
+        assertEquals(
+            "share_scope_requires_operator",
+            assertThrows(OperatorApiException::class.java) { service.setScope("u", "a", "operator_tags", true) }.code,
+        )
+        assertThrows(OperatorApiException::class.java) { service.setScope("other", "a", "operator_tags", true) }
+        verify(exactly = 0) { repository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) }
+        service.create("u", "a")
+        assertEquals(listOf("operator", "star"), service.getAccountShare("u", "a").scopes)
+        service.setScope("u", "a", "operator_tags", true)
+        assertEquals(listOf("operator", "operator_tags", "star"), current.shareScopes)
+        assertEquals("legacy", current.shareToken)
+        service.setScope("u", "a", "operator_tags", false)
+        assertEquals(listOf("operator", "star"), current.shareScopes)
+        service.setScope("u", "a", "operator_tags", true)
+        service.setScope("u", "a", "operator", false)
+        assertEquals(listOf("star"), current.shareScopes)
+        service.create("u", "a")
+        assertEquals(listOf("operator", "star"), current.shareScopes)
+        service.setScope("u", "a", "operator_tags", true)
+        service.revoke("u", "a")
+        assertEquals(listOf("star"), current.shareScopes)
+        service.create("u", "a")
+        service.setScope("u", "a", "operator_tags", true)
+        service.regenerateAccountShare("u", "a")
+        assertEquals(listOf("operator", "operator_tags", "star"), current.shareScopes)
+        service.revokeAccountShare("u", "a")
+        assertEquals(emptyList<String>(), current.shareScopes)
+        assertNull(current.shareToken)
+    }
+
+    @Test
+    fun `tag consent retry cannot reopen a concurrently closed operator box`() {
+        wire()
+        every { repository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) } answers {
+            current = current.copy(shareScopes = listOf("star"))
+            null
+        }
+        assertEquals(
+            "share_scope_requires_operator",
+            assertThrows(OperatorApiException::class.java) { service.setScope("u", "a", "operator_tags", true) }.code,
+        )
+        assertEquals(listOf("star"), current.shareScopes)
+        verify(exactly = 1) { repository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `concurrent star update preserves newly consented tags`() {
+        wire()
+        var collided = false
+        every { repository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) } answers {
+            if (!collided) {
+                collided = true
+                current = current.copy(shareScopes = listOf("operator", "operator_tags"))
+                null
+            } else {
+                current.copy(shareScopes = args[5] as List<String>).also { current = it }
+            }
+        }
+        service.setScope("u", "a", "star", true)
+        assertEquals(listOf("operator", "operator_tags", "star"), current.shareScopes)
     }
 
     @Test

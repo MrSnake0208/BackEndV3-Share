@@ -17,7 +17,10 @@ data class OperatorShareViewResponse(
     val catalogVersion: String,
     val updatedAt: Instant?,
     val entries: Map<String, OperatorShareEntryDto>,
+    val tags: List<OperatorShareTag> = emptyList(),
 )
+
+data class OperatorShareTag(val id: String, val name: String, val operatorIds: List<String>)
 
 data class OperatorShareEntryDto(
     val level: Int,

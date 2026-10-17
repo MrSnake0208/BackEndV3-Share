@@ -5,8 +5,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.handler.OperatorExceptionHandler
+import com.lhs.share.hub.controller.account.AccountShareController
+import com.lhs.share.hub.controller.account.response.AccountShareResponse
 import com.lhs.share.hub.controller.operator.OperatorController
 import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
+import com.lhs.share.hub.controller.operator.response.OperatorShareTag
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.service.operator.OperatorApiException
 import com.lhs.share.hub.service.operator.OperatorCatalogService
@@ -22,6 +25,7 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -43,7 +47,10 @@ class OperatorShareControllerContractTest {
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         mockMvc = MockMvcBuilders
-            .standaloneSetup(OperatorController(operatorService, catalogService, helper, shareService = shareService))
+            .standaloneSetup(
+                OperatorController(operatorService, catalogService, helper, shareService = shareService),
+                AccountShareController(shareService, helper),
+            )
             .setControllerAdvice(OperatorExceptionHandler())
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .build()
@@ -77,6 +84,50 @@ class OperatorShareControllerContractTest {
     }
 
     @Test
+    fun `tag consent uses authenticated identity and rejects client owner or missing consent`() {
+        every { shareService.setScope("u1", "acc1", "operator_tags", true) } returns
+            AccountShareResponse("acc1", true, "code", listOf("operator", "operator_tags"))
+        mockMvc.perform(
+            patch("/v1/accounts/share").param("account_id", "acc1").contentType("application/json")
+                .content("""{"scope":"operator_tags","enabled":true}"""),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.scopes[1]").value("operator_tags"))
+        listOf(
+            """{"scope":"operator_tags"}""",
+            """{"scope":"operator_tags","enabled":true,"user_id":"other"}""",
+        ).forEach { body ->
+            mockMvc.perform(patch("/v1/accounts/share").param("account_id", "acc1").contentType("application/json").content(body))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify(exactly = 1) { shareService.setScope("u1", "acc1", "operator_tags", true) }
+        every { shareService.setScope("u1", "foreign", "operator_tags", true) } throws
+            OperatorApiException(HttpStatus.NOT_FOUND, "account_not_found", "Account not found")
+        mockMvc.perform(
+            patch("/v1/accounts/share").param("account_id", "foreign").contentType("application/json")
+                .content("""{"scope":"operator_tags","enabled":true}"""),
+        ).andExpect(status().isNotFound).andExpect(jsonPath("$.error.code").value("account_not_found"))
+    }
+
+    @Test
+    fun `public tags serialize names and snake case membership without exposing private organization`() {
+        every { shareService.view("code") } returns OperatorShareViewResponse(
+            "代号鸢",
+            "fixture",
+            Instant.EPOCH,
+            emptyMap(),
+            listOf(OperatorShareTag("main", "主力", listOf("owned"))),
+        )
+        mockMvc.perform(get("/v1/operator/share/view/code"))
+            .andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.tags[0].id").value("main"))
+            .andExpect(jsonPath("$.data.tags[0].name").value("主力"))
+            .andExpect(jsonPath("$.data.tags[0].operator_ids[0]").value("owned"))
+            .andExpect(jsonPath("$.data.pinned_ids").doesNotExist())
+            .andExpect(jsonPath("$.data.status_order").doesNotExist())
+    }
+
+    @Test
     fun `public view is anonymous shaped and disables caching`() {
         every { shareService.view("code") } returns OperatorShareViewResponse(
             game = "代号鸢",
@@ -91,6 +142,7 @@ class OperatorShareControllerContractTest {
             .andExpect(jsonPath("$.data.game").value("代号鸢"))
             .andExpect(jsonPath("$.data.catalog_version").value("2026-09-03"))
             .andExpect(jsonPath("$.data.entries").isEmpty)
+            .andExpect(jsonPath("$.data.tags").isEmpty)
 
         verify { shareService.view("code") }
     }

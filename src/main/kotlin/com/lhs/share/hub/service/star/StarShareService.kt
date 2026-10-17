@@ -14,7 +14,7 @@ class StarShareService(private val shares: OperatorShareService, private val sta
         val state = states.findByUserIdAndAccountId(account.userId, account.accountId)
         return StarShareResponse(
             account.game,
-            account.effectiveShareScopes(),
+            account.effectiveShareScopes().filter { it in setOf("operator", "star") },
             state != null,
             state?.updatedAt,
             state?.inventory.orEmpty().map { StarShareEntry(it.kind, it.name, it.quality, it.level) },

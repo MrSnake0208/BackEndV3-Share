@@ -25,7 +25,7 @@ class AccountShareController(private val shares: OperatorShareService, private v
     @GetMapping
     fun current(@RequestParam(name = "account_id") accountId: String) = success(shares.getAccountShare(helper.requireUserId(), accountId))
 
-    @Operation(summary = "开启或关闭一种分享；开启时创建或复用代码")
+    @Operation(summary = "开启或关闭一种分享；operator_tags 须先开启 operator，关闭 operator 一并撤销标签公开")
     @PatchMapping(consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun scope(@RequestParam(name = "account_id") accountId: String, @Valid @RequestBody request: AccountShareScopeRequest) =
         success(shares.setScope(helper.requireUserId(), accountId, request.scope!!, request.enabled!!))

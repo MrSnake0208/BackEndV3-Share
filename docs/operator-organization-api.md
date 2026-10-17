@@ -4,6 +4,8 @@
 
 本接口仅管理展示分类，独立于 annotation、objective、favorite、MaaYuan 采集和 v3/v4 密探交换。数据存入 `operator_organization`，按用户和子账号唯一；删除子账号在同一事务内级联删除。GET 未找到记录时返回 revision 0 的默认快照，不创建数据。
 
+分类 API 始终仅限本人读写。分享者显式开启 `operator_tags` 后，密探 BOX 单独投影已公开密探的标签名称和关联；不公开完整分类快照、置顶或分组顺序，关闭 BOX 一并撤销标签公开。详见 [账号公开分享契约](./account-sharing.md#自定义标签主动公开)。
+
 ## 快照契约
 
 响应使用现有 `ApiResult` 包装，`data` 示例：

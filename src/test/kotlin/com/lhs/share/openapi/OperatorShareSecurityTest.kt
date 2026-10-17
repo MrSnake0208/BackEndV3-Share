@@ -39,6 +39,15 @@ class OperatorShareSecurityTest {
     lateinit var starShares: com.lhs.share.hub.service.star.StarShareService
 
     @Test
+    fun `anonymous viewers cannot enable tag publication`() {
+        mockMvc.perform(
+            patch("/v1/accounts/share").param("account_id", "a").contentType("application/json")
+                .content("""{"scope":"operator_tags","enabled":true}"""),
+        ).andExpect(status().isUnauthorized)
+        org.mockito.Mockito.verifyNoInteractions(shareService)
+    }
+
+    @Test
     fun `star views are public but account share commands and private current state are not`() {
         `when`(
             starShares.view("star-code"),

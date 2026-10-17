@@ -50,6 +50,19 @@ class OperatorShareMongoTest {
     private fun owner(accountId: String) = Query.query(Criteria.where("userId").`is`("u").and("accountId").`is`(accountId))
 
     @Test
+    fun `tag consent persists with owner and stale scope CAS protection`() {
+        val scopes = listOf("operator", "operator_tags", "star")
+        val enabled = repository.updateShareAuthorization("u", "a", "old-a", null, "old-a", scopes, now)!!
+        assertEquals(scopes, template.findOne(owner("a"), SubAccount::class.java)!!.shareScopes)
+        assertNull(repository.updateShareAuthorization("foreign", "a", "old-a", scopes, "old-a", listOf("star"), now))
+        assertNull(repository.updateShareAuthorization("u", "a", "old-a", null, "old-a", listOf("operator"), now))
+        val closed = repository.updateShareAuthorization("u", "a", "old-a", enabled.shareScopes, "old-a", listOf("star"), now)!!
+        assertEquals(listOf("star"), closed.shareScopes)
+        assertNull(repository.updateShareAuthorization("u", "a", "old-a", scopes, "old-a", scopes, now))
+        assertNull(template.findOne(owner("b"), SubAccount::class.java)!!.shareScopes)
+    }
+
+    @Test
     fun `simultaneous scope CAS writes have exactly one winner without changing another account`() {
         val barrier = CyclicBarrier(2)
         Executors.newFixedThreadPool(2).use { executor ->

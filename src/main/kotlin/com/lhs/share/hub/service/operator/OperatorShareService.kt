@@ -9,6 +9,7 @@ import com.lhs.share.hub.controller.operator.response.OperatorShareEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorShareOddityValue
 import com.lhs.share.hub.controller.operator.response.OperatorShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareStarStone
+import com.lhs.share.hub.controller.operator.response.OperatorShareTag
 import com.lhs.share.hub.controller.operator.response.OperatorShareViewResponse
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.SubAccountRepository
@@ -26,6 +27,7 @@ class OperatorShareService(
     private val operatorService: OperatorService,
     private val catalogService: OperatorCatalogService,
     private val annotationRepository: OperatorAnnotationRepository,
+    private val organizationService: OperatorOrganizationService,
 ) {
     fun get(userId: String, accountId: String): OperatorShareResponse = response(requireAccount(userId, accountId))
 
@@ -52,6 +54,14 @@ class OperatorShareService(
             catalogVersion = catalogService.currentCatalogVersion(),
             updatedAt = current?.updatedAt,
             entries = entries,
+            tags = if ("operator_tags" in account.effectiveShareScopes()) {
+                organizationService.get(account.userId, account.accountId).path("tags").mapNotNull { tag ->
+                    val members = tag.path("operator_ids").map { it.asText() }.filter { it in entries }
+                    if (members.isEmpty()) null else OperatorShareTag(tag.path("id").asText(), tag.path("name").asText(), members)
+                }
+            } else {
+                emptyList()
+            },
         )
     }
 
@@ -59,12 +69,15 @@ class OperatorShareService(
 
     fun setScope(userId: String, accountId: String, scope: String, enabled: Boolean): AccountShareResponse {
         if (scope !in
-            setOf("operator", "star")
+            setOf("operator", "star", "operator_tags")
         ) {
             throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "share_scope_invalid", "Unsupported share scope")
         }
         return accountResponse(
             change(userId, accountId, disabling = !enabled) {
+                if (scope == "operator_tags" && enabled && "operator" !in it.effectiveShareScopes()) {
+                    throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "share_scope_requires_operator", "请先开启密探 BOX 分享")
+                }
                 if (enabled) it.effectiveShareScopes() + scope else it.effectiveShareScopes() - scope
             },
         )
@@ -99,7 +112,8 @@ class OperatorShareService(
         var latest = requireAccount(userId, accountId)
         val originalToken = latest.shareToken
         repeat(MAX_GENERATION_ATTEMPTS) {
-            val nextScopes = scopes(latest).distinct().sorted()
+            val requestedScopes = scopes(latest)
+            val nextScopes = requestedScopes.filter { it != "operator_tags" || "operator" in requestedScopes }.distinct().sorted()
             if (nextScopes == latest.effectiveShareScopes() && (!rotate || nextScopes.isEmpty())) return latest
             if (disabling &&
                 latest.shareToken != originalToken

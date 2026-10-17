@@ -39,5 +39,7 @@ data class SubAccount(
 fun SubAccount.effectiveShareScopes(): List<String> = if (shareToken.isNullOrBlank()) {
     emptyList()
 } else {
-    (shareScopes ?: listOf("operator")).filter { it in setOf("operator", "star") }.distinct().sorted()
+    (shareScopes ?: listOf("operator"))
+        .filter { it in setOf("operator", "star") || (it == "operator_tags" && shareScopes?.contains("operator") == true) }
+        .distinct().sorted()
 }
