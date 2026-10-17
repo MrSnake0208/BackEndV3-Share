@@ -35,11 +35,52 @@ class OperatorShareServiceTest {
     private val operatorService = mockk<OperatorService>()
     private val catalogService = mockk<OperatorCatalogService>()
     private val annotationRepository = mockk<OperatorAnnotationRepository>(relaxed = true)
-    private val service = OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository)
+    private val organizationService = mockk<OperatorOrganizationService>()
+    private val service =
+        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService)
 
     @AfterEach
     fun `sharing never replaces or upserts the account document`() {
         verify(exactly = 0) { accountRepository.save(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `public tags require consent and expose only shared members with no private classification`(enabled: Boolean) {
+        val account = account("code").copy(shareScopes = if (enabled) listOf("operator", "operator_tags") else listOf("operator"))
+        every { accountRepository.findByShareToken("code") } returns account
+        every { catalogService.currentCatalogVersion() } returns "fixture"
+        every { operatorService.current("u1", "acc1", "代号鸢") } returns listOf(
+            OperatorCurrentResponse(
+                userId = "u1",
+                accountId = "acc1",
+                game = "代号鸢",
+                fullBaselineAt = Instant.EPOCH,
+                entries = mapOf("owned" to entry(starLevel = 3), "unowned" to entry(starLevel = 0)),
+                updatedAt = Instant.EPOCH,
+            ),
+        )
+        every { organizationService.get("u1", "acc1") } returns jacksonObjectMapper().readTree(
+            """{"pinned_ids":["private"],"status_order":["skip"],"revision":9,"tags":[
+              {"id":"main","name":"主力","operator_ids":["owned","unowned","absent"]},
+              {"id":"hidden","name":"私人空标签","operator_ids":["unowned"]}
+            ]}""",
+        ) as com.fasterxml.jackson.databind.node.ObjectNode
+        val view = service.view("code")
+        assertEquals(setOf("owned"), view.entries.keys)
+        assertEquals(if (enabled) 1 else 0, view.tags.size)
+        if (enabled) {
+            assertEquals("主力", view.tags.single().name)
+            assertEquals(listOf("owned"), view.tags.single().operatorIds)
+        }
+        val json = jacksonObjectMapper().registerModule(JavaTimeModule())
+            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).valueToTree<com.fasterxml.jackson.databind.JsonNode>(view)
+        assertEquals(setOf("game", "catalog_version", "updated_at", "entries", "tags"), json.fieldNames().asSequence().toSet())
+        if (enabled) assertEquals(setOf("id", "name", "operator_ids"), json.path("tags")[0].fieldNames().asSequence().toSet())
+        verify(exactly = if (enabled) 1 else 0) { organizationService.get("u1", "acc1") }
+        verify(exactly = if (enabled) 1 else 0) { organizationService.get(any(), any()) }
+        verify(exactly = 0) { organizationService.put(any(), any(), any()) }
+        verify(exactly = 0) { accountRepository.updateShareAuthorization(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

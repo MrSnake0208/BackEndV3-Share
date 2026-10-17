@@ -273,9 +273,18 @@ class OpenApiSchemaHarnessTest {
         assertEquals(listOf(20, 20), latest.path("inventory").map { it.path("level").asInt() })
         val legacy = "/v1/operator/share?account_id=$id"
         assertEquals(code, success(call("legacy enable operator", "PUT", legacy)).path("share_code").asText())
-        success(call("operator now public", "GET", operator, user = null))
+        assertTrue(success(call("operator now public without tags", "GET", operator, user = null)).path("tags").isEmpty)
+        val consent = """{"scope":"operator_tags","enabled":true}"""
+        assertEquals(401, call("anonymous tag consent denied", "PATCH", manage, consent, user = null).status)
+        assertEquals(404, call("foreign tag consent denied", "PATCH", manage, consent, user = owner + "_foreign").status)
+        assertEquals(
+            listOf("operator", "operator_tags", "star"),
+            success(call("owner enables tag consent", "PATCH", manage, consent)).path("scopes").map { it.asText() },
+        )
+        assertTrue(success(call("empty shared box hides all tags", "GET", operator, user = null)).path("tags").isEmpty)
         success(call("legacy revoke only operator", "DELETE", legacy))
         assertEquals(listOf("star"), success(call("star scope survives", "GET", manage)).path("scopes").map { it.asText() })
+        assertEquals(422, call("tags cannot reopen revoked box", "PATCH", manage, consent).status)
         success(call("star remains public", "GET", star, user = null))
         val newCode = success(call("rotate shared code", "POST", rotate)).path("share_code").asText()
         assertTrue(newCode != code && newCode.isNotBlank())

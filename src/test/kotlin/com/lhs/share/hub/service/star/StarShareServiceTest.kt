@@ -26,9 +26,16 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class StarShareServiceTest {
+    @Test
+    fun `tag permission is never advertised as a third share view`() {
+        every { accounts.findByShareToken("code") } returns account.copy(shareScopes = listOf("operator", "operator_tags", "star"))
+        every { states.findByUserIdAndAccountId("owner", "a") } returns null
+        assertEquals(listOf("operator", "star"), service.view("code").availableViews)
+    }
+
     private val accounts = mockk<SubAccountRepository>()
     private val states = mockk<StarStateCurrentRepository>()
-    private val service = StarShareService(OperatorShareService(accounts, mockk(), mockk(), mockk()), states)
+    private val service = StarShareService(OperatorShareService(accounts, mockk(), mockk(), mockk(), mockk()), states)
     private val account =
         SubAccount(userId = "owner", accountId = "a", name = "Private name", game = "如鸢", shareToken = "code", shareScopes = listOf("star"))
     private fun state(generation: Long, level: Int) = StarStateCurrent(
