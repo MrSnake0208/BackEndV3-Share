@@ -187,6 +187,36 @@ class OpenApiTokenServiceTest {
     }
 
     @Test
+    fun `daily tasks write scope cannot reach operator or inventory writes`() {
+        every { redisCache.getCache("open-api-token:daily", TokenCacheData::class.java) } returns
+            TokenCacheData("u1", "main", listOf(OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE.code), 0)
+
+        // 只有它自己的最小权限可通过
+        assertEquals(
+            OpenApiPrincipal("u1", "main"),
+            service.validateAuthorization("Bearer daily", OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE),
+        )
+
+        // 密探写入/读取/导出/自动采集、库存读写、星石上传、活动日历：全部必须 403
+        listOf(
+            OpenApiPermission.OPERATOR_WRITE,
+            OpenApiPermission.OPERATOR_READ,
+            OpenApiPermission.OPERATOR_EXPORT,
+            OpenApiPermission.OPERATOR_SCAN_WRITE,
+            OpenApiPermission.INVENTORY_WRITE,
+            OpenApiPermission.INVENTORY_READ,
+            OpenApiPermission.STAR_CAPTURE_WRITE,
+            OpenApiPermission.CALENDAR_READ,
+        ).forEach { permission ->
+            val error = assertThrows(InventoryApiException::class.java) {
+                service.validateAuthorization("Bearer daily", permission)
+            }
+            assertEquals(403, error.status.value(), "scope " + permission.key + " must stay unreachable")
+            assertEquals("forbidden", error.code)
+        }
+    }
+
+    @Test
     fun `Mongo fallback validates token`() {
         every { redisCache.getCache("open-api-token:tok123", TokenCacheData::class.java) } returns null
         every { tokenRepository.findByToken("tok123") } returns entity(userId = "u2", scope = listOf(10003))
