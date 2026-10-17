@@ -87,7 +87,8 @@ class FeedbackAccessServiceTest {
         val hidden = FeedbackCategory("CUSTOM_HIDDEN", "历史板块", hidden = true)
         every { categories.list() } returns listOf(hidden)
         every { authorizationService.hasRole("user", AdminRole.SUPER_ADMIN) } returns false
-        every { repository.findById("user") } returns Optional.of(FeedbackAccessGrant(userId = "user", receiveAreas = setOf(hidden.key), updatedBy = "root"))
+        every { repository.findById("user") } returns
+            Optional.of(FeedbackAccessGrant(userId = "user", receiveAreas = setOf(hidden.key), updatedBy = "root"))
         every { authorizationService.manageableAreasFor("user") } returns setOf(hidden.key)
         every { authorizationService.feedbackRolesFor("user") } returns setOf("OPERATOR")
         every { authorizationService.operatorAreasFor("user") } returns setOf(hidden.key)
@@ -118,10 +119,12 @@ class FeedbackAccessServiceTest {
             every { categories.setHidden("STAR", hidden) } returns (before to after)
             assertEquals(hidden, service.setCategoryHidden("root", "STAR", hidden).hidden)
             verify {
-                auditService.record(match<AdminAuditLog> {
-                    it.action == AdminAuditAction.FEEDBACK_CATEGORY_VISIBILITY_UPDATED &&
-                        it.before?.feedbackCategoryHidden == !hidden && it.after?.feedbackCategoryHidden == hidden
-                })
+                auditService.record(
+                    match<AdminAuditLog> {
+                        it.action == AdminAuditAction.FEEDBACK_CATEGORY_VISIBILITY_UPDATED &&
+                            it.before?.feedbackCategoryHidden == !hidden && it.after?.feedbackCategoryHidden == hidden
+                    },
+                )
             }
         }
         val unchanged = FeedbackCategory("STAR", "星石")
