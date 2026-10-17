@@ -32,10 +32,11 @@ class OperatorPlannerValidator(
     ) as ObjectNode
 
     fun workspace(request: ObjectNode): ObjectNode {
-        fields(request, setOf("schema_version", "active_plan_id", "training_levels", "plans", "expected_revision"))
+        fields(request, setOf("schema_version", "active_plan_id", "training_levels", "plans", "stamina_sources", "expected_revision"))
         version(request)
         revision(request)
         levels(request.path("training_levels"))
+        if (request.has("stamina_sources")) staminaSources(request.path("stamina_sources"))
         val plans = array(request.path("plans"), "plans")
         val ids = mutableSetOf<String>()
         plans.forEach { plan ->
@@ -253,10 +254,56 @@ class OperatorPlannerValidator(
     }
 
     private fun preferences(node: JsonNode) {
-        fields(node, setOf("luoyang", "shouchun", "purchase_count"))
+        fields(node, setOf("luoyang", "shouchun", "purchase_count", "source_periods"))
         integer(node.path("luoyang"), "luoyang", 0, 4)
         integer(node.path("shouchun"), "shouchun", 0, 4)
         integer(node.path("purchase_count"), "purchase_count", 0, 8)
+        if (node.has("source_periods")) {
+            var previous: LocalDate? = null
+            array(node.path("source_periods"), "source_periods").forEach { period ->
+                fields(period, setOf("from_date", "sources"))
+                val from = date(text(period.path("from_date"), "from_date"))
+                if (previous?.let { from <= it } == true) invalid("Source periods must be ordered and unique", "source_periods")
+                previous = from
+                staminaSources(period.path("sources"))
+            }
+        }
+    }
+
+    private fun staminaSources(node: JsonNode) {
+        fields(node, setOf("monthly_card", "fixed_sources"))
+        val card = node.path("monthly_card")
+        fields(card, setOf("tier", "daily_enabled", "shop_enabled", "daily_amount", "shop_amount", "start_date", "end_date"))
+        if (card.path("tier").asText() !in setOf("none", "yinghuo", "xingguang", "yuehua", "zhaoyang", "custom")) {
+            invalid("Invalid monthly card tier", "monthly_card.tier")
+        }
+        listOf("daily_enabled", "shop_enabled").forEach {
+            if (!card.path(it).isBoolean) invalid("Expected boolean", it)
+        }
+        listOf("daily_amount", "shop_amount").forEach { integer(card.path(it), it, 0, 99999) }
+        listOf("start_date", "end_date").forEach {
+            if (!card.path(it).isTextual) invalid("Expected date or empty string", it)
+        }
+        val start = card.path("start_date").asText().takeIf { it.isNotEmpty() }?.let(::date)
+        val end = card.path("end_date").asText().takeIf { it.isNotEmpty() }?.let(::date)
+        if (start != null && end != null && start > end) invalid("Invalid monthly card date range", "monthly_card")
+        val ids = mutableSetOf<String>()
+        val sources = array(node.path("fixed_sources"), "fixed_sources")
+        if (sources.size() > 32) invalid("At most 32 daily sources", "fixed_sources")
+        val reserved = setOf("buy", "reserve", "required-extra", "diagnostic-budget", "monthly-card-daily", "monthly-card-shop")
+        sources.forEach { source ->
+            fields(source, setOf("id", "label", "value", "enabled"))
+            val id = text(source.path("id"), "source.id")
+            if (id.length !in 1..96 || id in reserved ||
+                id.startsWith("planner-reserve-") || !ids.add(id)
+            ) {
+                invalid("Invalid or duplicate daily source", "source.id")
+            }
+            val label = text(source.path("label"), "source.label").trim()
+            if (label.length !in 1..32) invalid("Source name must contain 1..32 characters", "source.label")
+            integer(source.path("value"), "source.value", 0, 99999)
+            if (!source.path("enabled").isBoolean) invalid("Expected boolean", "source.enabled")
+        }
     }
 
     private fun strategy(node: JsonNode) {

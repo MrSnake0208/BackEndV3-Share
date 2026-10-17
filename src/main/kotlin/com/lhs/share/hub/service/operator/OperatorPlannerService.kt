@@ -160,6 +160,12 @@ class OperatorPlannerService(
         }
 
     private fun writeWorkspace(userId: String, accountId: String, expected: Long, content: ObjectNode): ObjectNode {
+        // Older clients omit account-wide sources when editing their training lists.
+        if (!content.has("stamina_sources")) {
+            workspaces.findByUserIdAndAccountId(userId, accountId)?.let { old ->
+                mapper.readTree(old.payloadJson).get("stamina_sources")?.let { content.set<JsonNode>("stamina_sources", it) }
+            }
+        }
         val saved = workspaces.replace(userId, accountId, expected, content.toString(), Instant.now()) ?: conflict(WORKSPACE_CONFLICT)
         return response(saved.payloadJson, accountId, saved.revision, saved.updatedAt)
     }
@@ -167,6 +173,11 @@ class OperatorPlannerService(
     private fun writeSchedule(userId: String, accountId: String, planId: String, expected: Long, content: ObjectNode): ObjectNode {
         val old = schedules.findByUserIdAndAccountIdAndPlanId(userId, accountId, planId)
         if ((old?.revision ?: 0L) != expected) conflict(SCHEDULE_CONFLICT)
+        if (old != null && mapper.readTree(old.payloadJson).path("preferences").has("source_periods") &&
+            !content.path("preferences").has("source_periods")
+        ) {
+            conflict("stamina_sources_client_outdated")
+        }
         validator.preserveHistory(old?.let { mapper.readTree(it.payloadJson) as ObjectNode }, content)
         val saved = schedules.replace(userId, accountId, planId, expected, content.toString(), Instant.now()) ?: conflict(SCHEDULE_CONFLICT)
         return response(saved.payloadJson, accountId, saved.revision, saved.updatedAt).put("plan_id", planId)

@@ -225,6 +225,35 @@ class InventoryServiceTest {
         assertEquals(5, count("u1", "baijinbi"))
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = [60, 65, 80, 90])
+    fun `monthly white coins accept actual integer amounts and keep the same daily id`(amount: Long) {
+        val id = "yuanhub:daily-whitecoin:monthly-card:2026-08-16"
+        val record = reward(id, "2026-08-16T10:00:00+08:00", "baijinbi", amount).copy(acquisitionChannel = "月卡奖励")
+        assertEquals(1, service.import("u1", document(record)).accepted)
+        assertEquals(amount, count("u1", "baijinbi"))
+        assertEquals(1, service.import("u1", document(record)).duplicates)
+        assertEquals(
+            "record_conflict",
+            assertThrows(InventoryApiException::class.java) {
+                service.import("u1", document(record.copy(entries = listOf(entry("baijinbi", amount + 1)))))
+            }.code,
+        )
+        assertEquals(amount, count("u1", "baijinbi"))
+        assertEquals(1, records.size)
+    }
+
+    @Test
+    fun `monthly 65 covered by an inventory snapshot only annotates income`() {
+        service.import("u1", document(snapshot("scan", "2026-08-16T11:00:00Z", "full", entry("baijinbi", 100))))
+        val record = reward("yuanhub:daily-whitecoin:monthly-card:2026-08-16", "2026-08-16T10:00:00Z", "baijinbi", 65)
+            .copy(acquisitionChannel = "月卡奖励")
+        assertEquals(1, service.import("u1", document(record)).historyOnly)
+        assertEquals(100, count("u1", "baijinbi"))
+        assertEquals(1, service.import("u1", document(record)).duplicates)
+        assertEquals(100, count("u1", "baijinbi"))
+    }
+
     @Test
     fun `dispatch reward requires and persists stamina cost`() {
         val dispatch = reward("dispatch", "2026-08-16T10:00:00Z", "baijinbi", 1).copy(

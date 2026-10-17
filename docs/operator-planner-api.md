@@ -42,6 +42,30 @@ MongoDB 新增 `operator_training_workspace`、`operator_stamina_schedule`、`op
 
 ## 体力日程
 
+### 子账号每日来源（可选扩展）
+
+工作区可保存 `stamina_sources`，由同账号下所有培养清单共享，仍使用原有 `expected_revision` CAS与账号事件，不增加集合或接口。账号对应游戏由SubAccount决定。
+
+```json
+{"monthly_card":{"tier":"zhaoyang","daily_enabled":true,"shop_enabled":true,
+ "daily_amount":60,"shop_amount":20,"start_date":"2026-10-17","end_date":"2026-11-16"},
+ "fixed_sources":[{"id":"event","label":"每日活动","value":30,"enabled":true}]}
+```
+
+`tier`允许none/yinghuo/xingguang/yuehua/zhaoyang/custom；数值为0..99999整数，日期可为空字符串，日期范围包含首尾，开关须为boolean。fixed_sources最多32个，ID唯一且1..96字符，名称1..32字符；禁止buy、reserve、求解器内部required-extra/diagnostic-budget/planner-reserve-*及两个月卡专用ID（购买沿用次数，储备为一次性）。
+
+日程根preferences与schedule.context.preferences可包含 `source_periods:[{"from_date":"2026-10-17","sources":{...}}]`，sources结构同stamina_sources，from_date严格递增且唯一。前端根据日期取最后生效规则；同一开始日重复应用替换旧规则，不逐日复制模板。标准月卡体力ID分别为 `monthly-card-daily` 和 `monthly-card-shop`。
+
+旧数据缺少可选字段时按原规则读取，不增加月卡；旧客户端编辑工作区未携带stamina_sources时保留原配置，不让其删掉新设置。已有source_periods的日程若收到省略此字段的旧客户端写入，返回409 `stamina_sources_client_outdated`，要求更新页面；不静默移除规则。revision冲突和不可变历史检查仍按原逻辑运行。
+
+账号配置保存与当前清单应用是两个revision作用域，非跨文档原子操作：配置保存成功、日程应用失败时，保留配置并由用户重试日程，不回滚或覆盖其他设备。仅按新规则实现可选字段支持，schema_version=1与rules_version=13不变；不迁移或重算已保存快照，不影响库存v2协议。
+
+先发布后端可选字段支持，再发布前端。后端回退前需评估已有扩展日程：旧后端会拒绝新字段写入；不得自动清除扩展数据来绕过校验。
+
+最小验证：`./gradlew test --tests '*OperatorPlannerServiceTest' --tests '*OperatorPlannerControllerContractTest' --tests '*InventoryServiceTest' --console=plain`。CAS的真实Mongo覆盖：`./gradlew integrationTest --tests '*OperatorPlannerMongoTest' --console=plain`，只使用TestMongo自有可抛弃容器，不连接开发/生产数据库。均由用户/CI执行。
+
+### 日程读写
+
 `GET/PUT /v1/operator/training-plans/{planId}/stamina-schedule`。所属清单不存在返回 404 `training_plan_not_found`。
 
 ```json
