@@ -39,7 +39,7 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 - `average_gold_pulls`：未删除5星事件中正整数 `pull_span` 的均值，四舍五入保留一位小数。包含批次中已知单条间隔，不使用批次总量、不包含当前垫抽，缺少有效样本为 null。
 - `small_pity_win_rate`：每池首条5星默认小保底，按 `sortOrder,eventId` 升序推演，小保底UP成功后重置、非UP失败后转大保底，大保底UP不进入分子分母并重置。结果为百分数（如66.7），与抽数无关；4星和删除记录不推进状态。无样本、未知UP/稀有度或大保底非UP的矛盾顺序为 null，有样本但无成功为0。常驻池的适用性沿用前端卡池分类规则，不展示该比例。
 
-全局 `summary.average_gold_pulls` 按相同有效样本口径汇总当前账号所有卡池，仅在最终均值舍入一次，不平均已舍入的各池均值；不包含 baseline。无有效样本为 null。`summary.small_pity_win_rate` 仍为 null，不跨池推演保底。
+全局 `summary.average_gold_pulls` 按相同有效样本口径汇总当前账号所有卡池，仅在最终均值四舍五入保留两位小数，不平均已舍入的各池均值；不包含 baseline。前端固定显示两位小数（如 `26.33`、`12.00`）；卡池均值仍保留一位小数。无有效样本为 null。`summary.small_pity_win_rate` 仍为 null，不跨池推演保底。
 
 全局 `summary` 还提供以下可空字段（旧后端字段缺失表示未知；`pool_summaries` 内保持 null）：
 - `permanent_known_total_pulls`：无限期常驻池已知累计。以投影后池快照的 `pool_type` 为准，忽略大小写及首尾空格，接受 permanent、standard、常驻、常驻卡池、常驻招募且 `end_date=null`，与前端常驻识别一致；累计所有对应个人池的有效独立记录抽数、有效批次总量和已知 progress，不含 baseline，不重复累计批次间隔；没有对应池/已知抽数时为0。

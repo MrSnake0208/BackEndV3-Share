@@ -17,6 +17,19 @@ class RecruitmentGoldStatisticsTest {
         assertEquals(1.3, stats(event("up", 1), event("up", 1), event("up", 2)).averageGoldPulls)
     }
 
+    @Test fun `account average rounds original spans to two decimals while pool keeps one`() {
+        val stats = stats(event("unknown", 1), event("up", 1), event("up", 2), event("up"), event("up", 99, 4), event("up", 0))
+        assertEquals(1.33, stats.accountAverageGoldPulls)
+        assertEquals(1.3, stats.averageGoldPulls)
+        assertEquals(1.67, stats(event("up", 1), event("up", 2), event("up", 2)).accountAverageGoldPulls)
+        val half = stats(*Array(8) { event("up", if (it == 0) 2L else 1L) })
+        assertEquals(1.13, half.accountAverageGoldPulls)
+        assertEquals(1.1, half.averageGoldPulls)
+        assertEquals(12.0, stats(event("up", 12)).accountAverageGoldPulls)
+        assertNull(stats().accountAverageGoldPulls)
+        assertNull(stats(event("up"), event("up", 0), event("up", 5, 4)).accountAverageGoldPulls)
+    }
+
     @Test fun `first gold assumes small pity and guaranteed UP is excluded regardless of spans`() {
         assertEquals(66.7, stats(event("up"), event("non_up", 1), event("up", 40), event("up")).smallPityWinRate)
         assertEquals(0.0, stats(event("non_up")).smallPityWinRate)

@@ -802,7 +802,7 @@ class RecruitmentServiceTest {
         every { readStore.statisticEvents("u", "a") } answers {
             listOf(
                 RecruitmentStatisticEvent("p", 5, 39, "non_up", "gold", "绝密"),
-                RecruitmentStatisticEvent("other", 5, 1, "unknown", "other-gold", "其他绝密"),
+                RecruitmentStatisticEvent("other", 5, 2, "unknown", "other-gold", "其他绝密"),
                 RecruitmentStatisticEvent("p", 5, 38, "up", "gold", "绝密"),
                 RecruitmentStatisticEvent("p", 5, null, "up", "gold", "绝密"),
                 RecruitmentStatisticEvent("p", 4, 100, "up", "gold", "四星"),
@@ -841,7 +841,7 @@ class RecruitmentServiceTest {
             "p" to RecruitmentTotals(900, 0, 1, 1, 0),
         )
         val archive = service.archive("u", "a")
-        assertEquals(26.0, archive.summary.averageGoldPulls)
+        assertEquals(26.33, archive.summary.averageGoldPulls)
         assertEquals(88L, archive.summary.permanentKnownTotalPulls)
         assertEquals("gold", archive.summary.mostObtainedGoldAgents?.single()?.agentId)
         assertEquals(3L, archive.summary.mostObtainedGoldAgents?.single()?.count)
