@@ -80,31 +80,37 @@ class OpenApiTokenService(
 
     /**
      * 校验 token 与权限,返回归属 userId 和 accountId。
-     * token 空 → 401;Redis 无则回退 Mongo,仍无 → 401;scope 不含 requiredCode → 403。
+     * token 空 → 401;Redis 无则回退 Mongo,仍无 → 401;scope 不含任何必需权限 → 403。
+     * 需要多个权限之一时用 [validateAnyAuthorization](如今日待办读取:operator:read 或 operator:daily-tasks:write)。
      */
-    fun validateAuthorization(authorization: String?, permission: OpenApiPermission): OpenApiPrincipal {
-        val token = authorization
-            ?.takeIf { it.startsWith(BEARER_PREFIX) }
-            ?.removePrefix(BEARER_PREFIX)
-            ?.trim()
-        return validate(token, permission.code)
-    }
+    fun validateAuthorization(authorization: String?, permission: OpenApiPermission): OpenApiPrincipal =
+        validate(bearerToken(authorization), setOf(permission.code))
 
-    fun authenticateAuthorization(authorization: String?): OpenApiPrincipal {
-        val token = authorization
-            ?.takeIf { it.startsWith(BEARER_PREFIX) }
-            ?.removePrefix(BEARER_PREFIX)
-            ?.trim()
-        return validate(token, null)
-    }
+    /**
+     * 校验 token 是否具备 [permissions] 中的**任意一个**权限。
+     *
+     * 用于「同一份数据允许两种最小权限之一访问」的场景:今日待办读取既接受
+     * operator:read,也接受 operator:daily-tasks:write —— 只想在手机小组件上
+     * 看今日历练的用户,不必为此额外授予能读取全部密探数据的 operator:read。
+     */
+    fun validateAnyAuthorization(authorization: String?, vararg permissions: OpenApiPermission): OpenApiPrincipal =
+        validate(bearerToken(authorization), permissions.map { it.code }.toSet())
 
-    private fun validate(token: String?, requiredCode: Int?): OpenApiPrincipal {
+    fun authenticateAuthorization(authorization: String?): OpenApiPrincipal =
+        validate(bearerToken(authorization), emptySet())
+
+    private fun bearerToken(authorization: String?): String? = authorization
+        ?.takeIf { it.startsWith(BEARER_PREFIX) }
+        ?.removePrefix(BEARER_PREFIX)
+        ?.trim()
+
+    private fun validate(token: String?, requiredCodes: Set<Int>): OpenApiPrincipal {
         if (token.isNullOrBlank()) {
             throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is missing")
         }
         val cached = redisCache.getCache(redisKey(token), TokenCacheData::class.java)
         if (cached != null) {
-            if (requiredCode != null && !cached.scope.contains(requiredCode)) {
+            if (requiredCodes.isNotEmpty() && requiredCodes.none { cached.scope.contains(it) }) {
                 throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
             }
             beta.requireAccess(cached.userId)
@@ -114,7 +120,7 @@ class OpenApiTokenService(
         // 回退 Mongo(防 Redis 丢失)
         val entity = tokenRepository.findByToken(token)
             ?: throw InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is invalid")
-        if (requiredCode != null && !entity.scope.contains(requiredCode)) {
+        if (requiredCodes.isNotEmpty() && requiredCodes.none { entity.scope.contains(it) }) {
             throw InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
         }
         beta.requireAccess(entity.userId)

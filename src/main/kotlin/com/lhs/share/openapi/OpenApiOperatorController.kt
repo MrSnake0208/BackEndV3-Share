@@ -165,7 +165,8 @@ class OpenApiOperatorController(
 
     @Operation(
         summary = "读取今日密探历练待办",
-        description = "需要 operator:read；账号由 Token 绑定，忽略客户端传入的 account_id/plan_id；无可用方案时返回空 tasks 与 no_schedule。",
+        description = "需要 operator:read 或 operator:daily-tasks:write（任意其一）；账号由 Token 绑定，" +
+            "忽略客户端传入的 account_id/plan_id；无可用方案时返回空 tasks 与 no_schedule。",
     )
     @ApiResponses(
         value = [
@@ -181,7 +182,13 @@ class OpenApiOperatorController(
         @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false) authorization: String?,
         @RequestParam(required = false) date: String?,
     ): ResponseEntity<ApiResult<OpenApiDailyTasksResponse>> {
-        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.OPERATOR_READ)
+        // 只想在手机小组件上看今日历练的用户，只授予 operator:daily-tasks:write 就应该够用，
+        // 因此读取接受 operator:read 或 operator:daily-tasks:write 任意其一（不放开密探其他读接口）。
+        val principal = tokenService.validateAnyAuthorization(
+            authorization,
+            OpenApiPermission.OPERATOR_READ,
+            OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+        )
         val day = date?.takeIf { it.isNotBlank() } ?: LocalDate.now(clock.withZone(ZoneId.of("Asia/Shanghai"))).toString()
         val plan = activePlan(principal.userId, principal.accountId)
         val planId = plan?.path("id")?.asText()

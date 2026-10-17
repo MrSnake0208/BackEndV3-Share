@@ -483,4 +483,57 @@ class OpenApiTokenServiceTest {
         assertFalse(item.toString().contains("tok123"))
         assertEquals(Instant.parse("2023-11-14T22:13:20Z"), item.createdAt)
     }
+
+    @Test
+    fun `any-of validation accepts either scope and rejects when neither is present`() {
+        // 只有今日历练完成记录权限：读取今日待办（operator:read 或 operator:daily-tasks:write）应当放行
+        every { redisCache.getCache("open-api-token:daily-only", TokenCacheData::class.java) } returns
+            TokenCacheData("u1", "main", listOf(OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE.code), 0)
+        assertEquals(
+            OpenApiPrincipal("u1", "main"),
+            service.validateAnyAuthorization(
+                "Bearer daily-only",
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            ),
+        )
+        // 单权限校验仍然拒绝：读接口并没有放宽成「随便什么 scope 都能读」
+        assertEquals(
+            403,
+            assertThrows(InventoryApiException::class.java) {
+                service.validateAuthorization("Bearer daily-only", OpenApiPermission.OPERATOR_READ)
+            }.status.value(),
+        )
+
+        // 只有密探读取权限：同样放行
+        every { redisCache.getCache("open-api-token:read-only", TokenCacheData::class.java) } returns
+            TokenCacheData("u1", "main", listOf(OpenApiPermission.OPERATOR_READ.code), 0)
+        assertEquals(
+            OpenApiPrincipal("u1", "main"),
+            service.validateAnyAuthorization(
+                "Bearer read-only",
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            ),
+        )
+
+        // 两个都没有（例如只有活动日历）：403
+        every { redisCache.getCache("open-api-token:calendar-only", TokenCacheData::class.java) } returns
+            TokenCacheData("u1", "main", listOf(OpenApiPermission.CALENDAR_READ.code), 0)
+        val forbidden = assertThrows(InventoryApiException::class.java) {
+            service.validateAnyAuthorization(
+                "Bearer calendar-only",
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        }
+        assertEquals(403, forbidden.status.value())
+        assertEquals("forbidden", forbidden.code)
+
+        // 空权限列表等价于「只要 Token 有效」，与 authenticateAuthorization 一致
+        assertEquals(
+            OpenApiPrincipal("u1", "main"),
+            service.validateAnyAuthorization("Bearer calendar-only"),
+        )
+    }
 }
