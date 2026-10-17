@@ -1,5 +1,6 @@
 package com.lhs.share.openapi
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -23,8 +24,10 @@ import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -245,5 +248,155 @@ class OpenApiDailyTasksContractTest {
         mvc.perform(get(path).header("Authorization", "Bearer t"))
             .andExpect(status().isUnprocessableEntity)
             .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+    }
+
+    private fun completion(
+        token: String = "Bearer write",
+        entry: String = "fh-12",
+        body: String = """{"date":"2026-10-17","expected_version":7,"expected_schedule_revision":3,"completed":true}""",
+    ) = put("$path/$entry/completion")
+        .header("Authorization", token)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(body)
+
+    @Test
+    fun `completion endpoint is a documented open api write endpoint`() {
+        val method = OpenApiOperatorController::class.java.getDeclaredMethod(
+            "completeDailyTask",
+            String::class.java,
+            String::class.java,
+            JsonNode::class.java,
+        )
+
+        assertNotNull(method.getAnnotation(RequireOpenApiToken::class.java))
+        assertNotNull(method.getAnnotation(Operation::class.java))
+    }
+
+    @Test
+    fun `read response exposes schedule revision and planned candidates`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_READ) } returns OpenApiPrincipal("u1", "acc1")
+        every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
+        every { dailyTasks.get("u1", "acc1", "daily", "2026-10-17") } returns
+            dailyResponse(tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 1)))
+
+        mvc.perform(get(path).header("Authorization", "Bearer t"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.version").value(7))
+            .andExpect(jsonPath("$.data.schedule_revision").value(3))
+            .andExpect(jsonPath("$.data.planned_tasks[0].id").value("fh-12"))
+            .andExpect(jsonPath("$.data.planned_tasks[0].group_id").value("fh"))
+            .andExpect(jsonPath("$.data.planned_tasks[0].group_name").value("风火"))
+            .andExpect(jsonPath("$.data.planned_tasks[0].stage_level").value(12))
+            .andExpect(jsonPath("$.data.planned_tasks[0].count").value(4))
+            .andExpect(jsonPath("$.data.planned_tasks[0].completed_count").value(1))
+            .andExpect(jsonPath("$.data.planned_tasks[0].cost_per").value(20))
+            .andExpect(jsonPath("$.data.tasks[0].id").value("fh-12"))
+    }
+
+    @Test
+    fun `planned candidates stay empty when the schedule is not ready`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_READ) } returns OpenApiPrincipal("u1", "acc1")
+        every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
+        every { dailyTasks.get(any(), any(), any(), any()) } returns
+            dailyResponse(status = "needs_recalculation", tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 1)))
+
+        mvc.perform(get(path).header("Authorization", "Bearer t"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.schedule_revision").value(3))
+            .andExpect(jsonPath("$.data.planned_tasks").isEmpty)
+    }
+
+    @Test
+    fun `completion returns the authoritative snapshot without caching`() {
+        every { tokenService.validateAuthorization("Bearer write", OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+            OpenApiPrincipal("u1", "acc1")
+        every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
+        every { dailyTasks.completeFromOpenApi("u1", "acc1", "daily", "2026-10-17", "fh-12", 7L, 3L, true) } returns
+            dailyResponse(tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 4)))
+
+        mvc.perform(completion())
+            .andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.account_id").value("acc1"))
+            .andExpect(jsonPath("$.data.plan_id").value("daily"))
+            .andExpect(jsonPath("$.data.plan_name").value("日常"))
+            .andExpect(jsonPath("$.data.date").value("2026-10-17"))
+            .andExpect(jsonPath("$.data.version").value(7))
+            .andExpect(jsonPath("$.data.needs_update").value(false))
+            .andExpect(jsonPath("$.data.source_status").value("ready"))
+            .andExpect(jsonPath("$.data.schedule_revision").value(3))
+            .andExpect(jsonPath("$.data.planned_tasks[0].id").value("fh-12"))
+            .andExpect(jsonPath("$.data.tasks[0].completed_count").value(4))
+
+        verify(exactly = 1) {
+            dailyTasks.completeFromOpenApi("u1", "acc1", "daily", "2026-10-17", "fh-12", 7L, 3L, true)
+        }
+    }
+
+    @Test
+    fun `completion rejects missing and read only tokens with real http errors`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } throws
+            InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is missing")
+        mvc.perform(completion(token = "Bearer missing"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.error.code").value("unauthorized"))
+
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } throws
+            InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
+        mvc.perform(completion(token = "Bearer read-only"))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.error.code").value("forbidden"))
+    }
+
+    @Test
+    fun `completion maps conflicts and invalid tasks to real http errors`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+            OpenApiPrincipal("u1", "acc1")
+        every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
+        every { dailyTasks.completeFromOpenApi(any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            OperatorApiException(HttpStatus.CONFLICT, "training_tasks_conflict", "待办已在其他设备更新，请读取最新状态后重试")
+        mvc.perform(completion())
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("training_tasks_conflict"))
+
+        every { dailyTasks.completeFromOpenApi(any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "历练待办不存在")
+        mvc.perform(completion())
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+    }
+
+    @Test
+    fun `completion validates the exact body before touching the schedule`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+            OpenApiPrincipal("u1", "acc1")
+        val bodies = listOf(
+            """{"date":"2026-10-17","expected_version":7,"expected_schedule_revision":3}""",
+            """{"date":"2026-10-17","expected_version":7,"expected_schedule_revision":3,"completed":true,"account_id":"victim"}""",
+            """{"date":"2026-10-17","expected_version":7,"expected_schedule_revision":3,"completed":"true"}""",
+            """{"date":20261017,"expected_version":7,"expected_schedule_revision":3,"completed":true}""",
+            """{"date":"2026-10-17","expected_version":-1,"expected_schedule_revision":3,"completed":true}""",
+        )
+        bodies.forEach { body ->
+            mvc.perform(completion(body = body))
+                .andExpect(status().isUnprocessableEntity)
+                .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+        }
+
+        verify(exactly = 0) { dailyTasks.completeFromOpenApi(any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { planner.workspace(any(), any()) }
+    }
+
+    @Test
+    fun `completion without a plan is unprocessable instead of failing`() {
+        every { tokenService.validateAuthorization(any(), OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+            OpenApiPrincipal("u1", "acc1")
+        every { planner.workspace("u1", "acc1") } returns workspace(null)
+
+        mvc.perform(completion())
+            .andExpect(status().isUnprocessableEntity)
+            .andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
+
+        verify(exactly = 0) { dailyTasks.completeFromOpenApi(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 }

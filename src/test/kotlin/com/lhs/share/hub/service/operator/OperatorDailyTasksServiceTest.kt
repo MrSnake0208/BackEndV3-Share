@@ -218,4 +218,124 @@ class OperatorDailyTasksServiceTest {
         (spends[1] as ObjectNode).put("value", 1.5)
         assertEquals("invalid", OperatorDailyTasksService.source(schedule, "2026-10-16").status)
     }
+
+    @Test
+    fun `open api completion adopts today tasks atomically when no record exists`() {
+        val result = service().completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 0L, 3L, true)
+
+        assertEquals(1L, result.version)
+        assertEquals(listOf(task(10, 1), task(12, 4, 4)), result.tasks)
+        verify(exactly = 1) { repository.replace("u", "a", "p", "2026-10-16", 0L, any(), any()) }
+        verify(exactly = 1) { events.publishChange("u", "a", "operator_training_tasks", any()) }
+    }
+
+    @Test
+    fun `open api completion rejects a stale schedule revision without writing`() {
+        val error = assertThrows(OperatorApiException::class.java) {
+            service().completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 0L, 99L, true)
+        }
+
+        assertEquals(HttpStatus.CONFLICT, error.status)
+        verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `open api completion refuses schedules that are not ready`() {
+        schedule = snapshot("2026-10-17")
+        val missingDay = assertThrows(OperatorApiException::class.java) {
+            service().completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 0L, 3L, true)
+        }
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, missingDay.status)
+
+        val pending = snapshot()
+        (pending.path("schedule").path("context") as ObjectNode).set<ObjectNode>(
+            "plan_baselines",
+            mapper.readTree("""{"2026-10-16":{"spends":[]}}"""),
+        )
+        schedule = pending
+        val recalculation = assertThrows(OperatorApiException::class.java) {
+            service().completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 0L, 3L, true)
+        }
+        assertEquals(HttpStatus.CONFLICT, recalculation.status)
+
+        verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `open api completion rejects an unknown entry without writing`() {
+        val error = assertThrows(OperatorApiException::class.java) {
+            service().completeFromOpenApi("u", "a", "p", "2026-10-16", "fh-1", 0L, 3L, true)
+        }
+
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `open api completion rejects a stale record version without writing`() {
+        val api = service()
+        api.adopt("u", "a", "p", "2026-10-16", body())
+        val error = assertThrows(OperatorApiException::class.java) {
+            api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 5L, 3L, true)
+        }
+
+        assertEquals(HttpStatus.CONFLICT, error.status)
+        assertEquals(1L, stored!!.version)
+        assertEquals(0, stored!!.tasks.first { it.id == "ds-12" }.completedCount)
+        verify(exactly = 1) { repository.replace(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `open api completion retries are idempotent and never bump the version`() {
+        val api = service()
+        api.adopt("u", "a", "p", "2026-10-16", body())
+        val first = api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 1L, 3L, true)
+        assertEquals(4, first.tasks.first { it.id == "ds-12" }.completedCount)
+        assertEquals(2L, first.version)
+
+        val retried = api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 2L, 3L, true)
+        assertEquals(2L, retried.version)
+        assertEquals(2L, stored!!.version)
+        assertEquals(first.tasks, retried.tasks)
+        verify(exactly = 2) { repository.replace(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `open api completion unchecks to zero and preserves other completions`() {
+        val api = service()
+        api.adopt("u", "a", "p", "2026-10-16", body())
+        api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-10", 1L, 3L, true)
+        val second = api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 2L, 3L, true)
+        assertEquals(listOf(task(10, 1, 1), task(12, 4, 4)), second.tasks)
+
+        val unchecked = api.completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 3L, 3L, false)
+        assertEquals(listOf(task(10, 1, 1), task(12, 4, 0)), unchecked.tasks)
+        assertEquals(4L, unchecked.version)
+    }
+
+    @Test
+    fun `merge keeps existing completions for open api adoption`() {
+        val planned = OperatorDailyTasksService.source(snapshot(), "2026-10-16").items
+        assertEquals(listOf(task(10, 1, 1), task(12, 4)), OperatorDailyTasksService.merge(planned, listOf(task(10, 1, 1))))
+    }
+
+    @Test
+    fun `open api completion outside the beijing business day never writes`() {
+        val error = assertThrows(OperatorApiException::class.java) {
+            service().completeFromOpenApi("u", "a", "p", "2026-10-15", "ds-12", 0L, 3L, true)
+        }
+
+        assertEquals(HttpStatus.CONFLICT, error.status)
+        verify { repository wasNot io.mockk.Called }
+        verify { planner wasNot io.mockk.Called }
+    }
+
+    @Test
+    fun `open api completion stays scoped to the token bound account`() {
+        service().completeFromOpenApi("u", "a", "p", "2026-10-16", "ds-12", 0L, 3L, true)
+
+        verify(exactly = 1) { planner.schedule("u", "a", "p") }
+        verify(exactly = 1) { accounts.fenceRecruitmentWrite("u", "a", any()) }
+        verify(exactly = 1) { repository.replace("u", "a", "p", "2026-10-16", 0L, any(), any()) }
+    }
 }

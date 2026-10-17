@@ -38,7 +38,7 @@ class OpenApiPermissionTest {
     fun listAll_returns_key_code_desc_entries() {
         val list = OpenApiPermission.listAll()
 
-        assertEquals(9, list.size)
+        assertEquals(10, list.size)
         val read = list.first { it.scope == "inventory:read" }
         assertEquals("库存数据读取", read.description)
 
@@ -53,5 +53,19 @@ class OpenApiPermissionTest {
         assertEquals(40001, OpenApiPermission.codeByKey("calendar:read"))
         assertEquals("calendar:read", OpenApiPermission.CALENDAR_READ.key)
         assertEquals("活动日历读取", list.first { it.scope == "calendar:read" }.description)
+
+        assertEquals(20005, OpenApiPermission.codeByKey("operator:daily-tasks:write"))
+        assertEquals("今日历练完成记录", list.first { it.scope == "operator:daily-tasks:write" }.description)
+    }
+
+    @Test
+    fun daily_tasks_write_permission_resolves_and_stays_unique() {
+        assertEquals(20005, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE.code)
+        assertEquals("operator:daily-tasks:write", OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE.key)
+        assertEquals("今日历练完成记录", OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE.desc)
+        assertEquals(20005, OpenApiPermission.codeByKey("operator:daily-tasks:write"))
+        assertEquals(OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE, OpenApiPermission.byKey("operator:daily-tasks:write"))
+        assertEquals(OpenApiPermission.entries.size, OpenApiPermission.entries.map { it.code }.distinct().size)
+        assertEquals(OpenApiPermission.entries.size, OpenApiPermission.entries.map { it.key }.distinct().size)
     }
 }

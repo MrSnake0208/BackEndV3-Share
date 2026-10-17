@@ -73,6 +73,58 @@ class OperatorDailyTasksService(
         }
     }
 
+    /**
+     * OpenAPI 最小写入:在同一事务内按需承接今日待办并记录一次完成勾选。
+     *
+     * 复用 [write]/[source]/[merge]/repository CAS/publish/response,与 JWT 路径共享同一套算法;
+     * expectedVersion == 0 表示当天尚无正式记录,此时先按规划承接再落库,否则只更新已有记录。
+     */
+    fun completeFromOpenApi(
+        user: String,
+        account: String,
+        plan: String,
+        date: String,
+        entry: String,
+        expectedVersion: Long,
+        expectedScheduleRevision: Long,
+        completed: Boolean,
+    ): OperatorDailyTasksResponse {
+        return write(user, account, plan, date) {
+            val source = source(planner.schedule(user, account, plan), date)
+            if (expectedVersion == 0L) {
+                when (source.status) {
+                    "ready" -> Unit
+                    "needs_recalculation", "daily_limit" -> conflict("今日规划已变化，请刷新后核对")
+                    else -> invalid("今天没有可完成的历练")
+                }
+                if (source.revision != expectedScheduleRevision) conflict("日程已变化，请刷新后重试")
+                val planned = merge(source.items, emptyList())
+                if (planned.none { it.id == entry }) invalid("历练待办不存在")
+                val tasks = planned.map {
+                    if (it.id == entry) it.copy(completedCount = if (completed) maxOf(it.count, it.completedCount) else 0) else it
+                }
+                if (exceedsDailyLimit(tasks)) invalid("同类历练每日最多 6 次，请先调整规划")
+                val saved = repository.replace(user, account, plan, date, 0L, tasks, clock.instant()) ?: conflict()
+                publish(user, account, plan, date)
+                response(account, plan, date, source, saved)
+            } else {
+                val current = repository.find(user, account, plan, date) ?: conflict("请先加入今日待办")
+                if (current.version != expectedVersion) conflict()
+                val task = current.tasks.find { it.id == entry } ?: invalid("历练待办不存在")
+                val completedCount = if (completed) maxOf(task.count, task.completedCount) else 0
+                val tasks = current.tasks.map { if (it.id == entry) it.copy(completedCount = completedCount) else it }
+                    .filter { it.count > 0 || it.completedCount > 0 }
+                if (tasks == current.tasks) {
+                    response(account, plan, date, source, current)
+                } else {
+                    val saved = repository.replace(user, account, plan, date, expectedVersion, tasks, clock.instant()) ?: conflict()
+                    publish(user, account, plan, date)
+                    response(account, plan, date, source, saved)
+                }
+            }
+        }
+    }
+
     private fun write(
         user: String,
         account: String,
