@@ -63,7 +63,7 @@ class RecruitmentService(
                     progress, totals.eventCount, totals.exactCount, totals.unknownCount, unknownProgress,
                     totals.unknownCount > 0 || unknownProgress > 0,
                     fourStarCount = totals.fourStarCount,
-                    averageGoldPulls = accountGoldStatistics.averageGoldPulls,
+                    averageGoldPulls = accountGoldStatistics.accountAverageGoldPulls,
                     permanentKnownTotalPulls = pools.filter { isPermanentRecruitmentPool(it.mappedSnapshot ?: it.snapshot) }.sumOf {
                         (byPool[it.poolId]?.recordedPulls ?: 0) + (byPool[it.poolId]?.batchPulls ?: 0) + (it.progress ?: 0)
                     },

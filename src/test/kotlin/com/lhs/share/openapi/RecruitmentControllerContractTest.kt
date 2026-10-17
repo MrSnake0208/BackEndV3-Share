@@ -90,7 +90,7 @@ class RecruitmentControllerContractTest {
         every { service.archive("u", "a") } returns RecruitmentArchiveResponse(
             "a", "如鸢", 0, 0, null, emptyList(), emptyList(),
             summary.copy(
-                averageGoldPulls = 23.4,
+                averageGoldPulls = 23.45,
                 permanentKnownTotalPulls = 123,
                 mostObtainedGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 3), RecruitmentAgentCount("b", "乙", 3)),
                 mostNonUpGoldAgents = emptyList(),
@@ -107,7 +107,7 @@ class RecruitmentControllerContractTest {
         )
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.summary.average_gold_pulls").value(23.4))
+            .andExpect(jsonPath("$.data.summary.average_gold_pulls").value(23.45))
             .andExpect(jsonPath("$.data.summary.permanent_known_total_pulls").value(123))
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents.length()").value(2))
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].agent_id").value("a"))

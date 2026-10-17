@@ -14,6 +14,8 @@ internal class RecruitmentGoldStatistics {
 
     val averageGoldPulls: Double?
         get() = if (knownCount == 0L) null else (knownPulls.toDouble() / knownCount * 10).roundToLong() / 10.0
+    val accountAverageGoldPulls: Double?
+        get() = if (knownCount == 0L) null else (knownPulls.toDouble() / knownCount * 100).roundToLong() / 100.0
     val smallPityWinRate: Double?
         get() = if (!validPity || smallCount == 0L) null else (smallWins.toDouble() / smallCount * 1000).roundToLong() / 10.0
 
