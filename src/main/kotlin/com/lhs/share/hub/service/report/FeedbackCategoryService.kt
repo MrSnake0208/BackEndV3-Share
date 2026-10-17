@@ -52,6 +52,21 @@ class FeedbackCategoryService(private val repository: FeedbackCategoryCatalogRep
         return existing to updated
     }
 
+    fun reorder(keys: List<String>, expectedKeys: List<String>): Pair<List<FeedbackCategory>, List<FeedbackCategory>> {
+        val current = snapshot()
+        val currentKeys = current.categories.map { it.key }
+        if (expectedKeys != currentKeys) {
+            throw ApiResultException(HttpStatus.CONFLICT.value(), "反馈板块顺序已更新，请刷新后重试")
+        }
+        if (keys.size != currentKeys.size || keys.toSet().size != keys.size || keys.toSet() != currentKeys.toSet()) {
+            throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "排序必须包含全部反馈板块且不能重复")
+        }
+        val byKey = current.categories.associateBy { it.key }
+        val reordered = keys.map { byKey.getValue(it) }
+        if (keys != currentKeys) save(current.copy(categories = reordered))
+        return current.categories to reordered
+    }
+
     private fun snapshot(): FeedbackCategoryCatalog {
         val current = repository.findById("feedback").orElseGet {
             FeedbackCategoryCatalog(categories = FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) })

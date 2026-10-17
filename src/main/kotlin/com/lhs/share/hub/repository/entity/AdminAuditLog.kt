@@ -15,6 +15,7 @@ enum class AdminAuditAction {
     FEEDBACK_CATEGORY_CREATED,
     FEEDBACK_CATEGORY_RENAMED,
     FEEDBACK_CATEGORY_VISIBILITY_UPDATED,
+    FEEDBACK_CATEGORY_REORDERED,
     RECRUITMENT_ACCESS_MODE_UPDATED,
     RECRUITMENT_ACCESS_GRANTED,
     RECRUITMENT_ACCESS_REVOKED,
@@ -35,6 +36,7 @@ data class AdminAuditSnapshot(
     val recruitmentAccess: Map<String, String>? = null,
     val feedbackCategoryLabel: String? = null,
     val feedbackCategoryHidden: Boolean? = null,
+    val feedbackCategoryOrder: List<String>? = null,
 )
 
 @Document("admin_audit_logs")
