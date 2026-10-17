@@ -90,11 +90,20 @@ class OperatorPlannerMongoTest {
             val executor = Executors.newFixedThreadPool(2)
             try {
                 val results = executor.invokeAll(
-                    (1..2).map {
+                    (1..2).map { amount ->
                         Callable {
                             barrier.await()
                             runCatching {
-                                service.putWorkspace("owner", "account", validator.emptyWorkspace().put("expected_revision", revision))
+                                val request = validator.emptyWorkspace().put("expected_revision", revision)
+                                request.set<ObjectNode>(
+                                    "stamina_sources",
+                                    mapper.readTree(
+                                        """{"monthly_card":{"tier":"custom","daily_enabled":true,"shop_enabled":false,
+                                            "daily_amount":$amount,"shop_amount":20,"start_date":"","end_date":""},
+                                            "fixed_sources":[]}""",
+                                    ) as ObjectNode,
+                                )
+                                service.putWorkspace("owner", "account", request)
                             }
                         }
                     },
@@ -109,6 +118,8 @@ class OperatorPlannerMongoTest {
                         ).code,
                 )
                 assertEquals(revision + 1, workspaces.findByUserIdAndAccountId("owner", "account")!!.revision)
+                val winner = results.single { it.isSuccess }.getOrThrow().path("stamina_sources")
+                assertEquals(winner, service.workspace("owner", "account").path("stamina_sources"))
                 assertEquals(1, template.count(org.springframework.data.mongodb.core.query.Query(), OperatorTrainingWorkspace::class.java))
             } finally {
                 executor.shutdownNow()

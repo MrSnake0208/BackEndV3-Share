@@ -63,4 +63,21 @@ class OperatorPlannerControllerContractTest {
         )
             .andExpect(status().isUnprocessableEntity).andExpect(jsonPath("$.error.code").value("schema_validation_failed"))
     }
+
+    @Test
+    fun `account source settings keep snake case fields across the workspace HTTP contract`() {
+        val body = """{"schema_version":1,"expected_revision":3,"stamina_sources":{
+            "monthly_card":{"tier":"xingguang","daily_enabled":true,"shop_enabled":true,
+            "daily_amount":35,"shop_amount":20,"start_date":"2026-10-17","end_date":"2026-11-17"},
+            "fixed_sources":[]}}"""
+        every { service.putWorkspace("user", "acc1", any()) } answers { thirdArg<ObjectNode>().deepCopy().put("revision", 4) }
+        mvc.perform(
+            put("/v1/operator/training-workspace").param("account_id", "acc1")
+                .contentType(MediaType.APPLICATION_JSON).content(body),
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.stamina_sources.monthly_card.daily_amount").value(35))
+            .andExpect(jsonPath("$.data.stamina_sources.monthly_card.end_date").value("2026-11-17"))
+            .andExpect(jsonPath("$.data.revision").value(4))
+        verify { service.putWorkspace("user", "acc1", match { it.path("expected_revision").asInt() == 3 }) }
+    }
 }
