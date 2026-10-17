@@ -19,6 +19,46 @@ class FeedbackCategoryServiceTest {
     private val service = FeedbackCategoryService(repository)
 
     @Test
+    fun `排序持久化完整板块对象且重复顺序不写库`() {
+        val calendar = FeedbackCategory("CUSTOM_CAL", "活动日历", FeedbackArea.CALENDAR, hidden = true)
+        val other = FeedbackCategory("OTHER", "其他")
+        var stored = FeedbackCategoryCatalog(categories = listOf(calendar, other), version = 4)
+        every { repository.findById("feedback") } answers { Optional.of(stored) }
+        every { repository.save(any()) } answers { firstArg<FeedbackCategoryCatalog>().also { stored = it } }
+        val keys = listOf("OTHER", "CUSTOM_CAL")
+
+        assertEquals(listOf(calendar, other) to listOf(other, calendar), service.reorder(keys, keys.reversed()))
+        assertEquals(listOf(other, calendar), FeedbackCategoryService(repository).list())
+        assertEquals(4L, stored.version)
+        service.reorder(keys, keys)
+        verify(exactly = 1) { repository.save(any()) }
+    }
+
+    @Test
+    fun `排序拒绝重复缺失未知板块和过期顺序且不写库`() {
+        val keys = listOf("CALENDAR", "OTHER")
+        val stored = FeedbackCategoryCatalog(categories = keys.map { FeedbackCategory(it, it) })
+        every { repository.findById("feedback") } returns Optional.of(stored)
+        for (invalid in listOf(emptyList(), listOf("CALENDAR"), listOf("OTHER", "OTHER"), listOf("CALENDAR", "UNKNOWN"))) {
+            assertEquals(400, assertThrows(ApiResultException::class.java) { service.reorder(invalid, keys) }.statusCode)
+        }
+        for (stale in listOf(keys.reversed(), listOf("CALENDAR"))) {
+            assertEquals(409, assertThrows(ApiResultException::class.java) { service.reorder(keys.reversed(), stale) }.statusCode)
+        }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `排序沿用版本冲突保护且空库可保存默认目录顺序`() {
+        every { repository.findById("feedback") } returns Optional.empty()
+        val keys = FeedbackArea.labels.keys.toList()
+        every { repository.save(any()) } throws OptimisticLockingFailureException("stale")
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.reorder(keys.reversed(), keys) }.statusCode)
+        every { repository.save(any()) } answers { firstArg<FeedbackCategoryCatalog>() }
+        assertEquals(keys.reversed(), service.reorder(keys.reversed(), keys).second.map { it.key })
+    }
+
+    @Test
     fun `旧目录只补日历一次且读取不持久化不改历史板块`() {
         val historical = listOf(FeedbackCategory("CUSTOM_OLD", "旧板块"), FeedbackCategory(FeedbackArea.OTHER, "旧其他名称"))
         val stored = FeedbackCategoryCatalog(categories = historical, version = 7)

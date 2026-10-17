@@ -94,4 +94,23 @@ class FeedbackCategoryMongoTest {
         }
         assertEquals("新名称", service.label(category.key))
     }
+
+    @Test
+    fun `排序重载持久化并阻止旧顺序和旧版本覆盖且保留隐藏属性`() {
+        val calendar = FeedbackCategory("CUSTOM_CAL", "日历", FeedbackArea.CALENDAR, hidden = true)
+        val other = FeedbackCategory("OTHER", "其他")
+        val stale = repository.save(FeedbackCategoryCatalog(categories = listOf(calendar, other)))
+        val service = FeedbackCategoryService(repository)
+        val keys = listOf(other.key, calendar.key)
+        service.reorder(keys, keys.reversed())
+        assertEquals(listOf(other, calendar), FeedbackCategoryService(repository).list())
+        assertThrows(OptimisticLockingFailureException::class.java) { repository.save(stale) }
+        assertEquals(
+            409,
+            assertThrows(com.lhs.share.controller.response.ApiResultException::class.java) {
+                service.reorder(keys, keys.reversed())
+            }.statusCode,
+        )
+        assertEquals(listOf(other, calendar), repository.findById("feedback").orElseThrow().categories)
+    }
 }

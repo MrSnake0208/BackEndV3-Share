@@ -48,6 +48,36 @@ class FeedbackCategoryControllerContractTest {
     }
 
     @Test
+    fun `排序路由绑定完整新旧顺序并返回目录而非命中改名路由`() {
+        every { helper.requireUserId() } returns "root"
+        every { service.reorderCategories("root", listOf("OTHER", "CALENDAR"), listOf("CALENDAR", "OTHER")) } returns listOf(
+            FeedbackAreaOptionResponse("OTHER", "其他"),
+            FeedbackAreaOptionResponse("CALENDAR", "日历", "CALENDAR", true),
+        )
+        mvc.perform(
+            put("/v1/admin/feedback-categories/order").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"keys":["OTHER","CALENDAR"],"expected_keys":["CALENDAR","OTHER"]}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].key").value("OTHER"))
+            .andExpect(jsonPath("$.data[1].builtin_key").value("CALENDAR"))
+            .andExpect(jsonPath("$.data[1].hidden").value(true))
+        verify(exactly = 0) { service.renameCategory(any(), any(), any()) }
+    }
+
+    @Test
+    fun `排序接口保留权限非法列表和冲突业务错误`() {
+        every { helper.requireUserId() } returns "actor"
+        for (code in listOf(403, 400, 409)) {
+            every { service.reorderCategories("actor", any(), any()) } throws ApiResultException(code, "拒绝操作")
+            mvc.perform(
+                put("/v1/admin/feedback-categories/order").contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"keys":[],"expected_keys":[]}"""),
+            ).andExpect(jsonPath("$.status_code").value(code))
+        }
+    }
+
+    @Test
     fun `隐藏接口保留权限不存在和并发冲突业务错误`() {
         every { helper.requireUserId() } returns "actor"
         for (code in listOf(403, 404, 409)) {

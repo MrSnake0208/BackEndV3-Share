@@ -145,6 +145,24 @@ class FeedbackAccessService(
         return FeedbackAreaOptionResponse(updated.key, updated.label, updated.builtinKey, updated.hidden)
     }
 
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun reorderCategories(adminUserId: String, keys: List<String>, expectedKeys: List<String>): List<FeedbackAreaOptionResponse> {
+        authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val (before, after) = categories.reorder(keys, expectedKeys)
+        if (before != after) {
+            auditService.record(
+                AdminAuditLog(
+                    actorUserId = adminUserId,
+                    action = AdminAuditAction.FEEDBACK_CATEGORY_REORDERED,
+                    targetResource = "feedback_categories",
+                    before = AdminAuditSnapshot(feedbackCategoryOrder = before.map { it.label }),
+                    after = AdminAuditSnapshot(feedbackCategoryOrder = after.map { it.label }),
+                ),
+            )
+        }
+        return after.map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden) }
+    }
+
     private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {
         auditService.record(
             AdminAuditLog(

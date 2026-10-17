@@ -83,6 +83,58 @@ class FeedbackAccessServiceTest {
     }
 
     @Test
+    fun `排序必须有配置权限且只审计实际顺序变更`() {
+        val before = listOf(FeedbackCategory("CALENDAR", "日历", hidden = true), FeedbackCategory("OTHER", "其他"))
+        val after = before.reversed()
+        val expectedKeys = before.map { it.key }
+        val keys = after.map { it.key }
+        every { authorizationService.requirePermission("manager", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } throws
+            ApiResultException(403, "权限不足")
+        assertEquals(403, assertThrows(ApiResultException::class.java) { service.reorderCategories("manager", keys, expectedKeys) }.statusCode)
+        verify(exactly = 0) { categories.reorder(any(), any()) }
+        every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
+        every { categories.reorder(keys, expectedKeys) } returns (before to after)
+        val response = service.reorderCategories("root", keys, expectedKeys)
+        assertEquals(keys, response.map { it.key })
+        assertTrue(response.last().hidden)
+        verify(exactly = 1) {
+            auditService.record(
+                match<AdminAuditLog> {
+                    it.action == AdminAuditAction.FEEDBACK_CATEGORY_REORDERED && it.actorUserId == "root" &&
+                        it.before?.feedbackCategoryOrder == listOf("日历", "其他") &&
+                        it.after?.feedbackCategoryOrder == listOf("其他", "日历")
+                },
+            )
+        }
+        every { categories.reorder(keys, keys) } returns (after to after)
+        service.reorderCategories("root", keys, keys)
+        every { categories.reorder(keys, expectedKeys) } throws ApiResultException(409, "目录已更新")
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.reorderCategories("root", keys, expectedKeys) }.statusCode)
+        verify(exactly = 1) { auditService.record(any()) }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `目录排序在用户与工作台选项中保留且隐藏项仅留完整目录`() {
+        val ordered = listOf(
+            FeedbackCategory("OTHER", "其他"),
+            FeedbackCategory("CALENDAR", "日历", hidden = true),
+            FeedbackCategory("STAR", "星石"),
+        )
+        every { categories.list() } returns ordered
+        every { authorizationService.hasRole("user", AdminRole.SUPER_ADMIN) } returns false
+        every { repository.findById("user") } returns Optional.empty()
+        every { authorizationService.manageableAreasFor("user") } returns emptySet()
+        every { authorizationService.feedbackRolesFor("user") } returns emptySet()
+        every { authorizationService.developerAreasFor("user") } returns emptySet()
+        val current = service.current("user")
+        assertEquals(ordered.map { it.key }, current.categoryCatalog.map { it.key })
+        assertEquals(listOf("OTHER", "STAR"), current.availableCategories.map { it.key })
+        assertEquals(current.availableCategories, current.availableWorkAreas)
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
     fun `隐藏目录只影响可选项不移除既有授权或历史目录`() {
         val hidden = FeedbackCategory("CUSTOM_HIDDEN", "历史板块", hidden = true)
         every { categories.list() } returns listOf(hidden)
