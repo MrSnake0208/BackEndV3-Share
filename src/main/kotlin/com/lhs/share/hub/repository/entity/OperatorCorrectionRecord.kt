@@ -32,4 +32,5 @@ data class OperatorCorrectionRecord(
     val huaji: OperatorHuaji? = null,
     val huajiLegacy: OperatorHuajiLegacy? = null,
     val createdAt: Instant = Instant.now(),
+    val levelBreakthroughStage: Int? = null,
 )

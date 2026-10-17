@@ -147,6 +147,7 @@ class OperatorShareServiceTest {
         assertEquals("2026-09-03", view.catalogVersion)
         assertEquals(setOf("recruited"), view.entries.keys)
         assertEquals(27, view.entries.getValue("recruited").starLevel)
+        assertEquals(9, view.entries.getValue("recruited").levelBreakthroughStage)
         assertEquals(state, view.entries.getValue("recruited").growthState)
         val json = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
@@ -300,6 +301,7 @@ class OperatorShareServiceTest {
         elite = 17,
         starLevel = starLevel,
         level = 90,
+        levelBreakthroughStage = 9,
         discs = listOf(OperatorDisc("技能增伤")),
         starStones = listOf(OperatorStarStone("攻击力", "main1", 60)),
         discLoadouts = listOf(OperatorDiscLoadout("disc_1", "命盘一")),

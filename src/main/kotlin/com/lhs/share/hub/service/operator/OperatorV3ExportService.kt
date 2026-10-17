@@ -82,9 +82,17 @@ class OperatorV3ExportService(
                 .put("elite", entry.elite)
                 .put("star_level", entry.starLevel)
             val catalog = catalogService.getOperator(operatorId)
+            if (version >= 5) {
+                val stage = OperatorLevelBreakthroughRules.read(entry.level, entry.levelBreakthroughStage)
+                if (stage == null) node.putNull("level_breakthrough_stage") else node.put("level_breakthrough_stage", stage)
+            } else {
+                node.withArray(
+                    "warnings",
+                ).add("level_breakthrough_information_loss: use v5 to preserve level breakthrough and observed inputs")
+            }
             run {
                 val huaji = OperatorHuajiRules.read(entry, catalog)
-                if (version == 4) {
+                if (version >= 4) {
                     node.remove("star_level")
                     node.set<JsonNode>("huaji", objectMapper.valueToTree(huaji))
                     node.set<JsonNode>(
@@ -94,7 +102,7 @@ class OperatorV3ExportService(
                         ),
                     )
                 } else {
-                    node.putArray(
+                    node.withArray(
                         "warnings",
                     ).add(
                         "legacy_huaji_information_loss: owned=${huaji.owned}, stage=${huaji.stage}, awakened=${huaji.awakened}; legacy star_level=${entry.starLevel} cannot encode independent facts, use v4",
@@ -136,9 +144,18 @@ class OperatorV3ExportService(
                 stats.observedInputs?.let { inputs ->
                     val observed = objectMapper.createObjectNode()
                     inputs.level?.let { observed.put("level", it) }
+                    if (version >= 5) {
+                        if (inputs.levelBreakthroughStage ==
+                            null
+                        ) {
+                            observed.putNull("level_breakthrough_stage")
+                        } else {
+                            observed.put("level_breakthrough_stage", inputs.levelBreakthroughStage)
+                        }
+                    }
                     inputs.elite?.let { observed.put("elite", it) }
                     inputs.starLevel?.let { observed.put("star_level", it) }
-                    if (version == 4) inputs.huaji?.let { observed.set<JsonNode>("huaji", objectMapper.valueToTree(it)) }
+                    if (version >= 4) inputs.huaji?.let { observed.set<JsonNode>("huaji", objectMapper.valueToTree(it)) }
                     inputs.odditiesSignature?.let { observed.put("oddities_signature", it) }
                     inputs.equippedStarStonesSignature?.let { observed.put("equipped_star_stones_signature", it) }
                     if (!observed.isEmpty) combat.set<ObjectNode>("observed_inputs", observed)
@@ -184,7 +201,7 @@ class OperatorV3ExportService(
                 val targetNode = objectMapper.createObjectNode()
                 target.targetLevel?.let { targetNode.put("level", it) }
                 target.targetElite?.let { targetNode.put("elite", it) }
-                if (versionForTargets == 4 && target.targetHuaji != null) {
+                if (versionForTargets >= 4 && target.targetHuaji != null) {
                     targetNode.set<JsonNode>("huaji", objectMapper.valueToTree(target.targetHuaji))
                 } else {
                     target.targetStarLevel?.let { targetNode.put("star_level", it) }

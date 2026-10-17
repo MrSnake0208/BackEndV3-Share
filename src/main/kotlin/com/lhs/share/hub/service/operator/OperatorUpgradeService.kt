@@ -113,8 +113,15 @@ class OperatorUpgradeService(
                         game = request.game,
                         operatorId = request.operatorId,
                         reason = "quick_upgrade",
-                        fields = if (request.dimension == AWAKENING) setOf("huaji") else setOf("level", "elite", "star_level"),
+                        fields = if (request.dimension ==
+                            AWAKENING
+                        ) {
+                            setOf("huaji")
+                        } else {
+                            setOf("level", "elite", "star_level", "level_breakthrough_stage")
+                        },
                         level = savedEntry.level,
+                        levelBreakthroughStage = savedEntry.levelBreakthroughStage,
                         elite = savedEntry.elite,
                         starLevel = savedEntry.starLevel,
                         huaji = savedEntry.huaji,
@@ -148,6 +155,7 @@ class OperatorUpgradeService(
                         operatorElite = savedEntry.elite,
                         operatorStarLevel = savedEntry.starLevel,
                         operatorHuaji = savedEntry.huaji,
+                        operatorLevelBreakthroughStage = savedEntry.levelBreakthroughStage,
                         operatorRevision = savedEntry.revision,
                         consumed = consumed,
                         inventoryRevision = nextInventoryRevision,
@@ -211,7 +219,11 @@ class OperatorUpgradeService(
             )
         if (enforceExpectedOperatorRevision && entry.revision != request.expectedOperatorRevision) staleOperator()
         if (OperatorSharedGrowth.members(request.operatorId, catalogService).mapNotNull { current.entries[it] }
-                .any { it.level != entry.level || it.elite != entry.elite }
+                .any {
+                    it.level != entry.level || it.elite != entry.elite ||
+                        OperatorLevelBreakthroughRules.read(it.level, it.levelBreakthroughStage) !=
+                        OperatorLevelBreakthroughRules.read(entry.level, entry.levelBreakthroughStage)
+                }
         ) {
             invalid("shared_growth_conflict", "Correct inconsistent shared growth before consuming inventory")
         }
@@ -246,7 +258,23 @@ class OperatorUpgradeService(
             if (request.target > allowed) invalid("invalid_upgrade_target", "elite target exceeds the current level limit")
         }
         val baseCost = when (request.dimension) {
-            LEVEL -> OperatorRequirementRules.level(from, request.target, growthCatalog, request.skipBreakthroughMaterials)
+            LEVEL -> {
+                if (request.skipBreakthroughMaterials &&
+                    (
+                        from !in 10..90 || from % 10 != 0 ||
+                            OperatorLevelBreakthroughRules.read(from, entry.levelBreakthroughStage)?.let { it < from / 10 } == true
+                        )
+                ) {
+                    invalid("level_breakthrough_conflict", "Already-broken correction conflicts with the current breakthrough state")
+                }
+                OperatorRequirementRules.level(
+                    from,
+                    request.target,
+                    growthCatalog,
+                    request.skipBreakthroughMaterials,
+                    entry.levelBreakthroughStage,
+                )
+            }
             ELITE -> OperatorRequirementRules.elite(from, request.target, growthCatalog)
             AWAKENING -> OperatorRequirementRules.awakening()
             else -> OperatorRequirementRules.huaji(from, request.target)
@@ -341,7 +369,13 @@ class OperatorUpgradeService(
             if (stats.observedAttack != null || stats.observedHp != null) stats.copy(observedStatus = "stale") else stats
         }
         return when (dimension) {
-            LEVEL -> entry.copy(level = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
+            LEVEL -> entry.copy(
+                level = target,
+                levelBreakthroughStage = (target - 1) / 10,
+                combatStats = staleStats,
+                revision = entry.revision + 1,
+                updatedAt = now,
+            )
             ELITE -> entry.copy(elite = target, combatStats = staleStats, revision = entry.revision + 1, updatedAt = now)
             AWAKENING -> entry.copy(
                 starLevel = checkNotNull(entry.huaji?.stage),

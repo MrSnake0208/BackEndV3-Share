@@ -36,7 +36,7 @@ class OperatorV3ExportServiceTest {
         val catalog = mockk<OperatorCatalogService>()
         val account = SubAccount(userId = "u1", accountId = "a1", name = "账号", game = "如鸢")
         every { accounts.findByUserIdAndAccountId("u1", "a1") } returns account
-        every { currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "a1") } returns listOf(
+        val saved = listOf(
             OperatorCurrent(
                 userId = "u1",
                 accountId = "a1",
@@ -58,6 +58,7 @@ class OperatorV3ExportServiceTest {
                 ),
             ),
         )
+        every { currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "a1") } returns saved
         every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "a1") } returns listOf(
             OperatorAnnotation(userId = "u1", accountId = "a1", operatorId = "op1", growthState = state, note = "继续收集"),
         )
@@ -90,6 +91,43 @@ class OperatorV3ExportServiceTest {
         assertTrue(entry.path("favorite").booleanValue())
         assertEquals("继续收集", entry.path("note").asText())
         assertEquals(31, entry.path("targets").path("star_level").intValue())
+        val v5 = service.export("u1", "a1", null, 5)
+        OperatorV3SchemaValidator(mapper).validate(v5)
+        assertEquals(5, v5.path("version").asInt())
+        val v5Entry = v5.path("records").get(0).path("entries").get(0)
+        assertEquals(9, v5Entry.path("level_breakthrough_stage").asInt())
+        assertTrue(v5Entry.has("huaji"))
+        assertTrue(!exported.path("records").get(0).path("entries").get(0).has("level_breakthrough_stage"))
+        for (stage in listOf(8, 9, null)) {
+            val boundary = saved.single().entries.getValue("op1").copy(
+                level = 90,
+                elite = 15,
+                levelBreakthroughStage = stage,
+                combatStats = saved.single().entries.getValue("op1").combatStats!!.copy(
+                    observedAttack = 1234,
+                    observedInputs = com.lhs.share.hub.repository.entity.OperatorObservedInputs(level = 90, levelBreakthroughStage = null),
+                    observedStatus = "unverified",
+                ),
+            )
+            every { currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "a1") } returns
+                listOf(saved.single().copy(entries = mapOf("op1" to boundary)))
+            val backup = service.export("u1", "a1", null, 5)
+            OperatorV3SchemaValidator(mapper).validate(backup)
+            val data = backup.path("records").get(0).path("entries").get(0)
+            if (stage == null) {
+                assertTrue(data.path("level_breakthrough_stage").isNull)
+            } else {
+                assertEquals(stage, data.path("level_breakthrough_stage").asInt())
+            }
+            assertTrue(data.path("combat_stats").path("observed_inputs").path("level_breakthrough_stage").isNull)
+            val legacy = service.export("u1", "a1", null, 4)
+            OperatorV3SchemaValidator(mapper).validate(legacy)
+            assertTrue(
+                legacy.path(
+                    "records",
+                ).get(0).path("entries").get(0).path("warnings").toString().contains("level_breakthrough_information_loss"),
+            )
+        }
         every { catalog.getOperator("op1") } returns null
         val orphanBackup = service.export("u1", "a1", null, 4)
         OperatorV3SchemaValidator(mapper).validate(orphanBackup)

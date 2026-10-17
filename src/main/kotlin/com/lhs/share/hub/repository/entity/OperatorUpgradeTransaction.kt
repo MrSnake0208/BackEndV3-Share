@@ -30,6 +30,7 @@ data class OperatorUpgradeTransaction(
     val inventoryRevision: Long,
     val createdAt: Instant = Instant.now(),
     val operatorHuaji: OperatorHuaji? = null,
+    val operatorLevelBreakthroughStage: Int? = null,
 )
 
 data class UpgradeConsumedEntry(

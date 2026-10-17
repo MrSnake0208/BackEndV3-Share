@@ -89,6 +89,7 @@ class OperatorControllerContractTest {
                 .param("game", "代号鸢"),
         )
             .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].entries.op1.level_breakthrough_stage").value(9))
             .andExpect(jsonPath("$.data[0].entries.op1.star_level").value(27))
             .andExpect(jsonPath("$.data[0].entries.op1.star_stones[0].type").value("main1"))
             .andExpect(jsonPath("$.data[0].entries.op1.disc_loadouts[0].name").value("命盘一"))
@@ -110,6 +111,7 @@ class OperatorControllerContractTest {
                 .content(
                     """
                     {
+                      "level_breakthrough_stage": null,
                       "disc_loadouts": [],
                       "star_stones": [
                         {"type":"main1","name":"攻击力","level":60}
@@ -132,7 +134,7 @@ class OperatorControllerContractTest {
                 "代号鸢",
                 "op1",
                 match {
-                    it.has("disc_loadouts") &&
+                    it.has("level_breakthrough_stage") && it.path("level_breakthrough_stage").isNull && it.has("disc_loadouts") &&
                         it.has("star_stones") &&
                         it["combat_stats"].has("manual_attack")
                 },
@@ -209,6 +211,7 @@ class OperatorControllerContractTest {
         elite = 16,
         starLevel = 27,
         level = 90,
+        levelBreakthroughStage = 9,
         discs = listOf(OperatorDisc("盘A")),
         starStones = listOf(OperatorStarStone("星石", "main1", 60)),
         discLoadouts = listOf(OperatorDiscLoadout("one", "命盘一", listOf(OperatorDisc("盘A")))),

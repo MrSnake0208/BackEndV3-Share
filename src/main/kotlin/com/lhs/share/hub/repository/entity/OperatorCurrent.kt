@@ -34,6 +34,7 @@ data class OperatorEntry(
     val updatedAt: Instant? = null,
     val huaji: OperatorHuaji? = null,
     val huajiLegacy: OperatorHuajiLegacy? = null,
+    val levelBreakthroughStage: Int? = null,
 )
 
 data class OperatorHuaji(val owned: Boolean, val stage: Int?, val awakened: Boolean?)
@@ -69,6 +70,7 @@ data class OperatorObservedInputs(
     val odditiesSignature: String? = null,
     val equippedStarStonesSignature: String? = null,
     val huaji: OperatorHuaji? = null,
+    val levelBreakthroughStage: Int? = null,
 )
 
 data class OperatorOddityValue(

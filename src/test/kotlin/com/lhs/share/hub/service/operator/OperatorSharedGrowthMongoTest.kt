@@ -511,9 +511,80 @@ class OperatorSharedGrowthMongoTest {
     }
 
     @Test
+    fun `breakthrough v5 shares facts keeps unknown captures and rolls back atomically`() {
+        val before = current.findById("state").orElseThrow()
+        val captured = com.lhs.share.hub.repository.entity.OperatorObservedInputs(level = 90, levelBreakthroughStage = null)
+        current.save(
+            before.copy(
+                entries = before.entries.mapValues { (_, value) ->
+                    value.copy(combatStats = value.combatStats?.copy(observedInputs = captured, observedStatus = "unverified"))
+                },
+            ),
+        )
+        val doc = document("breakthrough")
+        (doc.path("document") as ObjectNode).put("version", 5)
+        val record = doc.path("document").path("records").get(0) as ObjectNode
+        record.put("source_kind", "manual")
+        record.set<com.fasterxml.jackson.databind.JsonNode>(
+            "entries",
+            mapper.readTree(
+                """[{"operator_id":"base","level_breakthrough_stage":9}]""",
+            ),
+        )
+        assertEquals(1, imports.commitBrowser("owner", doc).accepted)
+        val changed = current.findById("state").orElseThrow()
+        assertEquals(setOf(9), changed.entries.values.map { it.levelBreakthroughStage }.toSet())
+        assertEquals(captured, changed.entries.getValue("base").combatStats!!.observedInputs)
+        assertEquals("stale", changed.entries.getValue("base").combatStats!!.observedStatus)
+        val correctionsCount = corrections.count()
+        imports.commitBrowser("owner", doc)
+        assertEquals(changed, current.findById("state").orElseThrow())
+        assertEquals(correctionsCount, corrections.count())
+        assertThrows(IllegalStateException::class.java) {
+            transactions.executeWithoutResult {
+                service.patchCurrent(
+                    "owner",
+                    "account",
+                    "如鸢",
+                    "movie",
+                    mapper.readTree(
+                        """{"level_breakthrough_stage":8,"expected_revision":8,"reason":"manual_correction"}""",
+                    ) as ObjectNode,
+                )
+                error("force breakthrough rollback")
+            }
+        }
+        assertEquals(changed, current.findById("state").orElseThrow())
+        assertEquals(correctionsCount, corrections.count())
+        every { catalog.currentCatalogVersion() } returns "test"
+        val exporter = OperatorV3ExportService(
+            mapper,
+            accounts,
+            current,
+            mockk<com.lhs.share.hub.repository.OperatorAnnotationRepository>(relaxed = true),
+            mockk<com.lhs.share.hub.repository.OperatorGrowthTargetRepository>(relaxed = true),
+            mockk<com.lhs.share.hub.repository.InventoryAgentFavoriteRepository>(relaxed = true),
+            catalog,
+        )
+        val backup = exporter.export("owner", "account", null, 5)
+        current.deleteById("state")
+        val wrapper = mapper.createObjectNode()
+        wrapper.set<com.fasterxml.jackson.databind.JsonNode>("document", backup)
+        wrapper.set<com.fasterxml.jackson.databind.JsonNode>("account_mapping", mapper.createObjectNode().put("account", "account"))
+        imports.commitBrowser("owner", wrapper)
+        val restored = current.findByUserIdAndAccountIdAndGame("owner", "account", "如鸢")!!
+        assertEquals(setOf(9), restored.entries.values.map { it.levelBreakthroughStage }.toSet())
+        assertEquals(captured, restored.entries.getValue("base").combatStats!!.observedInputs)
+        assertEquals(
+            changed.entries.getValue("base").combatStats!!.observedStatus,
+            restored.entries.getValue("base").combatStats!!.observedStatus,
+        )
+    }
+
+    @Test
     fun `related CAS conflict cannot overwrite another form and transaction rollback removes all group writes`() {
         val entries = current.findById("state").orElseThrow().entries
-        val stale = entries.mapValues { (_, value) -> value.copy(level = 100, revision = 8) }
+        val stale = entries.mapValues { (_, value) -> value.copy(levelBreakthroughStage = 9, revision = 8) }
         current.compareAndSetEntries(
             "owner",
             "account",

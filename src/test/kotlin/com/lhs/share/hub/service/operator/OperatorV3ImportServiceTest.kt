@@ -639,6 +639,27 @@ class OperatorV3ImportServiceTest {
         verify { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", any()) }
     }
 
+    @Test
+    fun `v5 unsigned scan snapshots only its own breakthrough and old versions cannot add the field`() {
+        val wrapper = wrappedDocument()
+        val doc = wrapper.path("document") as com.fasterxml.jackson.databind.node.ObjectNode
+        doc.put("version", 5)
+        val source = doc.path("records").get(0).path("entries").get(0) as com.fasterxml.jackson.databind.node.ObjectNode
+        source.put("level_breakthrough_stage", 9)
+        val captured = slot<com.fasterxml.jackson.databind.node.ObjectNode>()
+        every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", capture(captured)) } returns
+            OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), false)
+        assertEquals(1, service.previewBrowser("u1", wrapper).accepted)
+        assertEquals(9, captured.captured.path("level_breakthrough_stage").asInt())
+        assertEquals(false, captured.captured.path("combat_stats").has("observed_inputs"))
+        source.putNull("level_breakthrough_stage")
+        service.previewBrowser("u1", wrapper)
+        assertEquals(false, captured.captured.has("level_breakthrough_stage"))
+        assertEquals(false, captured.captured.path("combat_stats").has("observed_inputs"))
+        doc.put("version", 4)
+        assertThrows(OperatorApiException::class.java) { OperatorV3SchemaValidator(mapper).validate(doc) }
+    }
+
     private fun wrappedDocument() = mapper.createObjectNode().apply {
         set<com.fasterxml.jackson.databind.JsonNode>("document", document())
         set<com.fasterxml.jackson.databind.JsonNode>(

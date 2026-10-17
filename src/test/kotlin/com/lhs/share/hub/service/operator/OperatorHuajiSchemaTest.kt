@@ -19,4 +19,13 @@ class OperatorHuajiSchemaTest {
             assertThrows(OperatorApiException::class.java) { validator.validate(document) }
         }
     }
+
+    @Test
+    fun `v5 boundary and unknown capture fixture validates and out of range fails`() {
+        ClassPathResource("operator-growth-exchange-v5/boundary.valid.json").inputStream.use { validator.validate(mapper.readTree(it)) }
+        ClassPathResource("operator-growth-exchange-v5/out-of-range.invalid.json").inputStream.use {
+            val document = mapper.readTree(it)
+            assertThrows(OperatorApiException::class.java) { validator.validate(document) }
+        }
+    }
 }

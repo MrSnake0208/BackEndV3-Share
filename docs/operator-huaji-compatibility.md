@@ -1,5 +1,6 @@
 # 密探独立化极与 operator exchange v4
 
+等级突破、采集快照与当前推荐完整备份见[operator v5](./operator-level-breakthrough-v5.md)；旧版本继续兼容。
 ## 1. 权威事实与能力
 
 当前 API、持久化和 v4 使用 `huaji:{owned:boolean,stage:0..25|null,awakened:boolean|null}`。`true` 确认已觉醒，`false` 确认未觉醒，`null` 待确认。`owned=true` 可以阶段未知；不能用共享等级/修为推导拥有。未拥有必须 stage=0，觉醒不得 true；拥有时 stage 不能为0。
@@ -56,7 +57,7 @@ PATCH支持部分huaji；缺失对象/子字段保留，显式null将stage或awa
 
 格式仍是`myshare-operator-exchange`，version=4，仅密探领域。沿用v3账号、记录、分区状态、鉴权和事务语义，客观entry以huaji替代star_level；huaji对象出现时三个字段均必填，可为null的仅stage/awakened。其余客观字段和独立annotation记录保持原结构；annotation targets可使用huaji。
 
-浏览器 `/v1/operator/import/preview`、`/import` 接收v3/v4原始或映射包装体；`/export?version=4`无损导出独立事实和追溯字段。OpenAPI旧v2/v3端点继续兼容，没有改成多领域v4。前端完整备份默认v4。
+浏览器 `/v1/operator/import/preview`、`/import` 接收v3/v4/v5原始或映射包装体；`/export?version=4`无损导出独立事实和追溯字段。OpenAPI旧v2/v3端点继续兼容，没有改成多领域v4。前端完整备份默认v5。
 
 v2输出继续camelCase `starLevel/subProf/starStones`；v3继续snake_case。二者单一标量不能同时表达任意stage+awakened、已确认未觉醒与未知、owned且stage未知。v3会在条目warnings明确提醒；v2以响应头`X-Operator-Exchange-Warning`提醒信息损失，接入端须展示此限制并优先选v4备份。不要将旧字段解释成无损备份；导入独立未知事实必须使用v4。
 

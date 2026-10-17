@@ -356,7 +356,10 @@ class OperatorV3ImportService(
                         }
                     }
                     group.any { it.response.status == REJECTED } ||
-                        listOf("level", "elite").any { field -> patches.mapNotNull { it.get(field) }.distinct().size > 1 }
+                        listOf("level", "elite", "level_breakthrough_stage").any { field ->
+                            patches.mapNotNull { it.get(field) }.distinct().size >
+                                1
+                        }
                 }.keys
             prepared.map { item ->
                 if (OperatorSharedGrowth.baseId(item.operatorId, catalogService) !in invalidGroups ||
@@ -779,6 +782,12 @@ class OperatorV3ImportService(
             if (entry.has("level")) patch.set<JsonNode>("level", entry.get("level"))
             if (entry.has("elite")) patch.set<JsonNode>("elite", entry.get("elite"))
         }
+        if (includeSection(entry, "breakthrough", command.confirmReview) && entry.has("level_breakthrough_stage")) {
+            val scanning = command.scanAccountId != null || text(record, "source_kind") == "scan"
+            if (!scanning || entry.hasNonNull("level_breakthrough_stage")) {
+                patch.set<JsonNode>("level_breakthrough_stage", entry.get("level_breakthrough_stage"))
+            }
+        }
         if (includeSection(entry, "huaji", command.confirmReview) && entry.has("star_level")) {
             patch.set<JsonNode>("star_level", entry.get("star_level"))
         }
@@ -823,6 +832,7 @@ class OperatorV3ImportService(
             patch.remove("level")
             patch.remove("elite")
         }
+        if (all || sectionStatus(entry, "breakthrough") == REVIEW) patch.remove("level_breakthrough_stage")
         if (all || sectionStatus(entry, "huaji") == REVIEW) {
             patch.remove("star_level")
             patch.remove("huaji")
@@ -847,6 +857,12 @@ class OperatorV3ImportService(
             if (old != new) put(field, OperatorV3FieldChange(old, new))
         }
         if (patch.has("level")) add("level", before?.level, after.level)
+        if (patch.has(
+                "level_breakthrough_stage",
+            )
+        ) {
+            add("level_breakthrough_stage", before?.levelBreakthroughStage, after.levelBreakthroughStage)
+        }
         if (patch.has("elite")) add("elite", before?.elite, after.elite)
         if (patch.has("star_level") || patch.has("huaji")) add("huaji", before?.huaji, after.huaji)
         if (patch.has("disc_loadouts")) add("disc_loadouts", before?.discLoadouts, after.discLoadouts)

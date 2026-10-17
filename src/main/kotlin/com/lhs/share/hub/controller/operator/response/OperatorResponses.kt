@@ -50,6 +50,7 @@ data class OperatorCurrentEntryDto(
     val updatedAt: Instant?,
     val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
     val huajiLegacy: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy? = null,
+    val levelBreakthroughStage: Int? = null,
 ) {
     companion object {
         fun of(entry: com.lhs.share.hub.repository.entity.OperatorEntry): OperatorCurrentEntryDto {
@@ -67,6 +68,7 @@ data class OperatorCurrentEntryDto(
                 normalized.updatedAt,
                 normalized.huaji,
                 normalized.huajiLegacy,
+                com.lhs.share.hub.service.operator.OperatorLevelBreakthroughRules.read(normalized.level, normalized.levelBreakthroughStage),
             )
         }
     }
