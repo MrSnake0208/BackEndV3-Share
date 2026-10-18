@@ -6,6 +6,7 @@ object BetaAccessPolicy {
         "/v1/accounts",
         "/v1/activity-calendar",
         "/v1/recruitment",
+        "/v1/achievements",
         "/v1/inventory",
         "/v1/operator",
         "/v1/star-state",
@@ -17,7 +18,11 @@ object BetaAccessPolicy {
 
     fun requiresBeta(method: String, path: String): Boolean {
         if (method == "OPTIONS") return false
-        if (method == "GET" && path in setOf("/v1/inventory/catalog", "/v1/operator/catalog", "/v1/recruitment/catalog")) return false
+        if (method == "GET" &&
+            path in setOf("/v1/inventory/catalog", "/v1/operator/catalog", "/v1/recruitment/catalog", "/v1/achievements/catalog")
+        ) {
+            return false
+        }
         if (method == "GET" && path.startsWith("/v1/operator/share/view/")) return false
         if (method == "GET" && path.startsWith("/v1/star/share/view/")) return false
         if (method == "POST" && path == "/user/open-api/token") return true

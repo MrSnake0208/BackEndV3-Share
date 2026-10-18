@@ -1,6 +1,7 @@
 package com.lhs.share.hub.service.account
 
 import com.lhs.share.hub.controller.account.response.SubAccountResponse
+import com.lhs.share.hub.repository.AchievementRepository
 import com.lhs.share.hub.repository.ActivityCalendarSubscriptionRepository
 import com.lhs.share.hub.repository.CalendarPrivateItemRepository
 import com.lhs.share.hub.repository.InventoryAgentFavoriteRepository
@@ -28,6 +29,7 @@ import com.lhs.share.hub.repository.StarRecoveryPointRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.hub.service.achievement.AchievementImportPreviews
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.hub.service.recruitment.RecruitmentService
 import com.lhs.share.openapi.OpenApiTokenService
@@ -76,6 +78,8 @@ class SubAccountService(
     private val starCompletionRepository: StarCompletionRepository? = null,
     private val operatorOrganizationRepository: OperatorOrganizationRepository? = null,
     private val operatorDailyTasksRepository: OperatorDailyTasksRepository? = null,
+    private val achievements: AchievementRepository? = null,
+    private val achievementPreviews: AchievementImportPreviews? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -123,6 +127,9 @@ class SubAccountService(
                     val nextGame = game?.let(::normalizeGame) ?: account.game
                     fenceAccount(account)
                     if (nextGame != account.game) {
+                        if (achievements?.hasSubstantiveData(userId, accountId) == true) {
+                            throw InventoryApiException(HttpStatus.CONFLICT, "achievement_game_locked", "已有成就档案，不能修改所属游戏；请使用另一个游戏账号")
+                        }
                         if (calendarPrivateItems?.exists(userId, accountId) == true) {
                             throw InventoryApiException(HttpStatus.CONFLICT, "calendar_private_game_locked", "已有私人日历事项，不能修改所属游戏；请使用另一个游戏账号")
                         }
@@ -137,6 +144,8 @@ class SubAccountService(
                             throw InventoryApiException(HttpStatus.CONFLICT, "recruitment_game_locked", "已有招募档案，不能修改所属游戏；请使用另一个游戏账号")
                         }
                         recruitmentRepository?.removeEmptyPreferences(userId, accountId)
+                        achievements?.deleteAccount(userId, accountId)
+                        achievementPreviews?.deleteAccount(userId, accountId)
                     }
                     val now = Instant.now()
                     accountRepository.updateDetails(userId, accountId, name ?: account.name, nextGame, now)
@@ -193,6 +202,8 @@ class SubAccountService(
                 recruitmentRepository?.deleteAccount(userId, accountId)
                 calendarSubscriptions?.deleteAccount(userId, accountId)
                 calendarPrivateItems?.deleteAccount(userId, accountId)
+                achievements?.deleteAccount(userId, accountId)
+                achievementPreviews?.deleteAccount(userId, accountId)
                 tokenService.revokeByAccount(userId, accountId)
                 accountRepository.deleteById(checkNotNull(account.id))
                 accountEvents?.publishChange(userId, accountId, "account_deleted")

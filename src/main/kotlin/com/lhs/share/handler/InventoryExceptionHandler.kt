@@ -2,6 +2,7 @@ package com.lhs.share.handler
 
 import com.fasterxml.jackson.core.JsonParseException
 import com.lhs.share.hub.controller.account.AccountController
+import com.lhs.share.hub.controller.achievement.AchievementController
 import com.lhs.share.hub.controller.inventory.InventoryController
 import com.lhs.share.hub.controller.inventory.response.InventoryError
 import com.lhs.share.hub.controller.inventory.response.InventoryErrorResponse
@@ -34,6 +35,7 @@ private val inventoryLog = KotlinLogging.logger { }
 @RestControllerAdvice(
     assignableTypes = [
         AccountController::class,
+        AchievementController::class,
         InventoryController::class,
         StarStateController::class,
         StarCompletionController::class,
