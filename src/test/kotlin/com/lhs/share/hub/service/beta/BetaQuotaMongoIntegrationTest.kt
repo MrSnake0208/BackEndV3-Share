@@ -95,7 +95,7 @@ class BetaQuotaMongoIntegrationTest {
         every { users.get(any()) } answers { com.lhs.share.fixtures.TestFixtures.user(firstArg()) }
         authorization = mockk(relaxed = true)
         val repositories = MongoRepositoryFactory(mongo)
-        notifications = NotificationService(repositories.getRepository(NotificationRepository::class.java))
+        notifications = NotificationService(repositories.getRepository(NotificationRepository::class.java), mockk(relaxed = true))
         audit = AdminAuditService(repositories.getRepository(AdminAuditLogRepository::class.java), authorization)
         service = newService(notifications)
         mongo.save(

@@ -20,9 +20,10 @@ import java.time.Instant
  * 反馈消息、管理员回复或状态更新后，由反馈服务调用 [create] 生成通知。
  */
 @Service
-@Transactional
+@Transactional(transactionManager = "hubTransactionManager")
 class NotificationService(
     private val notificationRepository: NotificationRepository,
+    private val notificationEvents: NotificationEventService,
 ) {
     private val random = SecureRandom()
 
@@ -57,7 +58,9 @@ class NotificationService(
             refId = refId,
             messageIndex = messageIndex,
         )
-        return notificationRepository.save(notification)
+        val saved = notificationRepository.save(notification)
+        notificationEvents.publishCreated(userId, checkNotNull(saved.id))
+        return saved
     }
 
     fun clearFeedbackReminders(ticketId: String, throughIndex: Int) {

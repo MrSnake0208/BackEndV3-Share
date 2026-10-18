@@ -420,3 +420,13 @@ ps -o pid,rss,cmd -C java
 ```
 
 必要时再降低 `YUANHUB_JAVA_MAX_RAM_PERCENTAGE`。
+
+## 私人通知 SSE
+
+`GET /v1/notifications/events` 使用现有 `Authorization: Bearer <JWT>` 请求头，仅订阅 JWT subject 的通知；不接受 URL token，不需要内测或子账号权限。响应为 `text/event-stream`，包含 `Cache-Control: no-store` 和 `X-Accel-Buffering: no`。每 15 秒发送注释心跳，连接约 5 分钟轮换，断开/超时/写入失败清理订阅。
+
+`NotificationService.create` 保存通知后，通过 `NotificationEventService` 在当前 Hub 事务的 `afterCommit` 发布 `notification_created`，事件 ID 和 JSON 的 `id` 均为通知 ID；事务回滚不发布。没有外层事务的已完成写入立即发布。推送失败不回滚反馈，也不改通知的已读状态；前端仍从现有通知接口读取权威数据。
+
+当前仓库的生产设计是一个活动 Nginx upstream，蓝绿发布在切流和 drain 期间有两个进程并存。通知广播仅在进程内有效，旧 SSE 连接可能短暂收不到新进程创建的事件；断开重连/30 秒失败轮询及健康时 120 秒校准会补偿。若未来同时对多个后端实例分流，同样存在跨实例实时送达限制，需要另行确认并引入共享事件通道，当前不接入 Redis Pub/Sub。
+
+上线前需人工确认 A/B 两层代理都保留 Authorization、支持长连接、禁用该路径的响应缓存/缓冲，不忽略 `X-Accel-Buffering`，并使读超时大于心跳间隔。中间代理可能不遵守后端头部；本次仅核实仓库部署文档与脚本，未访问或修改生产配置。浏览器冻结的后台页、离线页面不保证即时送达；没有离线 Web Push。
