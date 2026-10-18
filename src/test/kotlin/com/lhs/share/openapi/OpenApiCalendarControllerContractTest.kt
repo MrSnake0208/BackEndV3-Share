@@ -44,7 +44,7 @@ class OpenApiCalendarControllerContractTest {
     private val tokenService = mockk<OpenApiTokenService>()
     private val service = mockk<ActivityCalendarSubscriptionService>()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-10-17T00:00:00Z"), ZoneOffset.UTC)
-    private val controller = OpenApiCalendarController(tokenService, service, clock)
+    private val controller = OpenApiCalendarController(tokenService, service, mockk(), mockk(), clock)
     private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
         .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)

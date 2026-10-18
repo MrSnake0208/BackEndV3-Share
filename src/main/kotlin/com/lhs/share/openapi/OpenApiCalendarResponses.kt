@@ -1,5 +1,6 @@
 package com.lhs.share.openapi
 
+import com.lhs.share.hub.controller.calendar.response.ActivityCalendarItem
 import java.time.Instant
 import java.time.LocalDate
 
@@ -41,4 +42,12 @@ data class OpenApiCalendarEvent(
     val timeZone: String?,
     val subscribed: Boolean,
     val completed: Boolean,
+)
+
+/** 当前账号所属游戏的公开活动目录,不包含用户订阅记录。 */
+data class OpenApiCalendarEventsResponse(
+    val accountId: String,
+    val game: String,
+    val generatedAt: Instant,
+    val items: List<ActivityCalendarItem>,
 )

@@ -4,6 +4,8 @@ import com.lhs.share.config.doc.RequireOpenApiToken
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.calendar.response.CalendarSubscriptionResponse
+import com.lhs.share.hub.service.account.SubAccountService
+import com.lhs.share.hub.service.calendar.ActivityCalendarService
 import com.lhs.share.hub.service.calendar.ActivityCalendarSubscriptionService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -33,6 +35,8 @@ import java.time.ZoneId
 class OpenApiCalendarController(
     private val tokenService: OpenApiTokenService,
     private val subscriptions: ActivityCalendarSubscriptionService,
+    private val calendar: ActivityCalendarService,
+    private val accounts: SubAccountService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     /**
@@ -72,6 +76,28 @@ class OpenApiCalendarController(
                     accountId = principal.accountId,
                     generatedAt = Instant.now(clock),
                     window = OpenApiCalendarWindow(start, end),
+                    items = items,
+                ),
+            ),
+        )
+    }
+
+    @Operation(summary = "当前游戏全部活动", description = "只读返回 token 绑定账号所属游戏的全部公开活动,含未订阅活动")
+    @RequireOpenApiToken
+    @GetMapping("/events")
+    fun events(
+        @Parameter(hidden = true)
+        @RequestHeader(value = "Authorization", required = false) authorization: String?,
+    ): ResponseEntity<ApiResult<OpenApiCalendarEventsResponse>> {
+        val principal = tokenService.validateAuthorization(authorization, OpenApiPermission.CALENDAR_READ)
+        val account = accounts.requireAccount(principal.userId, principal.accountId)
+        val items = calendar.publicItems(account.game, null, null, null).items
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
+            success(
+                OpenApiCalendarEventsResponse(
+                    accountId = principal.accountId,
+                    game = account.game,
+                    generatedAt = Instant.now(clock),
                     items = items,
                 ),
             ),
