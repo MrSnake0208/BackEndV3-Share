@@ -51,7 +51,7 @@ class ActivityCalendarImportContractTest {
 
     @BeforeEach
     fun setup() {
-        mvc = MockMvcBuilders.standaloneSetup(AdminActivityCalendarController(service, helper, authorization, mapper, importer))
+        mvc = MockMvcBuilders.standaloneSetup(AdminActivityCalendarController(service, helper, authorization, mapper, importer, mockk()))
             .setControllerAdvice(
                 ActivityCalendarExceptionHandler(),
             ).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()

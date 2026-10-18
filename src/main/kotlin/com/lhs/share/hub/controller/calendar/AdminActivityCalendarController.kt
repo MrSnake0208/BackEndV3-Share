@@ -11,10 +11,13 @@ import com.lhs.share.hub.controller.calendar.request.ActivityCalendarRequestDeco
 import com.lhs.share.hub.controller.calendar.request.ActivityCalendarWriteRequest
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminItem
 import com.lhs.share.hub.controller.calendar.response.ActivityCalendarAdminResponse
+import com.lhs.share.hub.controller.calendar.response.CalendarClassificationExport
+import com.lhs.share.hub.controller.calendar.response.CalendarClassificationReport
 import com.lhs.share.hub.controller.calendar.response.CalendarImportReport
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.calendar.ActivityCalendarApiException
+import com.lhs.share.hub.service.calendar.ActivityCalendarClassificationExchangeService
 import com.lhs.share.hub.service.calendar.ActivityCalendarImportService
 import com.lhs.share.hub.service.calendar.ActivityCalendarService
 import io.swagger.v3.oas.annotations.Operation
@@ -45,8 +48,40 @@ class AdminActivityCalendarController(
     private val authorization: AdminAuthorizationService,
     mapper: ObjectMapper,
     private val importer: ActivityCalendarImportService,
+    private val classificationExchange: ActivityCalendarClassificationExchangeService,
 ) {
     private val decoder = ActivityCalendarRequestDecoder(mapper)
+
+    @Operation(summary = "导出全部手工活动及只读卡池参考，完整资料不受当前筛选影响")
+    @GetMapping("/export")
+    fun export(): ApiResult<CalendarClassificationExport> {
+        requireEditor()
+        return success(classificationExchange.export())
+    }
+
+    @Operation(summary = "只读预览按ID更新分类的JSON，最多10000条/20 MiB")
+    @PostMapping("/classification-import/preview", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun previewClassification(request: HttpServletRequest): ApiResult<CalendarClassificationReport> {
+        requireEditor()
+        val (json, _) = classificationExchange.envelope(
+            request.inputStream.readNBytes(
+                ActivityCalendarClassificationExchangeService.MAX_ENVELOPE_BYTES + 1,
+            ),
+        )
+        return success(classificationExchange.preview(json))
+    }
+
+    @Operation(summary = "按ID和版本在事务中更新分类，不新建、不删除、不覆盖其他资料")
+    @PostMapping("/classification-import/commit", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun commitClassification(request: HttpServletRequest): ApiResult<CalendarClassificationReport> {
+        val actor = requireEditor()
+        val (json, token) = classificationExchange.envelope(
+            request.inputStream.readNBytes(
+                ActivityCalendarClassificationExchangeService.MAX_ENVELOPE_BYTES + 1,
+            ),
+        )
+        return success(classificationExchange.commit(actor, json, token))
+    }
 
     @Operation(
         summary = "只读预览JSON v1手工活动导入；请求json为原始文本，最多1 MiB/200条",
