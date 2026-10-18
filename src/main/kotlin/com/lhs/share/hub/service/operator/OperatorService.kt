@@ -1665,7 +1665,7 @@ class OperatorService(
     }
 
     private fun optionalInt(node: ObjectNode, field: String, operatorId: String, path: String): Int? =
-        if (!node.has(field)) null else requiredInt(node, field, operatorId, path, "invalid_combat_stats")
+        if (!node.hasNonNull(field)) null else requiredInt(node, field, operatorId, path, "invalid_combat_stats")
 
     private fun requiredLong(node: ObjectNode, field: String, operatorId: String): Long {
         val value = node.get(field)
