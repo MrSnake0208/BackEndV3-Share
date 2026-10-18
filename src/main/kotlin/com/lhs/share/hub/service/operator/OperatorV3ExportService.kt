@@ -114,6 +114,9 @@ class OperatorV3ExportService(
                 val loadoutNode = objectMapper.createObjectNode().put("id", loadout.id).put("name", loadout.name)
                 val discs = loadoutNode.putArray("discs")
                 loadout.discs.forEach { disc -> discs.add(objectMapper.createObjectNode().put("ot_name", disc.otName)) }
+                loadoutNode.put("status", loadout.status)
+                val targets = loadoutNode.putArray("target_discs")
+                loadout.targetDiscs.forEach { disc -> targets.add(objectMapper.createObjectNode().put("ot_name", disc.otName)) }
                 loadouts.add(loadoutNode)
             }
             val stones = node.putArray("equipped_star_stones")

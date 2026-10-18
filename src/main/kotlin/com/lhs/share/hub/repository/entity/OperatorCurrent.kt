@@ -42,7 +42,13 @@ data class OperatorHuajiLegacy(val raw: Int, val source: String)
 
 data class OperatorDisc(val otName: String, val abbreviation: String? = null, val color: String? = null, val desp: String? = null)
 data class OperatorStarStone(val name: String? = null, val type: String, val level: Int)
-data class OperatorDiscLoadout(val id: String, val name: String, val discs: List<OperatorDisc> = emptyList())
+data class OperatorDiscLoadout(
+    val id: String,
+    val name: String,
+    val discs: List<OperatorDisc> = emptyList(),
+    val status: String = "unmarked",
+    val targetDiscs: List<OperatorDisc> = emptyList(),
+)
 
 data class OperatorCombatStats(
     val observedAttack: Long? = null,

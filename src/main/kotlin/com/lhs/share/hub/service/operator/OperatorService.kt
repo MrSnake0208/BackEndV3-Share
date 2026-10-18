@@ -739,7 +739,10 @@ class OperatorService(
         }
         if (request.has("disc_loadouts")) {
             fields += "disc_loadouts"
-            merged = merged.copy(discLoadouts = parseDiscLoadouts(request.get("disc_loadouts"), catalog), discs = emptyList())
+            merged = merged.copy(
+                discLoadouts = parseDiscLoadouts(request.get("disc_loadouts"), catalog, existing.normalized().discLoadouts),
+                discs = emptyList(),
+            )
             merged = merged.copy(discs = merged.discLoadouts.firstOrNull()?.discs.orEmpty())
         }
         if (request.has("star_stones")) {
@@ -890,7 +893,11 @@ class OperatorService(
         }
     }
 
-    private fun parseDiscLoadouts(node: JsonNode?, catalog: OperatorCatalogEntity): List<OperatorDiscLoadout> {
+    private fun parseDiscLoadouts(
+        node: JsonNode?,
+        catalog: OperatorCatalogEntity,
+        existing: List<OperatorDiscLoadout>,
+    ): List<OperatorDiscLoadout> {
         if (node == null || node.isNull || !node.isArray) {
             invalid("disc_loadouts must be an array", catalog.operatorId, "disc_loadouts", "invalid_disc_loadout")
         }
@@ -898,14 +905,14 @@ class OperatorService(
             invalid("disc_loadouts supports at most two loadouts", catalog.operatorId, "disc_loadouts", "invalid_disc_loadout")
         }
         val ids = mutableSetOf<String>()
-        return node.mapIndexed { index, raw ->
+        val parsed = node.mapIndexed { index, raw ->
             if (!raw.isObject) {
                 invalid("loadout must be an object", catalog.operatorId, "disc_loadouts[$index]", "invalid_disc_loadout")
             }
             val item = raw as ObjectNode
             rejectUnknown(
                 item,
-                setOf("id", "name", "discs"),
+                setOf("id", "name", "discs", "status", "target_discs"),
                 "invalid_disc_loadout",
                 catalog.operatorId,
                 "disc_loadouts[$index]",
@@ -940,58 +947,75 @@ class OperatorService(
                     "invalid_disc_loadout",
                 )
             }
-            val discsNode = item.get("discs")
-            if (discsNode == null || discsNode.isNull || !discsNode.isArray || discsNode.size() > 3) {
+            val status = if (item.has("status")) {
+                item.get("status").takeIf { it.isTextual && it.asText() in setOf("unmarked", "reroll", "perfect") }?.asText()
+                    ?: invalid("Invalid disc status", catalog.operatorId, "disc_loadouts[$index].status", "invalid_disc_loadout")
+            } else {
+                existing.getOrNull(index)?.status ?: "unmarked"
+            }
+            val discs = parseLoadoutDiscs(item.get("discs"), catalog, "disc_loadouts[$index].discs")
+            val targets = if (item.has("target_discs")) {
+                parseLoadoutDiscs(item.get("target_discs"), catalog, "disc_loadouts[$index].target_discs")
+            } else {
+                existing.getOrNull(index)?.targetDiscs.orEmpty()
+            }
+            OperatorDiscLoadout(id, name, discs, status, targets)
+        }
+        // 采集或旧客户端只更新实际命盘；遗漏的目标槽仍属于原来的命盘一/二。
+        return parsed + existing.drop(parsed.size).map { it.copy(discs = emptyList()) }
+            .takeIf { tail -> tail.any { it.status != "unmarked" || it.targetDiscs.isNotEmpty() } }.orEmpty()
+    }
+
+    private fun parseLoadoutDiscs(discsNode: JsonNode?, catalog: OperatorCatalogEntity, path: String): List<OperatorDisc> {
+        if (discsNode == null || discsNode.isNull || !discsNode.isArray || discsNode.size() > 3) {
+            invalid(
+                "loadout discs must be an array with at most three items",
+                catalog.operatorId,
+                path,
+                "invalid_disc_loadout",
+            )
+        }
+        val names = mutableSetOf<String>()
+        return discsNode.mapIndexed { discIndex, rawDisc ->
+            if (!rawDisc.isObject) {
                 invalid(
-                    "loadout discs must be an array with at most three items",
+                    "disc must be an object",
                     catalog.operatorId,
-                    "disc_loadouts[$index].discs",
+                    "$path[$discIndex]",
                     "invalid_disc_loadout",
                 )
             }
-            val names = mutableSetOf<String>()
-            val discs = discsNode.mapIndexed { discIndex, rawDisc ->
-                if (!rawDisc.isObject) {
-                    invalid(
-                        "disc must be an object",
-                        catalog.operatorId,
-                        "disc_loadouts[$index].discs[$discIndex]",
-                        "invalid_disc_loadout",
-                    )
-                }
-                val disc = rawDisc as ObjectNode
-                rejectUnknown(
-                    disc,
-                    setOf("ot_name"),
-                    "invalid_disc_loadout",
+            val disc = rawDisc as ObjectNode
+            rejectUnknown(
+                disc,
+                setOf("ot_name"),
+                "invalid_disc_loadout",
+                catalog.operatorId,
+                "$path[$discIndex]",
+            )
+            val otName = disc.get("ot_name")?.takeIf { it.isTextual }?.asText()
+                ?: invalid(
+                    "ot_name is required",
                     catalog.operatorId,
-                    "disc_loadouts[$index].discs[$discIndex]",
+                    "$path[$discIndex].ot_name",
+                    "invalid_disc_loadout",
                 )
-                val otName = disc.get("ot_name")?.takeIf { it.isTextual }?.asText()
-                    ?: invalid(
-                        "ot_name is required",
-                        catalog.operatorId,
-                        "disc_loadouts[$index].discs[$discIndex].ot_name",
-                        "invalid_disc_loadout",
-                    )
-                val catalogDisc = catalog.discs.firstOrNull { it.otName == otName }
-                    ?: invalid(
-                        "disc is not in the operator catalog",
-                        catalog.operatorId,
-                        "disc_loadouts[$index].discs[$discIndex].ot_name",
-                        "invalid_disc_loadout",
-                    )
-                if (!names.add(otName)) {
-                    invalid(
-                        "disc ot_name must be unique within a loadout",
-                        catalog.operatorId,
-                        "disc_loadouts[$index].discs",
-                        "invalid_disc_loadout",
-                    )
-                }
-                OperatorDisc(catalogDisc.otName, catalogDisc.abbreviation, catalogDisc.color, catalogDisc.desp)
+            val catalogDisc = catalog.discs.firstOrNull { it.otName == otName }
+                ?: invalid(
+                    "disc is not in the operator catalog",
+                    catalog.operatorId,
+                    "$path[$discIndex].ot_name",
+                    "invalid_disc_loadout",
+                )
+            if (!names.add(otName)) {
+                invalid(
+                    "disc ot_name must be unique within a loadout",
+                    catalog.operatorId,
+                    path,
+                    "invalid_disc_loadout",
+                )
             }
-            OperatorDiscLoadout(id, name, discs)
+            OperatorDisc(catalogDisc.otName, catalogDisc.abbreviation, catalogDisc.color, catalogDisc.desp)
         }
     }
 

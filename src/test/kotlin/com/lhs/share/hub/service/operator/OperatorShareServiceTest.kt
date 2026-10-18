@@ -154,6 +154,11 @@ class OperatorShareServiceTest {
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             .writeValueAsString(view)
         val values = jacksonObjectMapper().readTree(json).path("entries").path("recruited").path("combat_stats").path("oddities")
+        val sharedLoadout = jacksonObjectMapper().readTree(json).path("entries").path("recruited").path("disc_loadouts")[0]
+        assertEquals("技能增伤", sharedLoadout.path("discs")[0].path("ot_name").asText())
+        assertTrue(!sharedLoadout.has("target_discs"))
+        assertTrue(!sharedLoadout.has("status"))
+        assertTrue("仅自己可见" !in json)
         assertEquals(0.5, values.path("special").path("current").doubleValue())
         assertTrue(values.path("attack").path("current").isIntegralNumber)
         listOf(
@@ -304,7 +309,15 @@ class OperatorShareServiceTest {
         levelBreakthroughStage = 9,
         discs = listOf(OperatorDisc("技能增伤")),
         starStones = listOf(OperatorStarStone("攻击力", "main1", 60)),
-        discLoadouts = listOf(OperatorDiscLoadout("disc_1", "命盘一")),
+        discLoadouts = listOf(
+            OperatorDiscLoadout(
+                "disc_1",
+                "命盘一",
+                listOf(OperatorDisc("技能增伤")),
+                "reroll",
+                listOf(OperatorDisc("仅自己可见")),
+            ),
+        ),
         combatStats = OperatorCombatStats(
             observedAttack = 8186,
             observedHp = 28704,

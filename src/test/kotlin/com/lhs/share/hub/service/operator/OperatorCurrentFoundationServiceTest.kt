@@ -204,6 +204,99 @@ class OperatorCurrentFoundationServiceTest {
     }
 
     @Test
+    fun `dual targets save independently without changing actual discs or observations and survive old scan patches`() {
+        val before = stored.entries.getValue("op1")
+        val saved = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"disc_loadouts":[
+                  {"id":"one","name":"命盘一","discs":[{"ot_name":"盘A"}],"status":"reroll","target_discs":[{"ot_name":"盘B"},{"ot_name":"盘C"}]},
+                  {"id":"two","name":"命盘二","discs":[{"ot_name":"盘B"}],"status":"reroll","target_discs":[{"ot_name":"盘A"}]}
+                ]""",
+            ),
+        )
+        assertEquals(before.discs, saved.discs)
+        assertEquals(before.combatStats, saved.combatStats)
+        assertEquals(listOf("盘B", "盘C"), saved.discLoadouts[0].targetDiscs.map { it.otName })
+        assertEquals(listOf("盘A"), saved.discLoadouts[1].targetDiscs.map { it.otName })
+        assertEquals(saved.discLoadouts, lastCorrection!!.discLoadouts)
+        assertEquals(saved.discLoadouts, stored.entries.getValue("op1").discLoadouts)
+        val scanned = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""disc_loadouts":[{"id":"scan-id","discs":[{"ot_name":"盘C"}]}]""", revision = saved.revision),
+        )
+        assertEquals(listOf("盘C"), scanned.discs.map { it.otName })
+        assertEquals(saved.discLoadouts.map { it.targetDiscs }, scanned.discLoadouts.map { it.targetDiscs })
+        assertEquals(listOf("reroll", "reroll"), scanned.discLoadouts.map { it.status })
+        val cleared = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(""""disc_loadouts":[]""", revision = scanned.revision),
+        )
+        assertEquals(emptyList<OperatorDisc>(), cleared.discs)
+        assertEquals(saved.discLoadouts.map { it.targetDiscs }, cleared.discLoadouts.map { it.targetDiscs })
+    }
+
+    @Test
+    fun `changing status retains targets and explicit empty targets clear only their own slot`() {
+        val original = baseEntry().copy(
+            discLoadouts = baseEntry().discLoadouts.map { it.copy(status = "reroll", targetDiscs = listOf(OperatorDisc("盘C"))) },
+        )
+        stored = stored.copy(entries = mapOf("op1" to original))
+        val saved = service.patchCurrent(
+            "u1",
+            "acc1",
+            "代号鸢",
+            "op1",
+            patch(
+                """"disc_loadouts":[
+                  {"id":"one","discs":[{"ot_name":"盘A"}],"status":"perfect"},
+                  {"id":"two","discs":[{"ot_name":"盘B"}],"status":"unmarked","target_discs":[]}
+                ]""",
+            ),
+        )
+        assertEquals("perfect", saved.discLoadouts[0].status)
+        assertEquals(original.discLoadouts[0].targetDiscs, saved.discLoadouts[0].targetDiscs)
+        assertEquals("unmarked", saved.discLoadouts[1].status)
+        assertEquals(emptyList<OperatorDisc>(), saved.discLoadouts[1].targetDiscs)
+    }
+
+    @Test
+    fun `invalid targets and foreign account cannot write current or correction`() {
+        for (extra in listOf(
+            """"status":"automatic"""",
+            """"status":null""",
+            """"target_discs":null""",
+            """"target_discs":[{"ot_name":"foreign"}]""",
+            """"target_discs":[{"ot_name":"盘A"},{"ot_name":"盘A"}]""",
+            """"target_discs":[{"ot_name":"盘A"},{"ot_name":"盘B"},{"ot_name":"盘C"},{"ot_name":"盘A"}]""",
+        )) {
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.patchCurrent("u1", "acc1", "代号鸢", "op1", patch(""""disc_loadouts":[{"id":"one","discs":[],$extra}]"""))
+            }
+            assertEquals("invalid_disc_loadout", error.code)
+        }
+        every { accountRepository.findByUserIdAndAccountId("u2", "acc1") } returns null
+        every { accountRepository.findByUserIdAndAccountId("u1", "acc2") } returns null
+        for ((user, account) in listOf("u2" to "acc1", "u1" to "acc2")) {
+            val error = assertThrows(OperatorApiException::class.java) {
+                service.patchCurrent(user, account, "代号鸢", "op1", patch(""""disc_loadouts":[]"""))
+            }
+            assertEquals("account_not_found", error.code)
+        }
+        verify(exactly = 0) { currentRepository.compareAndSetEntries(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { correctionRepository.save(any()) }
+    }
+
+    @Test
     fun `patch rejects active semantics null loadouts and stale revision`() {
         val active = patch(""""disc_loadouts":[],"active_disc_loadout_id":"one"""")
         val nullLoadouts = patch(""""disc_loadouts":null""")
