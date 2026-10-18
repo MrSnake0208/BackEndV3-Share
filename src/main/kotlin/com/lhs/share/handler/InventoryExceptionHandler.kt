@@ -36,6 +36,7 @@ private val inventoryLog = KotlinLogging.logger { }
     assignableTypes = [
         AccountController::class,
         AchievementController::class,
+        com.lhs.share.hub.controller.achievement.AchievementCatalogAdminController::class,
         InventoryController::class,
         StarStateController::class,
         StarCompletionController::class,

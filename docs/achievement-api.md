@@ -2,15 +2,17 @@
 
 ## 当前资料与开放状态
 
-权威目录为 `src/main/resources/achievement/catalog.json`，前端只读取接口。本轮本地资料核对未发现可发布且来源、使用权限明确的真实游戏成就：代号鸢 0 条、如鸢 0 条；分类及常驻隐藏成就均未核验。两款目录分别为 `empty`，版本 `2026-10-18-empty-v1`。测试 fixture 仅在测试源码中；生产前端入口关闭，资料就绪前不得宣称完整库或开启入口。
+运行时权威目录为 Hub MongoDB 的 `achievement_catalogs`，每游戏一个文档。公共接口逐次读取 `published`，不会读取草稿或进程缓存；响应 `Cache-Control: no-store`，前端不持久缓存目录、PWA 不缓存业务 API。管理员发布成功后玩家下次刷新可读取新版本，无需重启后端。
 
-维护者补资料时，逐款核验名称、条件、分类、隐藏属性、奖励和口径，保存 HTTPS 来源、usage 使用依据与 verified_at 核验日期；未知可选字段留空。没有游戏原始 ID 时分配永久 `yh_` 内部 ID，不按标题、顺序生成，不冒充官方 ID。目录内含稳定 category_id、排序、可选别名与关联密探 id/name、章节、方法及折叠剧透。仅有明确口径时设置 progress_kind（integer/number）、target、unit。修订递增 catalog_version，并准确更新 data_status（empty/partial/complete）与 coverage；两款游戏不能按同名合并。启动校验非法目录直接失败，不回退到样例。
+`src/main/resources/achievement/catalog.json` 仅为缺失数据库文档的一次性种子/离线备份。目前种子代号鸢、如鸢均0条，不含测试 fixture。已有文档优先且不会覆盖；仅查库确认缺失时严格校验并 insert，并发初始化重复键重读获胜者。数据库/资源/校验异常直接报错，不静默降级空目录。初始化按游戏独立执行，不读取或写入个人档案。
 
-下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。开启前端生产入口需先完成真实资料核验和人工验收，修改统一 feature flag；本模块独立于羁绊助手。
+日常资料通过网站「管理工作台 → 内容维护 → 成就目录管理」维护，详细接口及操作见 [成就目录管理](achievement-catalog-admin.md)。游戏和系统生成的稳定 ID 不可编辑；成就名称和有效分类必填，条件、奖励、来源、核验日期等选填，不要求逐条核验后才发布。只有明确累计口径才填写 progress_kind（integer/number）与 target，unit 选填。公开 data_status 自动区分 empty/partial，coverage 可自动生成；complete 仅由管理员明确选择，不按条目数量推断完整程度。
+
+下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口仍受原统一 feature flag 控制；本模块独立于羁绊助手。
 
 ## 接口与保存约束
 
-沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。除公开目录外均要求网站 JWT、现有 Beta 资格和账号归属，响应 `Cache-Control: no-store`；不开放外部 token/share scope。
+沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；公开目录匿名可读，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
 
 | 方法与路径 | 输入 | 返回 |
 | --- | --- | --- |
@@ -46,7 +48,7 @@ preview_token 绑定用户、目标账号、游戏、当前档案版本、目录
 
 ## 定向检查
 
-`AchievementContractTest` 覆盖协议、严格输入及公开/私有响应；`AchievementMongoTest` 使用自有可抛弃 Mongo 副本集覆盖隔离、CAS、导入往返/原子性与账号生命周期竞争，不连接开发库。
+`AchievementCatalogAdminContractTest` 覆盖管理员权限/严格输入/初始化；`AchievementCatalogMongoTest` 使用隔离 Mongo 验证发布、草稿、CAS、回滚与个人记录兼容。`AchievementContractTest` 覆盖协议、严格输入及公开/私有响应；`AchievementMongoTest` 使用自有可抛弃 Mongo 副本集覆盖隔离、CAS、导入往返/原子性与账号生命周期竞争，不连接开发库。
 
 ```sh
 ./gradlew test --tests 'com.lhs.share.hub.service.achievement.AchievementContractTest' integrationTest --tests 'com.lhs.share.hub.service.achievement.AchievementMongoTest'
