@@ -326,17 +326,21 @@ class OperatorCurrentFoundationServiceTest {
 
     @Test
     fun `equal special numeric inputs preserve signature while a tenth change marks scan stale`() {
+        val entry = baseEntry().copy(levelBreakthroughStage = 0)
+        stored = stored.copy(entries = mapOf("op1" to entry))
         fun observation(value: String) = service.previewCurrentPatch(
             "u1",
             "acc1",
             "代号鸢",
             "op1",
-            patch(""""combat_stats":{"observed_attack":1000,"source":"scan","oddities":{"special":{"current":$value}}}"""),
+            patch(
+                """"level":10,"level_breakthrough_stage":0,"combat_stats":{"observed_attack":1000,"source":"scan","oddities":{"special":{"current":$value}}}""",
+            ),
         )
             .after
         assertEquals(observation("1").combatStats?.combatInputSignature, observation("1.0").combatStats?.combatInputSignature)
         val before = observation("0.5")
-        stored = stored.copy(entries = mapOf("op1" to baseEntry().copy(combatStats = before.combatStats, revision = before.revision)))
+        stored = stored.copy(entries = mapOf("op1" to entry.copy(combatStats = before.combatStats, revision = before.revision)))
         specialOddityName = "自定义第三项"
         val same = service.previewCurrentPatch(
             "u1",

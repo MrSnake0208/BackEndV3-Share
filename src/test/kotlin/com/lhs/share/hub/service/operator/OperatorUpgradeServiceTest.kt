@@ -323,7 +323,7 @@ class OperatorUpgradeServiceTest {
         operatorCurrent = current(starLevel = 21).copy(
             entries = mapOf("op1" to OperatorEntry(elite = 0, starLevel = 21, level = 10, revision = 7)),
         )
-        inventoryCurrent["item"] = stock("item", mapOf("bingshucanjuan" to 2, "jianjia" to 1))
+        inventoryCurrent["item"] = stock("item", mapOf("bingshucanjuan" to 4, "jianjia" to 1))
         val request = OperatorUpgradeRequest("a1", "如鸢", "op1", "level", 12, 7, skipBreakthroughMaterials = true)
         assertFalse(service.preview("u1", request.copy(skipBreakthroughMaterials = false)).available)
         val preview = service.preview("u1", request)
