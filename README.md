@@ -4,6 +4,8 @@
 
 逐模块审阅顺序、进度清单与报告模板见 [后端 Review 计划](docs/backend-review-plan.md)。
 
+外部开发者的正式入口为已部署 YuanHub 前端的 `/developers`；公开文档随前端构建发布。当前认证/版本边界与文档维护责任见[开放能力核对说明](docs/developer-api-status.md)。`backend-openapi.json` 是历史快照，不代表全部当前接口，不作为开发者中心的发布白名单。
+
 ## 一键发布
 
 独立 clone 本仓库即可发布，不需要前端仓库或 YuanHub-All。先提交业务改动并切换到干净的 `main`，安装 Git / GitHub CLI 并执行 `gh auth login`（账号需具备仓库推送与 Actions 访问权限）：
@@ -147,7 +149,7 @@ curl --fail-with-body -X PATCH "$API_BASE_URL/user/open-api/tokens/$TOKEN_ID/sco
 ```
 
 更新会立即同步到 MongoDB 和无过期 Redis 缓存，新增权限立即可用、移除权限立即失效；Token 明文不会
-改变，也无需在 MaaYuan 中重新填写。Token 明文仍只在首次生成时返回，列表和权限更新响应均不返回明文。
+改变，也无需在 MaaYuan 中重新填写。创建返回 Token 明文；后续本人 JWT 可按需通过 secret 接口复制，禁止缓存。列表和权限更新响应均不返回明文。
 当前 Token 仍不会自动过期。
 
 > **统一子账号说明（2026-08）**：`/v1/inventory/accounts` 与 `/v1/operator/accounts` 已合并为

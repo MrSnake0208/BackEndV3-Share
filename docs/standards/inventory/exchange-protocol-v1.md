@@ -1,5 +1,7 @@
 # 库存数据交换协议 v1
 
+> 历史设计资料，保留供追溯。当前 InventoryService 仅接受 version=2，V1 请求返回422 unsupported_version。新接入使用站内 `/developers/protocols/inventory-v2` 的库存 V2，不依据本页假定旧格式仍可调用。
+
 本文定义 MyShare 与合作平台之间导入、导出库存和奖励记录时使用的 JSON 格式。机器可读约束见 [inventory-exchange-v1.schema.json](./schema/inventory-exchange-v1.schema.json)。
 
 ## 1. 协议目标
