@@ -47,6 +47,16 @@ class OperatorV3ExportServiceTest {
                         starLevel = 31,
                         level = 100,
                         revision = 4,
+                        discLoadouts = listOf(
+                            com.lhs.share.hub.repository.entity.OperatorDiscLoadout(
+                                "disc_1",
+                                "输出",
+                                listOf(com.lhs.share.hub.repository.entity.OperatorDisc("盘A")),
+                                "reroll",
+                                listOf(com.lhs.share.hub.repository.entity.OperatorDisc("盘B")),
+                            ),
+                            com.lhs.share.hub.repository.entity.OperatorDiscLoadout("disc_2", "生存", status = "perfect"),
+                        ),
                         combatStats = OperatorCombatStats(
                             oddities = mapOf(
                                 "attack" to OperatorOddityValue(10.0),
@@ -76,6 +86,16 @@ class OperatorV3ExportServiceTest {
         val service = OperatorV3ExportService(mapper, accounts, currents, annotations, targets, favorites, catalog)
 
         val exported = service.export("u1", "a1", null)
+        for (version in listOf(3, 4, 5)) {
+            val backup = service.export("u1", "a1", null, version)
+            OperatorV3SchemaValidator(mapper).validate(backup)
+            val loadouts = backup.path("records").get(0).path("entries").get(0).path("disc_loadouts")
+            assertEquals("reroll", loadouts[0].path("status").asText())
+            assertEquals("盘A", loadouts[0].path("discs")[0].path("ot_name").asText())
+            assertEquals("盘B", loadouts[0].path("target_discs")[0].path("ot_name").asText())
+            assertEquals("perfect", loadouts[1].path("status").asText())
+            assertEquals(0, loadouts[1].path("target_discs").size())
+        }
         OperatorV3SchemaValidator(mapper).validate(exported)
 
         assertEquals(3, exported.path("version").intValue())

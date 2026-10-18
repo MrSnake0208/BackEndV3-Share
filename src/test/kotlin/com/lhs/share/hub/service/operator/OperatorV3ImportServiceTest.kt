@@ -660,6 +660,30 @@ class OperatorV3ImportServiceTest {
         assertThrows(OperatorApiException::class.java) { OperatorV3SchemaValidator(mapper).validate(doc) }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = [3, 4, 5])
+    fun `backup import forwards independent targets into the mapped account patch`(version: Int) {
+        val wrapper = wrappedDocument()
+        val document = wrapper.path("document") as com.fasterxml.jackson.databind.node.ObjectNode
+        document.put("version", version)
+        val source = document.path("records")[0].path("entries")[0] as com.fasterxml.jackson.databind.node.ObjectNode
+        val loadouts = mapper.readTree(
+            """[
+              {"id":"one","name":"命盘一","discs":[],"status":"reroll","target_discs":[]},
+              {"id":"two","name":"命盘二","discs":[],"status":"perfect","target_discs":[]}
+            ]""",
+        )
+        source.set<com.fasterxml.jackson.databind.JsonNode>("disc_loadouts", loadouts)
+        val captured = slot<com.fasterxml.jackson.databind.node.ObjectNode>()
+        every { operatorService.previewCurrentPatch("u1", "acc1", "如鸢", "op1", capture(captured)) } returns
+            OperatorCurrentPatchPreview(null, entry(level = 90, revision = 1), false)
+        assertEquals(1, service.previewBrowser("u1", wrapper).accepted)
+        assertEquals(loadouts, captured.captured.path("disc_loadouts"))
+        stubCommittedEntry()
+        assertEquals(1, service.commitBrowser("u1", wrapper).accepted)
+        verify { operatorService.patchCurrent("u1", "acc1", "如鸢", "op1", match { it.path("disc_loadouts") == loadouts }) }
+    }
+
     private fun wrappedDocument() = mapper.createObjectNode().apply {
         set<com.fasterxml.jackson.databind.JsonNode>("document", document())
         set<com.fasterxml.jackson.databind.JsonNode>(

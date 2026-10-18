@@ -41,6 +41,10 @@ data class OperatorDiscLoadoutPatchRequest(
     val id: String,
     val name: String? = null,
     val discs: List<OperatorDiscPatchRequest> = emptyList(),
+    @field:Schema(description = "缺失保留原组合标记；完美盘由用户确认", allowableValues = ["unmarked", "reroll", "perfect"])
+    val status: String? = null,
+    @field:Schema(description = "独立目标，最多三个合法且不重复词条；缺失保留，空数组清空")
+    @JsonProperty("target_discs") val targetDiscs: List<OperatorDiscPatchRequest>? = null,
 )
 
 data class OperatorDiscPatchRequest(@JsonProperty("ot_name") val otName: String)
