@@ -17,3 +17,7 @@
 招募备份 Schema 的权威源为本仓库 `docs/schema/recruitment-exchange-v1.schema.json`。前端维护者通过其 `scripts/sync-developer-schema.mjs` 显式更新发布快照；前端构建不读取本仓库，快照不人工编辑。接口/Scope/协议变化时同时更新前端公开参考、支持矩阵和协议记录，并按必要范围核对 Schema。
 
 内部库存 V1 设计资料继续保留，不能被当前接入说明推荐。历史 Swagger 快照的日期与覆盖范围不能替代当前代码审查；本次不重新生成或直接公开整份快照。
+
+## Achievement catalog administration
+
+Website-JWT administration is available under `/v1/admin/achievement-catalogs` with `achievement_catalog:write` (PLATFORM_ADMIN/SUPER_ADMIN). This is separate from player Beta/feature visibility and is not an external token scope. Draft saves, import preview/confirmation, atomic publication and rollback all require optimistic revisions. Public `GET /v1/achievements/catalog` retains its DTO and now reads Mongo published snapshots with no-store. See [catalog admin API](achievement-catalog-admin.md) for fields, import identity handling, history retention and progress compatibility limits.

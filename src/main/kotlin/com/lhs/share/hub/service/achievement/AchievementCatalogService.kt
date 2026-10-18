@@ -3,43 +3,67 @@ package com.lhs.share.hub.service.achievement
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.hub.controller.achievement.request.AchievementRequestDecoder.invalid
 import com.lhs.share.hub.controller.achievement.response.AchievementCatalogResponse
+import com.lhs.share.hub.repository.AchievementCatalogRepository
+import com.lhs.share.hub.repository.entity.AchievementCatalog
+import com.lhs.share.hub.repository.entity.CatalogCategory
+import com.lhs.share.hub.repository.entity.CatalogContent
+import com.lhs.share.hub.repository.entity.CatalogPublication
 import com.lhs.share.hub.service.account.SubAccountService
 import org.springframework.core.io.ClassPathResource
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
-import java.net.URI
-import java.time.LocalDate
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 @Service
-class AchievementCatalogService(mapper: ObjectMapper) {
-    private val catalogs: List<AchievementCatalogResponse> = ClassPathResource("achievement/catalog.json").inputStream.use { input ->
-        mapper.readTree(input).map { mapper.treeToValue(it, AchievementCatalogResponse::class.java) }
-    }.also { values ->
-        check(values.map { it.game }.toSet() == SubAccountService.SUPPORTED_GAMES && values.size == 2)
-        values.forEach { value ->
-            check(value.catalogVersion.isNotBlank() && value.coverage.isNotBlank())
-            check(value.dataStatus in setOf("empty", "partial", "complete"))
-            check((value.dataStatus == "empty") == value.entries.isEmpty())
-            check(value.categories.map { it.categoryId }.distinct().size == value.categories.size)
-            check(value.entries.map { it.achievementId }.distinct().size == value.entries.size)
-            value.entries.forEach { entry ->
-                check(entry.achievementId.matches(Regex("yh_[a-z0-9_]{1,96}")) && entry.game == value.game)
-                check(entry.categoryId in value.categories.map { it.categoryId } && entry.name.isNotBlank() && entry.condition.isNotBlank())
-                check(entry.dataStatus == "verified" && entry.sources.isNotEmpty())
-                check(LocalDate.parse(entry.verifiedAt).year in 1..9999)
-                entry.sources.forEach { check(URI(it.url).scheme == "https" && !URI(it.url).host.isNullOrBlank() && it.usage.isNotBlank()) }
-                if (entry.progressKind == null) {
-                    check(entry.target == null && entry.unit == null)
-                } else {
-                    check(
-                        entry.progressKind in setOf("integer", "number") && entry.target?.let { it.isFinite() && it > 0 } == true &&
-                            !entry.unit.isNullOrBlank(),
-                    )
-                }
-                if (entry.progressKind == "integer") check(entry.target!! % 1.0 == 0.0)
-            }
-        }
-        check(values.flatMap { it.entries }.map { it.achievementId }.distinct().size == values.sumOf { it.entries.size })
+class AchievementCatalogService(private val mapper: ObjectMapper, private val repository: AchievementCatalogRepository) {
+    fun catalog(game: String): AchievementCatalogResponse {
+        requireGame(game)
+        val published = repository.published(game) ?: load(game).published
+        return published.content.publicCatalog(published.version)
     }
 
-    fun catalog(game: String): AchievementCatalogResponse = catalogs.firstOrNull { it.game == game } ?: invalid("game 只允许代号鸢或如鸢")
+    private fun requireGame(game: String) {
+        if (game !in SubAccountService.SUPPORTED_GAMES) invalid("game 只允许代号鸢或如鸢")
+    }
+
+    fun load(game: String): AchievementCatalog {
+        requireGame(game)
+        repository.find(game)?.let { return it }
+        // Only an absent document may be seeded; database errors must propagate.
+        val seed = ClassPathResource("achievement/catalog.json").inputStream.use { input ->
+            mapper.readTree(input).map { mapper.treeToValue(it, AchievementCatalogResponse::class.java) }
+        }
+        check(seed.size == 2 && seed.map { it.game }.toSet() == SubAccountService.SUPPORTED_GAMES)
+        check(seed.flatMap { it.entries }.map { it.achievementId }.distinct().size == seed.sumOf { it.entries.size })
+        val contents = seed.map { value ->
+            check(value.catalogVersion.isNotBlank())
+            CatalogContent(
+                value.game,
+                value.dataStatus,
+                value.coverage,
+                value.categories.mapIndexed { i, c -> CatalogCategory(c.categoryId, c.name, i) },
+                value.entries,
+            ).also { check(AchievementCatalogRules.errors(it, true).isEmpty()) { "非法成就种子目录" } }
+        }
+        val content = contents.single { it.game == game }
+        val initial = AchievementCatalog(
+            game = game,
+            published = CatalogPublication(
+                seed.single { it.game == game }.catalogVersion,
+                content,
+                Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                "seed",
+            ),
+            draft = content,
+            identities = content.entries.associateBy { it.achievementId },
+            issuedIds = content.entries.map { it.achievementId }.toSet(),
+            categoryIds = content.categories.map { it.categoryId }.toSet(),
+        )
+        return try {
+            repository.insert(initial)
+        } catch (_: DuplicateKeyException) {
+            checkNotNull(repository.find(game)) { "目录初始化冲突后无法读取" }
+        }
+    }
 }

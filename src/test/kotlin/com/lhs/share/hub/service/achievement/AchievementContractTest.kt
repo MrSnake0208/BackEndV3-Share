@@ -123,7 +123,11 @@ class AchievementContractTest {
 
     @Test
     fun `real production catalogs are explicitly empty and no fixtures are seeded`() {
-        val real = AchievementCatalogService(mapper)
+        val repository = mockk<com.lhs.share.hub.repository.AchievementCatalogRepository>()
+        every { repository.published(any()) } returns null
+        every { repository.find(any()) } returns null
+        every { repository.insert(any()) } answers { firstArg() }
+        val real = AchievementCatalogService(mapper, repository)
         for (game in listOf("代号鸢", "如鸢")) {
             val response = real.catalog(game)
             assertEquals("empty", response.dataStatus)
