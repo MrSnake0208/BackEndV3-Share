@@ -6,16 +6,19 @@ import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.notification.response.NotificationListResponse
 import com.lhs.share.hub.controller.notification.response.NotificationResponse
+import com.lhs.share.hub.service.notification.NotificationEventService
 import com.lhs.share.hub.service.notification.NotificationService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 /**
  * 站内通知控制器
@@ -26,7 +29,16 @@ import org.springframework.web.bind.annotation.RestController
 class NotificationController(
     private val notificationService: NotificationService,
     private val helper: AuthenticationHelper,
+    private val notificationEvents: NotificationEventService,
 ) {
+
+    @Operation(summary = "私人通知事件", description = "通过 Authorization 请求头鉴权；仅推送当前用户的通知 ID，断线后通过通知列表补偿")
+    @RequireJwt
+    @GetMapping("/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun events(): ResponseEntity<SseEmitter> = ResponseEntity.ok()
+        .header("Cache-Control", "no-store")
+        .header("X-Accel-Buffering", "no")
+        .body(notificationEvents.subscribe(helper.requireUserId()))
 
     @Operation(summary = "通知列表", description = "分页返回当前用户的通知列表，可筛选仅未读")
     @RequireJwt
@@ -52,9 +64,7 @@ class NotificationController(
     @Operation(summary = "标记通知已读", description = "标记单条通知为已读")
     @RequireJwt
     @PatchMapping("/{id}/read")
-    fun markRead(
-        @PathVariable id: String,
-    ): ApiResult<NotificationResponse> {
+    fun markRead(@PathVariable id: String): ApiResult<NotificationResponse> {
         val userId = helper.requireUserId()
         val notification = notificationService.markRead(userId, id)
         return success(
