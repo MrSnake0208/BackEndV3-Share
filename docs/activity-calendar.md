@@ -10,26 +10,13 @@
 
 最小验证（仓库根）：`./gradlew test --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSubscriptionServiceTest' --console=plain`。
 
-## 可选细分类别（2026-10-09）
+## 两级分类与兼容代码（2026-10-18）
 
-持久化 `category` 及查询值继续使用 `ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER`，不为展示分组迁移旧记录。手工事件、写请求、公开/管理响应、建议原始资料与采纳快照新增 `subtype`、`subtype_detail`，均可省略或为 null，历史 Mongo 文档缺字段时默认为 null。PUT 仍为完整替换：省略或 null 会清除细类/细目。
+展示一级为活动、卡池、家具、其他；存储 category 和查询参数仍为 ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER，不迁移旧记录。新增 ACTIVITY subtype：FIRST_MEETING_ROULETTE（初见日/转盘）、FURNITURE_TRIAL（家具·历练）、MYSTERIOUS_CAVE（家具·神秘洞窟）。原 LARGE_EVENT 显示大型/周年，SIGN_IN 显示签到/楼主查岗。卡池限定/复刻/照影/自选仍从招募目录 pool_type 派生，只读。
 
-| category | 允许的 subtype |
-| --- | --- |
-| ACTIVITY | LARGE_EVENT（大型活动）、MEDIUM_EVENT（中型活动）、UNDERGROUND（地宫）、TAISHAN_FU（泰山府）、SIGN_IN（签到）、FURNITURE（家具） |
-| LOGIN | SIGN_IN；旧记录未标注时前端仍展示签到 |
-| SHOP | RECRUITMENT_SHOP（卡池商店）、ACTIVITY_SHOP（活动商店） |
-| OTHER | MAINTENANCE（维护）、STAR_POOL（星池） |
-| MAINTENANCE | MAINTENANCE；旧记录未标注时前端仍展示维护 |
-| RECRUITMENT | 不接受手工写入；卡池由目录派生 |
+旧 subtype、旧 LOGIN/MAINTENANCE/SHOP 及 FURNITURE + subtype_detail=MYSTERIOUS_CAVE 保持解码兼容；单条 PUT 的可选字段仍为完整替换，省略/null 清除。新表单只有两级，旧三级编码在读取/编辑其他字段时保留，主动重新分类才清空旧细目。MEDIUM_EVENT、TAISHAN_FU、无细目 FURNITURE 不自动猜测，待维护者确认。常驻/未知卡池继续只读保留。没有数据库迁移、索引或定时任务。
 
-`subtype_detail` 唯一值为 `MYSTERIOUS_CAVE`（神秘洞窟），且必须有 `category=ACTIVITY`、`subtype=FURNITURE`，即“活动 → 家具 → 神秘洞窟”。未知代码、数字/数字字符串枚举、中文作为代码、跨类别细类以及无家具父级的细目返回 422。建议提交与采纳沿用同一严格解码/业务校验，仍拒绝服务端字段及越权写入。
-
-`RECRUITMENT_POOL` 的日历响应增加只读 `pool_type`，直接取 `RecruitmentCatalogPool.poolType` 原始值。该字段不持久化到手工事件、不接受手工/建议/导入写入。派生 ID `recruitment:<poolId>`、`source_ref`、`read_only`、停用/隐藏/缺日期过滤均保持原义。自由文本类型的已知别名、组合优先级和中性回退由前端与招募档案共用的 `recruitmentPoolTypes.js` 处理；不按活动名称推断。
-
-批量 JSON 仍为 v1、1–200 条。自然键与导入 ID 不增加细类字段；`subtype/subtype_detail` 属于内容差异：已有记录同键则跳过并逐字段提示，文件内同键细类不同则冲突阻止提交。旧 JSON 可以照常导入；历史分类补全请使用带版本校验的目录编辑。不同细类不会变相创建重复活动。
-
-没有新增档期关联 ID，不自动合并家具/神秘洞窟或地宫/泰山府实体，不改起止时间、不复制活动、不取消独立订阅。家具与洞窟同档时间由维护者核对；类型关联不能证明两条记录属于同一期。无需数据库迁移、索引变更或定时任务。
+未知代码、数值枚举、中文代码和跨类别组合仍返回422。建议/采纳/新增型 JSON 共用原严格解码和业务校验。`subtype_detail` 仅兼容旧 FURNITURE 下的 MYSTERIOUS_CAVE。`pool_type` 不接受手工写入。类别改变不创建新ID、不合并记录、不改日期或订阅。
 
 ## 管理员 JSON v1 批量导入
 
@@ -355,3 +342,29 @@ Mongo 用例只使用 TestMongo 创建的专属临时容器；不得连接现有
 覆盖HTTP/JWT新旧契约、跨用户/账号CRUD、起止范围/闰日/长度校验、旧文档无回写读取和保留内容的更新、跨月跨年重叠/相邻窗口/长区间、真实持久化与唯一索引、CAS并发更新/删除、事务回滚、重命名/删除级联与删除竞争。升级时先兼容后端再前端；本次不部署、不重启服务。实际结果见根任务 `10-10-activity-calendar-private-items/verification.md`。
 
 日期属性转换器同时处理空值查询条件。带 from 的范围查询包含 `endDate=null`（含缺失字段）的持续活动，ISO日期字符串保持不变；无数据库 QueryMapper 回归覆盖真实查询映射路径。
+
+## 全量导出与按 ID 更新分类（2026-10-18）
+
+活动目录提供“导出全部”和“导入更新分类”；原“批量导入”仍只新增活动。导出不受页面筛选、游戏或日期范围限制，包含全部手工活动（历史、停用也包含）及当前可派生的只读卡池参考。它是分类整理文件，不替代数据库备份，不包含用户个人事项或订阅资料。
+
+三个管理接口复用现有 JWT + `activity_calendar:write` 权限，不新增内测资格门槛；公开/个人日历的内测限制保持原义：
+
+- `GET /v1/admin/activity-calendar/export`：返回完整分类交换文档。
+- `POST /v1/admin/activity-calendar/classification-import/preview`：请求 `{"json":"导出文件原文"}`，无写入。
+- `POST /v1/admin/activity-calendar/classification-import/commit`：请求同一原文及 `preview_token`，重新校验当前数据后事务提交。
+
+文档协议为 `document_type="activity-calendar-classification"`、整数 `schema_version=1`，含 `exported_at`、`classification_options`、`items`、`reference_items`。与新增型 JSON v1 不互通。容量为两数组合计最多10000条、原文UTF-8最多20 MiB；超限整份拒绝，不截断。下载通常带缩进，临近容量时使用紧凑JSON以保证往返；代理需允许转义后请求体，应用包裹上限为 `20 MiB * 6 + 4096` 字节。
+
+手工行是 `{id, expected_version, original, classification}`。`original` 保留完整管理资料供核对；只修改 `classification`，例如：
+
+```json
+{"level1":"家具","level2":"历练"}
+```
+
+使用导出文件中的真实ID和版本；历史缺version按0导出。`classification: null` 表示不更新，省略整个活动行也不删除。`original`、`classification_options`、`reference_items` 均是参考，不参与写入，也不能扩展服务端允许的分类。卡池不允许移入手工items或在此修改，请到招募目录维护。空目录示例为 `public/examples/activity-calendar-classification-v1.json`（前端仓）。
+
+预览报告包含 `total/ready/unchanged/skipped/invalid/conflicts/reference_count/rows/preview_token/updated`。行状态为 READY、UNCHANGED、SKIPPED、INVALID、CONFLICT，成功后 READY 变为 UPDATED。无效/重复/不存在/只读ID、非法分类或版本冲突阻止整批提交。只有实际分类变更才检查期望版本和写入；未修改导出文件重传应为零更新，旧编码不会被隐式规范化。
+
+提交使用 Hub Mongo 事务与逐条版本CAS，只更新 category、subtype、subtype_detail、修改审计及version。ID、标题、日期、说明、来源、启用状态、创建审计及订阅引用保持。任意一行失败整批回滚，缺少/过期令牌返回409。文件变化即废弃旧预览；超时或结果不明保留文件，必须重新预览实际结果，不复用旧令牌。重复提交相同目标不再增版本。
+
+生产使用步骤：先部署匹配的前后端，再从生产管理页导出并保留原文件；复制一份只改classification，上传预览、核对差异、勾选确认后提交；重新导出核对结果。代码发布本身不自动批改生产记录。旧后端不认识新增subtype，回滚版本前需评估已写入的新编码。上线前核实生产条数、文件体积、代理限制和Mongo事务能力。

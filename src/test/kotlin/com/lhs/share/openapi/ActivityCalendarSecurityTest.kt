@@ -85,6 +85,8 @@ class ActivityCalendarSecurityTest {
 
     @MockitoBean lateinit var importer: com.lhs.share.hub.service.calendar.ActivityCalendarImportService
 
+    @MockitoBean lateinit var classificationExchange: com.lhs.share.hub.service.calendar.ActivityCalendarClassificationExchangeService
+
     @MockitoBean lateinit var service: ActivityCalendarService
 
     @MockitoBean lateinit var suggestions: ActivityCalendarSuggestionService
@@ -103,6 +105,11 @@ class ActivityCalendarSecurityTest {
     fun `real security chain rejects anonymous calendar reads management and suggestions`() {
         mvc.perform(get("/v1/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(get("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
+        mvc.perform(get("/v1/admin/activity-calendar/export")).andExpect(status().isUnauthorized)
+        listOf("preview", "commit").forEach {
+            mvc.perform(post("/v1/admin/activity-calendar/classification-import/$it").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized)
+        }
         mvc.perform(post("/v1/admin/activity-calendar")).andExpect(status().isUnauthorized)
         mvc.perform(
             post("/v1/admin/activity-calendar/import/preview").contentType(MediaType.APPLICATION_JSON).content("{}"),
@@ -112,7 +119,7 @@ class ActivityCalendarSecurityTest {
         ).andExpect(status().isUnauthorized)
         mvc.perform(put("/v1/admin/activity-calendar/evt_test")).andExpect(status().isUnauthorized)
         mvc.perform(post("/v1/activity-calendar")).andExpect(status().isUnauthorized)
-        verifyNoInteractions(service, importer, authorization, stringRedisTemplate)
+        verifyNoInteractions(service, importer, classificationExchange, authorization, stringRedisTemplate)
     }
 
     @Test
@@ -147,6 +154,9 @@ class ActivityCalendarSecurityTest {
         val body = """{"game":"如鸢","title":"活动","category":"ACTIVITY","start_date":"2026-10-03","end_date":"2026-10-10"}"""
         listOf(
             get("/v1/admin/activity-calendar"),
+            get("/v1/admin/activity-calendar/export"),
+            post("/v1/admin/activity-calendar/classification-import/preview"),
+            post("/v1/admin/activity-calendar/classification-import/commit"),
             post("/v1/admin/activity-calendar"),
             post("/v1/admin/activity-calendar/import/preview"),
             post("/v1/admin/activity-calendar/import/commit"),
@@ -155,7 +165,7 @@ class ActivityCalendarSecurityTest {
             mvc.perform(it.header("Authorization", "Bearer synthetic").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isForbidden)
         }
-        verifyNoInteractions(service, importer)
+        verifyNoInteractions(service, importer, classificationExchange)
         `when`(authorization.hasPermission("editor", AdminPermission.ACTIVITY_CALENDAR_WRITE)).thenReturn(true)
         `when`(service.adminItems(null, null, null, null, null, null)).thenReturn(ActivityCalendarAdminResponse(emptyList()))
         mvc.perform(get("/v1/admin/activity-calendar").header("Authorization", "Bearer synthetic")).andExpect(status().isOk)

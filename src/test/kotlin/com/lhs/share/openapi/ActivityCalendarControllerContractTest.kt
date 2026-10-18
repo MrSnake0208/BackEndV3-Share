@@ -69,6 +69,7 @@ class ActivityCalendarControllerContractTest {
                 authorization,
                 mapper,
                 com.lhs.share.hub.service.calendar.ActivityCalendarImportService(service, repository, mapper),
+                mockk(),
             ),
         ).setControllerAdvice(ActivityCalendarExceptionHandler()).setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
         every { helper.requireUserId() } returns "editor"
