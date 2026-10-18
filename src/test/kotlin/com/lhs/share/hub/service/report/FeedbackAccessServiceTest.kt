@@ -90,7 +90,12 @@ class FeedbackAccessServiceTest {
         val keys = after.map { it.key }
         every { authorizationService.requirePermission("manager", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } throws
             ApiResultException(403, "权限不足")
-        assertEquals(403, assertThrows(ApiResultException::class.java) { service.reorderCategories("manager", keys, expectedKeys) }.statusCode)
+        assertEquals(
+            403,
+            assertThrows(ApiResultException::class.java) {
+                service.reorderCategories("manager", keys, expectedKeys)
+            }.statusCode,
+        )
         verify(exactly = 0) { categories.reorder(any(), any()) }
         every { authorizationService.requirePermission("root", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } returns Unit
         every { categories.reorder(keys, expectedKeys) } returns (before to after)

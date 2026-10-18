@@ -96,8 +96,7 @@ class OpenApiTokenService(
     fun validateAnyAuthorization(authorization: String?, vararg permissions: OpenApiPermission): OpenApiPrincipal =
         validate(bearerToken(authorization), permissions.map { it.code }.toSet())
 
-    fun authenticateAuthorization(authorization: String?): OpenApiPrincipal =
-        validate(bearerToken(authorization), emptySet())
+    fun authenticateAuthorization(authorization: String?): OpenApiPrincipal = validate(bearerToken(authorization), emptySet())
 
     private fun bearerToken(authorization: String?): String? = authorization
         ?.takeIf { it.startsWith(BEARER_PREFIX) }

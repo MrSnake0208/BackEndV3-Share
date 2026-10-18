@@ -96,11 +96,13 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `active plan returns token bound tasks with snake case and no caching`() {
-        every { tokenService.validateAnyAuthorization(
-            "Bearer t",
-            OpenApiPermission.OPERATOR_READ,
-            OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
-        ) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                "Bearer t",
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns
             workspace("daily", "favorites" to "特别关注", "daily" to "日常")
@@ -139,17 +141,25 @@ class OpenApiDailyTasksContractTest {
             .andExpect(jsonPath("$.data.tasks[3].group_name").value("经验"))
             .andExpect(content().string(containsString("\"group_name\":null")))
 
-        verify(exactly = 1) { tokenService.validateAnyAuthorization(
-            "Bearer t",
-            OpenApiPermission.OPERATOR_READ,
-            OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
-        ) }
+        verify(exactly = 1) {
+            tokenService.validateAnyAuthorization(
+                "Bearer t",
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        }
         verify(exactly = 1) { dailyTasks.get("u1", "acc1", "daily", "2026-10-17") }
     }
 
     @Test
     fun `blank active plan falls back to the first plan`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns
             workspace("", "favorites" to "特别关注", "daily" to "日常")
@@ -169,7 +179,13 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `unknown active plan falls back to the first plan`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns
             workspace("deleted", "favorites" to "特别关注", "daily" to "日常")
@@ -184,7 +200,13 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `workspace without plans returns no schedule and empty tasks`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace(null)
 
@@ -205,7 +227,13 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `date defaults to shanghai today and an explicit date is forwarded`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get("u1", "acc1", "daily", "2026-10-17") } returns dailyResponse()
@@ -223,7 +251,13 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `source status vocabulary is passed through`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get(any(), any(), any(), any()) } returns dailyResponse(status = "daily_limit")
@@ -236,19 +270,37 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `token and service failures use real http errors`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } throws
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } throws
             InventoryApiException(HttpStatus.UNAUTHORIZED, "unauthorized", "API token is missing")
         mvc.perform(get(path).header("Authorization", "Bearer t"))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("unauthorized"))
 
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } throws
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } throws
             InventoryApiException(HttpStatus.FORBIDDEN, "forbidden", "API token lacks the required scope")
         mvc.perform(get(path).header("Authorization", "Bearer t"))
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("forbidden"))
 
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
             OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get(any(), any(), any(), any()) } throws
@@ -282,7 +334,14 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `read response exposes schedule revision and planned candidates`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns OpenApiPrincipal("u1", "acc1")
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
+            OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get("u1", "acc1", "daily", "2026-10-17") } returns
             dailyResponse(tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 1)))
@@ -303,7 +362,14 @@ class OpenApiDailyTasksContractTest {
 
     @Test
     fun `planned candidates stay empty when the schedule is not ready`() {
-        every { tokenService.validateAnyAuthorization(any(), OpenApiPermission.OPERATOR_READ, OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE) } returns OpenApiPrincipal("u1", "acc1")
+        every {
+            tokenService.validateAnyAuthorization(
+                any(),
+                OpenApiPermission.OPERATOR_READ,
+                OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
+            )
+        } returns
+            OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get(any(), any(), any(), any()) } returns
             dailyResponse(status = "needs_recalculation", tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 1)))
@@ -417,7 +483,8 @@ class OpenApiDailyTasksContractTest {
                 OpenApiPermission.OPERATOR_READ,
                 OpenApiPermission.OPERATOR_DAILY_TASKS_WRITE,
             )
-        } returns OpenApiPrincipal("u1", "acc1")
+        } returns
+            OpenApiPrincipal("u1", "acc1")
         every { planner.workspace("u1", "acc1") } returns workspace("daily", "daily" to "日常")
         every { dailyTasks.get("u1", "acc1", "daily", "2026-10-17") } returns
             dailyResponse(tasks = listOf(OperatorTrainingTask("fh-12", "fh", 12, 4, 20, 0)))
