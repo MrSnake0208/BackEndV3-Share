@@ -80,6 +80,8 @@ class SubAccountService(
     private val operatorDailyTasksRepository: OperatorDailyTasksRepository? = null,
     private val achievements: AchievementRepository? = null,
     private val achievementPreviews: AchievementImportPreviews? = null,
+    private val bonds: com.lhs.share.hub.repository.BondRepository? = null,
+    private val bondPreviews: com.lhs.share.hub.service.bond.BondImportPreviews? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -127,6 +129,9 @@ class SubAccountService(
                     val nextGame = game?.let(::normalizeGame) ?: account.game
                     fenceAccount(account)
                     if (nextGame != account.game) {
+                        if (bonds?.hasSubstantiveData(userId, accountId) == true) {
+                            throw InventoryApiException(HttpStatus.CONFLICT, "bond_game_locked", "已有羁绊档案，不能修改所属游戏；请使用另一个游戏账号")
+                        }
                         if (achievements?.hasSubstantiveData(userId, accountId) == true) {
                             throw InventoryApiException(HttpStatus.CONFLICT, "achievement_game_locked", "已有成就档案，不能修改所属游戏；请使用另一个游戏账号")
                         }
@@ -146,6 +151,8 @@ class SubAccountService(
                         recruitmentRepository?.removeEmptyPreferences(userId, accountId)
                         achievements?.deleteAccount(userId, accountId)
                         achievementPreviews?.deleteAccount(userId, accountId)
+                        bonds?.deleteAccount(userId, accountId)
+                        bondPreviews?.deleteAccount(userId, accountId)
                     }
                     val now = Instant.now()
                     accountRepository.updateDetails(userId, accountId, name ?: account.name, nextGame, now)
@@ -204,6 +211,8 @@ class SubAccountService(
                 calendarPrivateItems?.deleteAccount(userId, accountId)
                 achievements?.deleteAccount(userId, accountId)
                 achievementPreviews?.deleteAccount(userId, accountId)
+                bonds?.deleteAccount(userId, accountId)
+                bondPreviews?.deleteAccount(userId, accountId)
                 tokenService.revokeByAccount(userId, accountId)
                 accountRepository.deleteById(checkNotNull(account.id))
                 accountEvents?.publishChange(userId, accountId, "account_deleted")

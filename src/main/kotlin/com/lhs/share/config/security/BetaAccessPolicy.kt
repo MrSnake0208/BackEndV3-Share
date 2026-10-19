@@ -7,6 +7,7 @@ object BetaAccessPolicy {
         "/v1/activity-calendar",
         "/v1/recruitment",
         "/v1/achievements",
+        "/v1/bonds",
         "/v1/inventory",
         "/v1/operator",
         "/v1/star-state",
@@ -19,7 +20,14 @@ object BetaAccessPolicy {
     fun requiresBeta(method: String, path: String): Boolean {
         if (method == "OPTIONS") return false
         if (method == "GET" &&
-            path in setOf("/v1/inventory/catalog", "/v1/operator/catalog", "/v1/recruitment/catalog", "/v1/achievements/catalog")
+            path in
+            setOf(
+                "/v1/inventory/catalog",
+                "/v1/operator/catalog",
+                "/v1/recruitment/catalog",
+                "/v1/achievements/catalog",
+                "/v1/bonds/catalog",
+            )
         ) {
             return false
         }

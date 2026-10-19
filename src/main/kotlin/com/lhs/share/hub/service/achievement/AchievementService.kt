@@ -36,6 +36,7 @@ class AchievementService(
     private val mapper: ObjectMapper,
     private val previews: AchievementImportPreviews,
     @param:Qualifier("hubTransactionTemplate") private val transaction: TransactionTemplate,
+    private val bonds: com.lhs.share.hub.service.bond.BondService? = null,
 ) {
     fun archive(userId: String, accountId: String): AchievementArchiveResponse = response(load(account(userId, accountId)))
 
@@ -248,8 +249,20 @@ class AchievementService(
     }
 
     private fun currentRevision(value: AchievementArchive): Long = value.version?.plus(1) ?: 0
-    private fun response(value: AchievementArchive) =
-        AchievementArchiveResponse(value.accountId, value.game, currentRevision(value), value.records)
+    private fun response(value: AchievementArchive): AchievementArchiveResponse {
+        val metrics = bonds?.archive(value.userId, value.accountId)?.let { source ->
+            if (source.game != value.game) throw conflict("羁绊指标与成就账号游戏不一致")
+            listOf(
+                com.lhs.share.hub.controller.achievement.response.AchievementLinkedMetric(
+                    "yuan_bond_variants",
+                    source.summary.triggeredCount,
+                    source.revision,
+                    source.catalogVersion,
+                ),
+            )
+        } ?: emptyList()
+        return AchievementArchiveResponse(value.accountId, value.game, currentRevision(value), value.records, metrics)
+    }
     private fun checkRevision(value: AchievementArchive, expected: Long) {
         if (expected < 0 || currentRevision(value) != expected) throw conflict("档案已由其它设备修改，请读取最新内容后重试")
     }

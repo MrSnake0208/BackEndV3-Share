@@ -141,6 +141,7 @@ class SecurityConfig(
                 "/v1/operator/catalog",
                 "/v1/recruitment/catalog",
                 "/v1/achievements/catalog",
+                "/v1/bonds/catalog",
                 "/v1/level/catalog",
                 "/v1/level/catalog/**",
                 "/v1/changelog/**",

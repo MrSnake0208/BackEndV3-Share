@@ -27,7 +27,14 @@ data class AchievementCatalogResponse(
     val entries: List<AchievementEntry>,
     val legacyRewards: Map<String, String> = emptyMap(),
 )
-data class AchievementArchiveResponse(val accountId: String, val game: String, val revision: Long, val records: List<AchievementRecord>)
+data class AchievementLinkedMetric(val metric: String, val value: Int, val sourceRevision: Long, val sourceCatalogVersion: String)
+data class AchievementArchiveResponse(
+    val accountId: String,
+    val game: String,
+    val revision: Long,
+    val records: List<AchievementRecord>,
+    val linkedMetrics: List<AchievementLinkedMetric> = emptyList(),
+)
 data class AchievementSourceAccount(val name: String)
 data class AchievementBackupResponse(
     val format: String = "yuanhub-achievement",
