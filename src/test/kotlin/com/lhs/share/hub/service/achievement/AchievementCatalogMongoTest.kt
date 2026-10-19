@@ -2,7 +2,7 @@ package com.lhs.share.hub.service.achievement
 
 import com.lhs.share.hub.controller.achievement.request.AchievementImportRequest
 import com.lhs.share.hub.controller.achievement.request.AchievementPatch
-import com.lhs.share.hub.controller.achievement.response.AchievementSource
+import com.lhs.share.hub.controller.achievement.response.AchievementReward
 import com.lhs.share.hub.repository.AchievementCatalogRepository
 import com.lhs.share.hub.repository.AchievementRepository
 import com.lhs.share.hub.repository.SubAccountRepository
@@ -54,9 +54,10 @@ class AchievementCatalogMongoTest {
         view = admin.addCategory(targetGame, view.revision, "合成测试分类")
         view = admin.addEntry(targetGame, view.revision, view.draft.categories.first().categoryId)
         val entry = view.draft.entries.first().copy(
-            name = "测试成就", condition = "合成条件", reward = "无奖励",
-            sources = listOf(AchievementSource("合成来源", "https://example.invalid/test", "独立测试 fixture")),
-            verifiedAt = "2026-10-18", dataStatus = "verified", progressKind = "integer", target = 10.0, unit = "次",
+            name = "测试成就",
+            condition = "合成条件",
+            rewards = emptyList(),
+            target = 10,
         )
         return admin.save(targetGame, view.revision, view.draft.copy(entries = listOf(entry), dataStatus = "partial", coverage = "合成测试范围"))
     }
@@ -116,13 +117,8 @@ class AchievementCatalogMongoTest {
         val stored = repository.find(game)!!
         val minimal = current.draft.entries.single().copy(
             condition = "",
-            reward = null,
-            sources = emptyList(),
-            verifiedAt = "",
-            dataStatus = "unverified",
-            progressKind = null,
+            rewards = null,
             target = null,
-            unit = null,
         )
         assertTrue(
             repository.replace(
@@ -139,8 +135,8 @@ class AchievementCatalogMongoTest {
         val published = admin.publish(game, revision, "admin")
         assertEquals("partial", published.published.content.dataStatus)
         assertEquals(minimal, publicCatalog.catalog(game).entries.single())
-        assertEquals("", published.draft.entries.single().verifiedAt)
-        assertEquals("unverified", published.draft.entries.single().dataStatus)
+        assertEquals(null, published.draft.entries.single().rewards)
+        assertEquals(null, published.draft.entries.single().target)
         assertThrows(InventoryApiException::class.java) { admin.publish(game, revision, "other") }
     }
 
@@ -193,11 +189,10 @@ class AchievementCatalogMongoTest {
     }
 
     @Test
-    fun `invalid names links references duplicate ids and unsupported progress prevent publication`() {
+    fun `invalid names rewards references duplicate ids and targets prevent publication`() {
         var current = ready()
         val entry = current.draft.entries.single()
         for (bad in listOf(
-            current.draft.copy(entries = listOf(entry.copy(sources = listOf(AchievementSource("来源", "http://example.invalid", ""))))),
             current.draft.copy(entries = listOf(entry.copy(name = ""))),
         )) {
             current = admin.save(game, current.revision, bad)
@@ -209,7 +204,7 @@ class AchievementCatalogMongoTest {
             current.draft.copy(entries = listOf(entry, entry)),
             current.draft.copy(entries = listOf(entry.copy(categoryId = "missing"))),
             current.draft.copy(categories = current.draft.categories.map { it.copy(enabled = false) }),
-            current.draft.copy(entries = listOf(entry.copy(progressKind = null, target = 1.0))),
+            current.draft.copy(entries = listOf(entry.copy(rewards = listOf(AchievementReward("unknown", "未知", 1))))),
             current.draft.copy(entries = listOf(entry.copy(achievementId = "yh_forged_new"))),
         )) {
             assertThrows(InventoryApiException::class.java) { admin.save(game, current.revision, bad) }
@@ -304,16 +299,14 @@ class AchievementCatalogMongoTest {
         val entry = current.draft.entries.single()
         val oldVersion = current.published.version
         for (changed in listOf(
-            entry.copy(target = 5.0),
-            entry.copy(unit = "个"),
-            entry.copy(progressKind = "number"),
-            entry.copy(progressKind = null, target = null, unit = null),
+            entry.copy(target = 5),
+            entry.copy(target = null),
         )) {
             current = admin.save(game, current.revision, current.draft.copy(entries = listOf(changed)))
             assertTrue(admin.preview(game, current.revision).errors.any { it.contains("口径") })
             assertThrows(InventoryApiException::class.java) { admin.publish(game, current.revision, "admin") }
         }
-        current = admin.save(game, current.revision, current.draft.copy(entries = listOf(entry.copy(target = 20.0))))
+        current = admin.save(game, current.revision, current.draft.copy(entries = listOf(entry.copy(target = 20))))
         assertEquals(1, admin.preview(game, current.revision).progressChanges.size)
         current = admin.publish(game, current.revision, "admin")
         assertThrows(InventoryApiException::class.java) { admin.publish(game, current.revision, "admin", oldVersion) }
@@ -347,11 +340,11 @@ class AchievementCatalogMongoTest {
         }
         current = admin.importConfirm(game, current.revision, "admin", file, "keep", preview.previewToken)
         assertEquals(original, current.draft.entries.first())
-        assertEquals("unverified", current.draft.entries.last().dataStatus)
+        assertEquals(original.rewards, current.draft.entries.last().rewards)
         preview = admin.importPreview(game, current.revision, "admin", file, "update")
         current = admin.importConfirm(game, current.revision, "admin", file, "update", preview.previewToken)
         assertEquals("导入更名", current.draft.entries.first().name)
-        assertEquals("unverified", current.draft.entries.first().dataStatus)
+        assertEquals(original.target, current.draft.entries.first().target)
         assertEquals(3, current.draft.entries.size)
         assertTrue(publicCatalog.catalog(game).entries.isEmpty())
         assertTrue(admin.preview(game, current.revision).errors.isEmpty())
@@ -390,5 +383,37 @@ class AchievementCatalogMongoTest {
             admin.importConfirm(game, current.revision, "admin", file, "update", preview.previewToken)
         }
         assertEquals(current, admin.read(game))
+    }
+
+    @Test
+    fun `legacy raw reward extensions and decimal targets stay readable but all catalog mutations are blocked`() {
+        var view = ready()
+        view = admin.publish(game, view.revision, "admin")
+        val collection = mongo.getCollectionName(com.lhs.share.hub.repository.entity.AchievementCatalog::class.java)
+        val raw = repository.raw(game)!!
+        val draftEntry = raw.get("draft", org.bson.Document::class.java).getList("entries", org.bson.Document::class.java).single()
+        draftEntry["spoiler"] = "不得丢弃的资料"
+        draftEntry["aliases"] = listOf("旧名称")
+        draftEntry["target"] = 2.5
+        val publishedEntry = raw.get(
+            "published",
+            org.bson.Document::class.java,
+        ).get("content", org.bson.Document::class.java).getList("entries", org.bson.Document::class.java).single()
+        publishedEntry.remove("rewards")
+        publishedEntry["reward"] = "旧奖励文本，暂无法解析"
+        mongo.getCollection(collection).replaceOne(org.bson.Document("_id", game), raw)
+        val original = repository.raw(game)
+        val read = admin.read(game)
+        assertTrue(read.compatibilityIssues.any { it.contains("spoiler") })
+        assertTrue(read.compatibilityIssues.any { it.contains("aliases") })
+        assertTrue(read.compatibilityIssues.any { it.contains("2.5") })
+        assertEquals(null, read.draft.entries.single().target)
+        assertEquals("旧奖励文本，暂无法解析", publicCatalog.catalog(game).legacyRewards.values.single())
+        assertThrows(InventoryApiException::class.java) { admin.save(game, read.revision, read.draft) }
+        assertThrows(InventoryApiException::class.java) { admin.discard(game, read.revision) }
+        assertThrows(InventoryApiException::class.java) { admin.publish(game, read.revision, "admin") }
+        assertThrows(InventoryApiException::class.java) { admin.addEntry(game, read.revision, read.draft.categories.single().categoryId) }
+        assertEquals(original, repository.raw(game))
+        assertEquals(original, admin.legacyExport(game))
     }
 }

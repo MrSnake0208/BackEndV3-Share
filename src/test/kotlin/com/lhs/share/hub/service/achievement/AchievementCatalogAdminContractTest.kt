@@ -70,7 +70,7 @@ class AchievementCatalogAdminContractTest {
 
     @Test
     fun `decoder rejects coercion invalid source shapes unknown fields and null collections`() {
-        val entry = fixtureCatalog().entries.first().copy(dataStatus = "verified", reward = "无奖励")
+        val entry = fixtureCatalog().entries.first().copy(rewards = emptyList())
         val base = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(entry)
         for ((key, json) in listOf(
             "sort" to "\"1\"",
@@ -111,7 +111,7 @@ class AchievementCatalogAdminContractTest {
         val seedMapper = io.mockk.spyk(mapper)
         val seeds = listOf("代号鸢", "如鸢").map { game ->
             fixtureCatalog(game).let { c ->
-                c.copy(dataStatus = "partial", entries = c.entries.map { it.copy(dataStatus = "verified", reward = "未知奖励") })
+                c.copy(dataStatus = "partial", entries = c.entries)
             }
         }
         every { seedMapper.readTree(any<InputStream>()) } returns mapper.valueToTree(seeds)

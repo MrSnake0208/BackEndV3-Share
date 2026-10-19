@@ -72,7 +72,8 @@ class AchievementContractTest {
             body.dropLast(1) + ",\"user_id\":\"other\"}", body.dropLast(1) + ",\"game\":\"如鸢\"}",
             body.dropLast(1) + ",\"source\":\"external\"}", body.dropLast(1) + ",\"favorite\":1}",
             body.dropLast(1) + ",\"note\":null}", body.dropLast(1) + ",\"note\":\"${"文".repeat(501)}\"}",
-            body.dropLast(1) + ",\"progress\":-1}", body.dropLast(1) + ",\"progress\":\"10\"}",
+            body.dropLast(1) + ",\"progress\":-1}", body.dropLast(1) + ",\"progress\":1.5}",
+            body.dropLast(1) + ",\"progress\":1.0000000000000001}", body.dropLast(1) + ",\"progress\":\"10\"}",
             body.dropLast(1) + ",\"progress\":1e999}", body.dropLast(1) + ",\"completed_on\":\"2026-02-30\"}",
             body.dropLast(1) + ",\"completed_on\":\"0000-01-01\"}",
         )

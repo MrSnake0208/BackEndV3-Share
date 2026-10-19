@@ -3,9 +3,9 @@ package com.lhs.share.hub.controller.achievement.response
 import com.lhs.share.hub.repository.entity.AchievementRecord
 import java.time.Instant
 
-data class AchievementSource(val title: String, val url: String, val usage: String)
 data class AchievementCategory(val categoryId: String, val name: String)
-data class AchievementOperator(val id: String, val name: String)
+data class AchievementReward(val itemKey: String, val name: String, val quantity: Long)
+data class AchievementRewardItem(val itemKey: String, val name: String, val games: List<String>)
 data class AchievementEntry(
     val achievementId: String,
     val game: String,
@@ -14,18 +14,9 @@ data class AchievementEntry(
     val condition: String,
     val sort: Int,
     val isHidden: Boolean? = null,
-    val aliases: List<String> = emptyList(),
-    val operators: List<AchievementOperator> = emptyList(),
-    val chapter: String? = null,
-    val reward: String? = null,
-    val method: String? = null,
-    val spoiler: String? = null,
-    val sources: List<AchievementSource> = emptyList(),
-    val verifiedAt: String,
-    val dataStatus: String,
-    val progressKind: String? = null,
-    val target: Double? = null,
-    val unit: String? = null,
+    val rewards: List<AchievementReward>? = null,
+    val target: Long? = null,
+    val linkedMetric: String? = null,
 )
 data class AchievementCatalogResponse(
     val catalogVersion: String,
@@ -34,6 +25,7 @@ data class AchievementCatalogResponse(
     val coverage: String,
     val categories: List<AchievementCategory>,
     val entries: List<AchievementEntry>,
+    val legacyRewards: Map<String, String> = emptyMap(),
 )
 data class AchievementArchiveResponse(val accountId: String, val game: String, val revision: Long, val records: List<AchievementRecord>)
 data class AchievementSourceAccount(val name: String)

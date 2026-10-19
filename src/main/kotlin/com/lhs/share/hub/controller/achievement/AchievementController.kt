@@ -1,6 +1,7 @@
 package com.lhs.share.hub.controller.achievement
 
 import com.fasterxml.jackson.core.JsonProcessingException
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lhs.share.config.doc.RequireJwt
@@ -40,13 +41,13 @@ class AchievementController(
 
     @RequireJwt
     @PatchMapping("/records/{id}", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun update(@PathVariable id: String, @RequestBody body: JsonNode) = AchievementRequestDecoder.write(body, id).let {
+    fun update(@PathVariable id: String, @RequestBody body: ByteArray) = AchievementRequestDecoder.write(requestBody(body), id).let {
         privateResult(service.update(helper.requireUserId(), it.accountId, it.expectedRevision, it.records))
     }
 
     @RequireJwt
     @PostMapping("/batch", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun batch(@RequestBody body: JsonNode) = AchievementRequestDecoder.write(body).let {
+    fun batch(@RequestBody body: ByteArray) = AchievementRequestDecoder.write(requestBody(body)).let {
         privateResult(service.update(helper.requireUserId(), it.accountId, it.expectedRevision, it.records))
     }
 
@@ -57,23 +58,24 @@ class AchievementController(
     @RequireJwt
     @PostMapping("/import/preview", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun preview(@RequestBody body: ByteArray) =
-        privateResult(service.preview(helper.requireUserId(), AchievementRequestDecoder.exchange(importBody(body), false)))
+        privateResult(service.preview(helper.requireUserId(), AchievementRequestDecoder.exchange(requestBody(body), false)))
 
     @RequireJwt
     @PostMapping("/import/confirm", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun confirm(@RequestBody body: ByteArray) =
-        privateResult(service.confirm(helper.requireUserId(), AchievementRequestDecoder.exchange(importBody(body), true)))
+        privateResult(service.confirm(helper.requireUserId(), AchievementRequestDecoder.exchange(requestBody(body), true)))
 
-    private fun importBody(body: ByteArray): JsonNode {
+    private fun requestBody(body: ByteArray): JsonNode {
         if (body.size > AchievementRequestDecoder.MAX_BYTES + 4096) {
             throw com.lhs.share.hub.service.inventory.InventoryApiException(
                 org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
                 "achievement_import_too_large",
-                "导入请求最多1MiB加4KiB封装",
+                "导入请求最多16MiB加4KiB封装",
             )
         }
         return try {
-            mapper.readTree(body) ?: AchievementRequestDecoder.invalid("JSON 不能为空")
+            mapper.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readTree(body)
+                ?: AchievementRequestDecoder.invalid("JSON 不能为空")
         } catch (_: JsonProcessingException) {
             throw com.lhs.share.hub.service.inventory.InventoryApiException(
                 org.springframework.http.HttpStatus.BAD_REQUEST,

@@ -26,8 +26,8 @@ data class AchievementImportRequest(
 )
 
 object AchievementRequestDecoder {
-    const val MAX_BYTES = 1048576
-    const val MAX_IMPORT = 1000
+    const val MAX_BYTES = 16 * 1024 * 1024
+    const val MAX_IMPORT = 5000
     val CONTENT_FIELDS = setOf("achievement_id", "status", "favorite", "note", "progress", "completed_on")
     private val metadata =
         setOf("updated_at", "revision", "source", "state_source", "state_updated_at", "progress_source", "progress_updated_at")
@@ -63,8 +63,10 @@ object AchievementRequestDecoder {
         val note = if ("note" in fields) text(node, "note") else ""
         if (note.length > 500) invalid("备注最多500字")
         val progress = node["progress"]?.takeUnless { it.isNull }?.let {
-            if (!it.isNumber || !it.doubleValue().isFinite() || it.doubleValue() < 0 || it.doubleValue() > 9007199254740991.0) {
-                invalid("进度必须是合法非负有限数值")
+            if (!it.isNumber || !it.doubleValue().isFinite() || it.doubleValue() < 0 || it.doubleValue() > 9007199254740991.0 ||
+                it.decimalValue().stripTrailingZeros().scale() > 0
+            ) {
+                invalid("进度必须是非负安全整数；旧小数备份请先核对，不能自动截断")
             }
             it.doubleValue()
         }
@@ -112,7 +114,7 @@ object AchievementRequestDecoder {
         )
         val document = node["document"] ?: invalid("缺少 document")
         if (document.toString().toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
-            throw InventoryApiException(HttpStatus.PAYLOAD_TOO_LARGE, "achievement_import_too_large", "成就文件最多1MiB")
+            throw InventoryApiException(HttpStatus.PAYLOAD_TOO_LARGE, "achievement_import_too_large", "成就文件最多16MiB")
         }
         val strategy = node["strategy"]?.let { text(node, "strategy") } ?: "keep_current"
         if (strategy !in setOf("keep_current", "use_file")) invalid("导入策略无效")

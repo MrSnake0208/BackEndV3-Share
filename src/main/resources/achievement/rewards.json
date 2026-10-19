@@ -1,0 +1,418 @@
+[
+  {
+    "item_key": "wuzhuqian",
+    "name": "五铢钱",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "bingshucanjuan",
+    "name": "兵书残卷",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "gongguoge",
+    "name": "功过格",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "tongxinjie",
+    "name": "同心结",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "wugouxue",
+    "name": "吴钩雪",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "bingdilian",
+    "name": "并蒂莲",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "pengcheng_dafengqixi",
+    "name": "彭城·大风起兮",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "xinzhi_wudan",
+    "name": "心纸【伍丹】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "xinzhi_achan",
+    "name": "心纸【阿蝉】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "zhuluanhuazhi",
+    "name": "朱栾花纸",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "wufengming",
+    "name": "梧凤鸣",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "unidentified_item",
+    "name": "物品1045",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "yuguanhao",
+    "name": "玉管毫",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "langya_yiwangdonghai",
+    "name": "琅琊·以望东海",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "baixingyao",
+    "name": "白星曜",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "baimeihuazhi",
+    "name": "白梅花纸",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "baijinbi",
+    "name": "白金币",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_gezhongshengshou",
+    "name": "称号【个中圣手】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_lingdaozhang",
+    "name": "称号【凌道张】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_lingdaozhang_silver",
+    "name": "称号【凌道张】·鎏银",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_lingdaozhang_gold",
+    "name": "称号【凌道张】·镂金",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_jianzhanshanhe",
+    "name": "称号【剑斩山河】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_pijitailai",
+    "name": "称号【否极泰来】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_tianxiaguixin",
+    "name": "称号【天下归心】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_tianrenganying",
+    "name": "称号【天人感应】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_tianmingyishan",
+    "name": "称号【天命一闪】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_hanchanfujian",
+    "name": "称号【寒蝉伏见】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_yiqizhe",
+    "name": "称号【弈棋者】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_xihuajun",
+    "name": "称号【惜花君】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_huijin",
+    "name": "称号【挥金】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_wenhantiannv",
+    "name": "称号【文汉天女】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_mingjun",
+    "name": "称号【明君】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_xingruhuai",
+    "name": "称号【星入怀】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_chengguangyaoyao",
+    "name": "称号【橙光曜曜】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_ziguangzhaozhao",
+    "name": "称号【紫光昭昭】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_huajianxinxu",
+    "name": "称号【花间心绪】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_xianzhu",
+    "name": "称号【贤主】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_qingmeizhuma",
+    "name": "称号【青梅竹马】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "title_huangwuxingzhe",
+    "name": "称号【黄雾行者】",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "fuchuan",
+    "name": "符传",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "sumi",
+    "name": "粟米",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "hongliaohuazhi",
+    "name": "红蓼花纸",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "xiuqiu",
+    "name": "绣球",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "tumihuazhi",
+    "name": "荼蘼花纸",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "guanxing",
+    "name": "观星",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "meiwu_fengjiantingmie",
+    "name": "郿坞·风翦霆灭",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "zuigucao",
+    "name": "醉骨草",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "gangding",
+    "name": "钢锭",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "yinfu",
+    "name": "阴符",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "qingzhuhuazhi",
+    "name": "青竹花纸",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "qingxiaoxuanfu_furong",
+    "name": "青绡玄服·傅融",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  },
+  {
+    "item_key": "feiyun",
+    "name": "飞云",
+    "games": [
+      "代号鸢",
+      "如鸢"
+    ]
+  }
+]

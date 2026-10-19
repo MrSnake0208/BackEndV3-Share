@@ -6,7 +6,7 @@
 
 `src/main/resources/achievement/catalog.json` 仅为缺失数据库文档的一次性种子/离线备份。目前种子代号鸢、如鸢均0条，不含测试 fixture。已有文档优先且不会覆盖；仅查库确认缺失时严格校验并 insert，并发初始化重复键重读获胜者。数据库/资源/校验异常直接报错，不静默降级空目录。初始化按游戏独立执行，不读取或写入个人档案。
 
-日常资料通过网站「管理工作台 → 内容维护 → 成就目录管理」维护，详细接口及操作见 [成就目录管理](achievement-catalog-admin.md)。游戏和系统生成的稳定 ID 不可编辑；成就名称和有效分类必填，条件、奖励、来源、核验日期等选填，不要求逐条核验后才发布。只有明确累计口径才填写 progress_kind（integer/number）与 target，unit 选填。公开 data_status 自动区分 empty/partial，coverage 可自动生成；complete 仅由管理员明确选择，不按条目数量推断完整程度。
+日常资料通过网站「管理工作台 → 内容维护 → 成就目录管理」维护，详细接口及操作见 [成就目录管理](achievement-catalog-admin.md)。游戏和系统生成的稳定 ID 不可编辑；成就名称和有效分类必填，条件与奖励允许暂缺，不要求逐条核验后才发布。公共条目固定为 achievement_id、game、category_id、name、condition、sort、is_hidden、rewards、target、linked_metric；没有原游戏ID或替代映射。target=null 不提供数值进度；明确目标为1到1e12的正整数。公开 data_status 自动区分 empty/partial，coverage 可自动生成；complete 仅由管理员明确选择，不按条目数量推断完整程度。
 
 下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口仍受原统一 feature flag 控制；本模块独立于羁绊助手。
 
@@ -24,7 +24,7 @@
 | POST /v1/achievements/import/preview | account_id、strategy、document | 逐条预览、数量、revision、catalog_version、preview_token |
 | POST /v1/achievements/import/confirm | 上述输入，加 expected_revision、catalog_version、preview_token、skip_unknown | 原子写入后的完整档案 |
 
-单条/批量 record 是部分更新：achievement_id 与 status/favorite/note/progress/completed_on 中至少一项；单条 ID 在路径中。省略字段保留，禁止客户端指定归属或来源。status 为 pending（待核对）、incomplete（确认未完成）、completed（已完成）；没有记录默认 pending。关注、备注和数值独立，不自动确认完成；非 completed 状态清除完成日期，不伪造今天为实际日期。备注纯文本最多500字符；进度非负、有限且不超过 JavaScript 安全整数上限，整数口径拒绝小数，无进度口径拒绝填写数值。
+单条/批量 record 是部分更新：achievement_id 与 status/favorite/note/progress/completed_on 中至少一项；单条 ID 在路径中。省略字段保留，禁止客户端指定归属或来源。status 为 pending（待核对）、incomplete（确认未完成）、completed（已完成）；没有记录默认 pending。关注、备注和数值独立，不自动确认完成；非 completed 状态清除完成日期，不伪造今天为实际日期。备注纯文本最多500字符；进度非负、有限且不超过 JavaScript 安全整数上限，所有新进度写入/备份导入拒绝小数；target=null 时拒绝填写数值。已有小数原样读取、导出及保留，改备注/状态不截断；含小数备份预览逐项标 invalid，整批确认拒绝，须先核对原口径，不自动取整。
 
 单条示例：`{"account_id":"已拥有的账号ID","expected_revision":0,"status":"completed"}`；批量示例：`{"account_id":"已拥有的账号ID","expected_revision":0,"records":[{"achievement_id":"目录中的稳定ID","favorite":true}]}`。示例中的占位 ID 不是生产成就。
 
@@ -36,15 +36,23 @@ Mongo 文档使用 @Version CAS，写入事务沿用账号 fence；账号删改�
 
 备份格式包含 format=`yuanhub-achievement`、schema_version=1、game、catalog_version、exported_at、source_account.name（仅提示）、records；记录包含稳定 achievement_id、三态、关注、备注、绝对进度、可选完成日期和服务器时间/版本/来源。无 token、用户 ID 或源账号权限凭据。导出当前账号全部记录，包括历史目录记录，不受筛选影响。
 
-最多1000条、1MiB UTF-8 JSON；HTTP 导入封装额外允许4KiB，超限413。保存时同时约束完整备份大小，确保本模块导出可重新读入。损坏 JSON、不支持的 schema、非法类型、跨游戏、重复 ID、数值或日期非法均不会部分写入。备份中的来源和时间不可伪造成可信第三方来源，实际变更由服务端标为 import。
+最多5000条（含历史记录）、16MiB UTF-8 JSON；HTTP 导入封装额外允许4KiB，超限413。保存时同时约束完整备份大小及个人档案15MiB JSON安全预算，预留Mongo BSON开销；数量/体积超限均不写入。合法整数备份可重新预览；历史未知/退役ID仍按 unknown 明确处理，旧小数备份须先核对。损坏 JSON、不支持的 schema、非法类型、跨游戏、重复 ID、数值或日期非法均不会部分写入。备份中的来源和时间不可伪造成可信第三方来源，实际变更由服务端标为 import。
 
 必须先预览：逐条返回 add/same/conflict/unknown/invalid，及最终 affected 数。默认 keep_current 完整保留已有实质冲突记录；明确 use_file 才采用文件提供的字段。空备注不擦除现有备注，缺项不删除，绝对进度不累加，相同内容重复导入不增加版本。目录版本不同可按稳定 ID 核对；未知 ID 需 skip_unknown=true 明确跳过，不生成条目，历史备份仍保留在原账号。任一 invalid 阻止整批确认。
 
 preview_token 绑定用户、目标账号、游戏、当前档案版本、目录版本、策略及文件内容摘要，有效10分钟；确认重新完整校验。换文件/策略/目标、档案或目录变动均需重新预览。预览不写数据库；内存缓存每用户/账号一份、总计最多512份，重启失效。当前单实例模式，多实例需粘性路由或共享预览存储；不会默默跨实例确认。
 
+## 奖励与旧目录
+
+`rewards=null` 为资料未补齐，`[]` 为确认无奖励，非空数组项为 `{item_key,name,quantity}`。字典为 `src/main/resources/achievement/rewards.json`，52种物品，包含适用游戏；5个物品复用已核对库存键，其余为独立奖励键，不代表已接入库存。原表的“物品1045”保留名称、标记待核定，不推测真实物品。数量为1..9007199254740991整数；单成就奖励数量合计也不得超安全整数。拒绝重复键、未知键、错误规范名、跨游戏物品、额外字段和类型强制转换。未来跨成就按物品汇总还须检查安全整数溢出，不混加不同物品。
+
+公共目录额外提供只读 `legacy_rewards`（ID→原文本，通常为空），玩家只在 rewards=null 时回显并标为未结构化，不作为可计算奖励。旧扩展字段、未结构化奖励和不兼容目标会产生管理员 `compatibility_issues`，阻止所有目录变更；原始Mongo文档和个人档案不自动迁移。管理员可用 `scope=legacy` 导出原始目录文档用于核对；这不是十字段目录导入文件。实际开发/生产存量本阶段未连接核查，不能据空种子推断数据库为空。
+
 ## 后续羁绊边界
 
-未来须先验证账号映射、授权和来源，再映射稳定 ID，不按名称匹配。外部观察与人工确认分别保存来源，旧数据/缺项不能降级完成；总量不能作为增量重复相加。达标先提示用户，成就完成不能反向解锁羁绊。本轮没有同步按钮、适配器或第三方权限。
+`linked_metric` 只允许 null 或 `yuan_bond_variants`；后者 target 只允许1/3/10/20/50/100/200。本阶段每款离线目录显式配置7项羁缘；其余条目不从中文数字猜目标。尚未实现羁绊目录/档案/页面/旧助手迁移或计算源；响应不提供虚构的 `linked_metrics`，界面明确提示当前仅为人工进度。
+
+后续接入同账号的可信羁绊派生绝对种数，失败不伪造0；不写回人工 progress、不相加或取最大。达标由用户确认完成，取消羁绊不降级已确认成就；成就完成不反向勾选羁绊。备份仍仅包含人工事实，不接受客户端派生数值。
 
 ## 定向检查
 
