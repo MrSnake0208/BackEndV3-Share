@@ -23,6 +23,8 @@ data class CatalogAdminView(
     val published: CatalogPublication,
     val draft: CatalogContent,
     val history: List<CatalogPublication>,
+    val compatibilityIssues: List<String> = emptyList(),
+    val rewardItems: List<com.lhs.share.hub.controller.achievement.response.AchievementRewardItem> = AchievementRewards.items,
 )
 data class CatalogChange(val achievementId: String, val name: String, val kind: String)
 data class CatalogPublishPreview(
@@ -58,6 +60,7 @@ class AchievementCatalogAdminService(
     private val imports = ConcurrentHashMap<String, PendingImport>()
 
     fun read(game: String) = view(catalog.load(game))
+    fun legacyExport(game: String) = repository.raw(game) ?: invalid("目录不存在")
 
     fun save(game: String, revision: Long, content: CatalogContent): CatalogAdminView {
         val current = current(game, revision)
@@ -82,7 +85,7 @@ class AchievementCatalogAdminService(
         val current = current(game, revision)
         if (current.draft.categories.none { it.categoryId == categoryId && it.enabled }) invalid("请先选择启用中的分类")
         val id = newId(game)
-        val entry = AchievementEntry(id, game, categoryId, "", "", current.draft.entries.size, verifiedAt = "", dataStatus = "unverified")
+        val entry = AchievementEntry(id, game, categoryId, "", "", current.draft.entries.size)
         val next = current.copy(draft = current.draft.copy(entries = current.draft.entries + entry), issuedIds = current.issuedIds + id)
         validate(next.draft, false)
         return persist(current, next)
@@ -133,8 +136,8 @@ class AchievementCatalogAdminService(
         val compatibility = AchievementCatalogRules.compatibility(content, current.identities)
         val progress = content.entries.mapNotNull { e ->
             val old = current.identities[e.achievementId]
-            if (old != null && (old.progressKind != e.progressKind || old.target != e.target || old.unit != e.unit)) {
-                "${e.achievementId}：${old.progressKind}/${old.target}/${old.unit} → ${e.progressKind}/${e.target}/${e.unit}"
+            if (old != null && old.target != e.target) {
+                "${e.achievementId}：${old.target} → ${e.target}"
             } else {
                 null
             }
@@ -246,7 +249,8 @@ class AchievementCatalogAdminService(
             document
         }
         if (!data.isObject || data.path("game").asText() != current.game) invalid("导入目录的目标游戏不匹配")
-        val rows = data["entries"]?.takeIf { it.isArray && it.size() <= 1000 } ?: invalid("entries 必须是最多1000条的数组")
+        val rows =
+            data["entries"]?.takeIf { it.isArray && it.size() <= AchievementCatalogRules.MAX_ENTRIES } ?: invalid("entries 必须是最多5000条的数组")
         val categoryRows = data["categories"]?.takeIf { it.isArray && it.size() <= 100 } ?: invalid("categories 必须是最多100项的数组")
         val categories = current.draft.categories.associateBy { it.categoryId }.toMutableMap()
         val items = mutableListOf<CatalogImportItem>()
@@ -263,7 +267,9 @@ class AchievementCatalogAdminService(
                         if (old != c) items += CatalogImportItem(-index - 1, c.categoryId, "conflict", "分类变更：${c.name}")
                         if (strategy == "update") categories[c.categoryId] = c
                     }
-                    c.categoryId in current.categoryIds -> items += CatalogImportItem(-index - 1, c.categoryId, "unmatched", "历史分类 ID 不复用")
+                    c.categoryId in current.categoryIds || c.categoryId.startsWith("cat_") ->
+                        items +=
+                            CatalogImportItem(-index - 1, c.categoryId, "unmatched", "历史分类 ID 不复用")
                     else -> {
                         val id = "cat_${UUID.randomUUID().toString().replace("-", "")}"
                         categories[id] = c.copy(categoryId = id)
@@ -288,8 +294,6 @@ class AchievementCatalogAdminService(
                 node.put("achievement_id", id)
                 if (!node.has("condition")) node.put("condition", "")
                 if (!node.has("sort")) node.put("sort", index)
-                if (!node.has("verified_at")) node.put("verified_at", "")
-                if (!node.has("data_status")) node.put("data_status", "unverified")
                 val parsed = AchievementCatalogDecoder.entry(node, mapper)
                 val entry = parsed.copy(categoryId = categoryMap[parsed.categoryId] ?: parsed.categoryId)
                 validate(
@@ -306,7 +310,7 @@ class AchievementCatalogAdminService(
                         else -> "conflict"
                     }
                     if (old == null || strategy == "update" && outcome == "conflict") {
-                        entries[id] = entry.copy(dataStatus = "unverified", verifiedAt = "")
+                        entries[id] = entry
                     }
                     items += CatalogImportItem(
                         index,
@@ -333,6 +337,7 @@ class AchievementCatalogAdminService(
         if (errors.isNotEmpty()) invalid(errors.joinToString("；"))
     }
     private fun current(game: String, revision: Long) = catalog.load(game).also {
+        if (it.compatibilityIssues.isNotEmpty()) conflict("旧目录需要离线核对，未写入任何内容：" + it.compatibilityIssues.take(5).joinToString("；"))
         if (it.revision !=
             revision
         ) {
@@ -340,12 +345,17 @@ class AchievementCatalogAdminService(
         }
     }
     private fun persist(old: AchievementCatalog, next: AchievementCatalog): CatalogAdminView {
+        val retained =
+            next.identities.keys + next.draft.entries.map { it.achievementId } + next.published.content.entries.map { it.achievementId } +
+                next.history.flatMap { snapshot -> snapshot.content.entries.map { it.achievementId } }
+        if (retained.size > AchievementCatalogRules.MAX_ENTRIES) invalid("目录含历史身份最多5000条，请保留原系统ID；不会按名称合并")
         val value = next.copy(revision = old.revision + 1)
-        if (mapper.writeValueAsBytes(value).size > 12 * 1024 * 1024) invalid("目录和历史超过12MiB安全上限，请减少长文本")
+        if (mapper.writeValueAsBytes(value).size > AchievementCatalogRules.MAX_DOCUMENT_BYTES) invalid("目录和历史超过12MiB安全上限，请减少长文本")
         if (!repository.replace(value, old.revision)) conflict("目录版本冲突，未覆盖其他管理员的修改")
         return view(value)
     }
-    private fun view(value: AchievementCatalog) = CatalogAdminView(value.revision, value.published, value.draft, value.history)
+    private fun view(value: AchievementCatalog) =
+        CatalogAdminView(value.revision, value.published, value.draft, value.history, value.compatibilityIssues)
     private fun newId(game: String) = "yh_${if (game == "代号鸢") "dhy" else "ry"}_${UUID.randomUUID().toString().replace("-", "")}"
     private fun conflict(message: String): Nothing =
         throw InventoryApiException(HttpStatus.CONFLICT, "achievement_catalog_conflict", message)

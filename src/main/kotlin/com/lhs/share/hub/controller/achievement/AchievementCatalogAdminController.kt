@@ -44,7 +44,13 @@ class AchievementCatalogAdminController(
     @GetMapping("/export")
     fun export(@RequestParam game: String, @RequestParam scope: String): ResponseEntity<*> {
         actor()
+        if (scope ==
+            "legacy"
+        ) {
+            return result(mapOf("format" to "yuanhub-achievement-catalog-legacy", "document" to service.legacyExport(game)))
+        }
         val current = service.read(game)
+        if (current.compatibilityIssues.isNotEmpty()) invalid("旧目录含待核对资料，请选择 legacy 导出原始文档；标准导出会丢失旧字段，已阻止")
         val content = when (scope) {
             "draft" -> current.draft
             "published" -> current.published.content.copy(catalogVersion = current.published.version)

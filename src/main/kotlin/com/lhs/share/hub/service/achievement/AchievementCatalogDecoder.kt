@@ -50,18 +50,20 @@ object AchievementCatalogDecoder {
     fun entry(node: JsonNode, mapper: ObjectMapper): AchievementEntry {
         fields(
             node,
-            setOf(
-                "achievement_id", "game", "category_id", "name", "condition", "chapter", "reward", "method", "spoiler",
-                "verified_at", "data_status", "progress_kind", "unit",
-            ),
+            setOf("achievement_id", "game", "category_id", "name", "condition", "linked_metric"),
             setOf("sort", "target"),
             setOf("is_hidden"),
-            setOf("aliases", "operators", "sources"),
+            setOf("rewards"),
         )
         integer(node, "sort")
-        node["aliases"]?.forEach { if (!it.isTextual) invalid("别名必须是文本") }
-        node["operators"]?.forEach { fields(it, setOf("id", "name")) }
-        node["sources"]?.forEach { fields(it, setOf("title", "url", "usage")) }
+        node["target"]?.takeUnless { it.isNull }?.let {
+            if (!it.isIntegralNumber || !it.canConvertToLong()) invalid("target 必须是正整数或 null")
+        }
+        node["rewards"]?.takeUnless { it.isNull }?.forEach {
+            fields(it, setOf("item_key", "name"), setOf("quantity"))
+            val quantity = it["quantity"]
+            if (quantity == null || !quantity.isIntegralNumber || !quantity.canConvertToLong()) invalid("奖励数量必须是正整数")
+        }
         return decode(node, AchievementEntry::class.java, mapper)
     }
 

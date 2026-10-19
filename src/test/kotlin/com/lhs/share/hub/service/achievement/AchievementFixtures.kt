@@ -8,7 +8,6 @@ import com.lhs.share.hub.controller.achievement.request.AchievementRequestDecode
 import com.lhs.share.hub.controller.achievement.response.AchievementCatalogResponse
 import com.lhs.share.hub.controller.achievement.response.AchievementCategory
 import com.lhs.share.hub.controller.achievement.response.AchievementEntry
-import com.lhs.share.hub.controller.achievement.response.AchievementSource
 
 // 合成测试数据，不代表真实游戏目录，禁止移动到 main/resources。
 internal fun achievementMapper() = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -24,17 +23,14 @@ internal fun fixtureCatalog(game: String = "代号鸢", version: String = "fixtu
         listOf(AchievementCategory("test", "测试分类")),
         (1..3).map { index ->
             AchievementEntry(
-                achievementId = "${prefix}_$index", game = game, categoryId = "test", name = "测试成就$index", condition = "测试条件", sort = index,
-                isHidden = index == 2, verifiedAt = "2026-10-18", dataStatus = "fixture",
-                sources = listOf(AchievementSource("测试来源", "https://example.invalid/fixture", "合成测试资料")),
-                progressKind = if (index ==
-                    1
-                ) {
-                    "integer"
-                } else {
-                    null
-                },
-                target = if (index == 1) 10.0 else null, unit = if (index == 1) "次" else null,
+                achievementId = "${prefix}_$index",
+                game = game,
+                categoryId = "test",
+                name = "测试成就$index",
+                condition = "测试条件",
+                sort = index,
+                isHidden = index == 2,
+                target = if (index == 1) 10L else null,
             )
         },
     )

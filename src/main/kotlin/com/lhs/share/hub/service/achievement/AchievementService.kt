@@ -105,7 +105,7 @@ class AchievementService(
         if (AchievementRequestDecoder.text(document, "game") != owner.game) invalid("备份游戏与目标账号不匹配")
         AchievementRequestDecoder.text(document, "catalog_version")
         val rows = document["records"]?.takeIf { it.isArray && it.size() <= AchievementRequestDecoder.MAX_IMPORT }
-            ?: invalid("records 必须是数组且最多1000条")
+            ?: invalid("records 必须是数组且最多5000条")
         val data = catalog.catalog(owner.game)
         val entries = data.entries.associateBy { it.achievementId }
         val otherGame = if (owner.game == "如鸢") "代号鸢" else "如鸢"
@@ -177,7 +177,7 @@ class AchievementService(
         val status = if ("status" in fields) patch.status else base.status
         val progress = if ("progress" in fields) patch.progress else base.progress
         if ("progress" in fields && progress != null &&
-            (entry.progressKind == null || entry.progressKind == "integer" && progress % 1.0 != 0.0)
+            (entry.target == null || !progress.isFinite() || progress < 0 || progress > 9007199254740991.0 || progress % 1.0 != 0.0)
         ) {
             invalid("此成就不支持该数值口径")
         }
@@ -236,9 +236,12 @@ class AchievementService(
 
     private fun persist(owner: SubAccount, current: AchievementArchive, records: List<AchievementRecord>): AchievementArchiveResponse {
         if (records == current.records) return response(current)
-        if (records.size > AchievementRequestDecoder.MAX_IMPORT) invalid("当前账号个人记录超过1000条上限，请保留备份并联系维护者")
+        if (records.size > AchievementRequestDecoder.MAX_IMPORT) invalid("当前账号个人记录超过5000条上限，请保留备份并联系维护者")
         if (mapper.writeValueAsBytes(backup(owner, records)).size > AchievementRequestDecoder.MAX_BYTES) {
-            invalid("完整备份将超过1MiB上限，请缩短备注后重试；未写入任何内容")
+            invalid("完整备份将超过16MiB上限，请缩短备注后重试；未写入任何内容")
+        }
+        if (mapper.writeValueAsBytes(current.copy(records = records)).size > 15 * 1024 * 1024) {
+            invalid("个人档案超过15MiB安全上限，请缩短备注；未写入任何内容")
         }
         if (!accounts.fenceRecruitmentWrite(owner.userId, owner.accountId, owner.game)) throw conflict("账号已修改或删除，请重新读取")
         return response(repository.save(current.copy(records = records)))

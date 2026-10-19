@@ -334,7 +334,7 @@ class AchievementMongoTest {
             assertThrows(InventoryApiException::class.java) { service.preview("owner", invalid) }
         }
         val oversized = mapper.createArrayNode()
-        repeat(1001) { oversized.add(mapper.createObjectNode().put("achievement_id", "id$it").put("status", "completed")) }
+        repeat(5001) { oversized.add(mapper.createObjectNode().put("achievement_id", "id$it").put("status", "completed")) }
         val document = base.document.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         document.set<com.fasterxml.jackson.databind.node.ObjectNode>("records", oversized)
         assertThrows(InventoryApiException::class.java) { service.preview("owner", base.copy(document = document)) }
@@ -445,5 +445,47 @@ class AchievementMongoTest {
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    @Test
+    fun `legacy fractional progress exports unchanged survives unrelated edits and rejects restore without truncation`() {
+        repository.save(
+            AchievementArchive(
+                "legacy-fraction",
+                "owner",
+                "a",
+                "代号鸢",
+                records = listOf(
+                    com.lhs.share.hub.repository.entity.AchievementRecord(
+                        id,
+                        progress = 1.5,
+                        updatedAt = java.time.Instant.EPOCH,
+                        revision = 1,
+                        source = "manual",
+                    ),
+                ),
+            ),
+        )
+        val read = service.archive("owner", "a")
+        assertEquals(1.5, read.records.single().progress)
+        val edited = service.update("owner", "a", read.revision, listOf(fixturePatch("""{"achievement_id":"$id","note":"保留小数"}""")))
+        assertEquals(1.5, edited.records.single().progress)
+        val exported = service.export("owner", "a")
+        assertEquals(1.5, exported.records.single().progress)
+        val request = AchievementImportRequest("b", mapper.valueToTree(exported), "use_file", false)
+        val preview = service.preview("owner", request)
+        assertEquals(1, preview.stats.getValue("invalid"))
+        assertTrue(preview.items.single().message!!.contains("不能自动截断"))
+        assertThrows(InventoryApiException::class.java) {
+            service.confirm(
+                "owner",
+                request.copy(
+                    expectedRevision = preview.expectedRevision,
+                    catalogVersion = preview.catalogVersion,
+                    previewToken = preview.previewToken,
+                ),
+            )
+        }
+        assertTrue(service.archive("owner", "b").records.isEmpty())
     }
 }

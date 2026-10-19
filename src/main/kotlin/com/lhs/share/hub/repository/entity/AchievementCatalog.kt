@@ -1,9 +1,11 @@
 package com.lhs.share.hub.repository.entity
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.lhs.share.hub.controller.achievement.response.AchievementCatalogResponse
 import com.lhs.share.hub.controller.achievement.response.AchievementCategory
 import com.lhs.share.hub.controller.achievement.response.AchievementEntry
 import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.Transient
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
@@ -18,13 +20,21 @@ data class CatalogContent(
     val retiredIds: Set<String> = emptySet(),
     val catalogVersion: String = "",
 ) {
+    @get:JsonIgnore
+    @field:Transient
+    var legacyRewards: Map<String, String> = emptyMap()
+
     fun publicCatalog(version: String) = AchievementCatalogResponse(
         version,
         game,
         dataStatus,
         coverage,
         categories.filter { it.enabled }.sortedBy { it.sort }.map { AchievementCategory(it.categoryId, it.name) },
-        entries.filter { it.achievementId !in retiredIds }.sortedBy { it.sort },
+        entries.filter { it.achievementId !in retiredIds }.sortedWith(
+            compareBy<AchievementEntry> { id -> categories.firstOrNull { it.categoryId == id.categoryId }?.sort ?: Int.MAX_VALUE }
+                .thenBy { it.sort }.thenBy { it.achievementId },
+        ),
+        legacyRewards.filterKeys { id -> entries.any { it.achievementId == id && id !in retiredIds } },
     )
 }
 
@@ -46,4 +56,8 @@ data class AchievementCatalog(
     val identities: Map<String, AchievementEntry> = emptyMap(),
     val issuedIds: Set<String> = emptySet(),
     val categoryIds: Set<String> = emptySet(),
-)
+) {
+    @get:JsonIgnore
+    @field:Transient
+    var compatibilityIssues: List<String> = emptyList()
+}
