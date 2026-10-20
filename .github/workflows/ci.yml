@@ -3,7 +3,8 @@ name: CI
 # 普通 push / PR 只做检查、测试与打包，不做任何生产部署。
 # 生产发布由 tag 触发的 release.yml 负责。
 #
-# 说明：容器依赖的 integrationTest / apiSchemaTest / realisticTest 不在默认 CI 内，
+# 默认 test 排除 integration / architecture / api-schema / realistic / stress 标签。
+# 说明：容器依赖的 integrationTest / apiSchemaTest / realisticTest / stressTest 不在默认 CI 内，
 # 它们需要 Docker 且耗时较长；本地完整验证入口是仓库外的 root ./test all。
 
 on:
