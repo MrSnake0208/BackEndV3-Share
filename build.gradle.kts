@@ -106,7 +106,7 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform { excludeTags("integration", "architecture", "api-schema") }
+    useJUnitPlatform { excludeTags("integration", "architecture", "api-schema", "realistic", "stress") }
 }
 
 // These properties belong to test JVMs, never the application or a developer's

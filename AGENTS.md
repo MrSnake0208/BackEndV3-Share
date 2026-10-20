@@ -30,6 +30,8 @@ YuanHub-All 工作区默认由**用户/CI 执行回归与全量验证**。Agent 
 ./gradlew assemble --console=plain
 ```
 
+默认 `test` 排除 `integration` / `architecture` / `api-schema` / `realistic` / `stress` 标签；普通单元、MockMvc 与未带这些标签的契约测试仍保留。各专用任务和 `check` 依赖不变。
+
 容器依赖的 `integrationTest` / `apiSchemaTest` / `realisticTest` 只在修改真正触及对应语义时建议执行；`stressTest` 仅用于索引、分页、聚合、大规模导入/同步等规模敏感修改。不得把它们当成普通小改动的固定流程。
 
 ## 浏览器自动化默认禁用
