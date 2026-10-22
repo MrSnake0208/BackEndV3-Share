@@ -14,6 +14,7 @@ import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorDailyTasksRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
+import com.lhs.share.hub.repository.OperatorMilestoneRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
@@ -78,6 +79,7 @@ class SubAccountService(
     private val starCompletionRepository: StarCompletionRepository? = null,
     private val operatorOrganizationRepository: OperatorOrganizationRepository? = null,
     private val operatorDailyTasksRepository: OperatorDailyTasksRepository? = null,
+    private val operatorMilestoneRepository: OperatorMilestoneRepository? = null,
     private val achievements: AchievementRepository? = null,
     private val achievementPreviews: AchievementImportPreviews? = null,
     private val bonds: com.lhs.share.hub.repository.BondRepository? = null,
@@ -217,6 +219,7 @@ class SubAccountService(
                 trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorDailyTasksRepository?.deleteAccount(userId, accountId)
+                operatorMilestoneRepository?.deleteAccount(userId, accountId)
                 plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorOrganizationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starLoadoutCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
