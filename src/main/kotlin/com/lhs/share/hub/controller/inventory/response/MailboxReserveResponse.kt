@@ -1,0 +1,23 @@
+package com.lhs.share.hub.controller.inventory.response
+
+import com.lhs.share.hub.repository.entity.MailboxReserve
+import com.lhs.share.hub.repository.entity.WhiteCoinMail
+import java.time.Instant
+
+data class MailboxReserveResponse(
+    val accountId: String,
+    val whiteCoinMails: List<WhiteCoinMail>,
+    val fuChuanMailCount: Int,
+    val version: Long,
+    val updatedAt: Instant?,
+) {
+    companion object {
+        fun of(accountId: String, reserve: MailboxReserve) = MailboxReserveResponse(
+            accountId,
+            reserve.whiteCoinMails,
+            reserve.fuChuanMailCount,
+            reserve.version,
+            reserve.updatedAt,
+        )
+    }
+}

@@ -1,5 +1,6 @@
 package com.lhs.share.hub.repository
 
+import com.lhs.share.hub.repository.entity.MailboxReserve
 import com.lhs.share.hub.repository.entity.SubAccount
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.mongodb.core.FindAndModifyOptions
@@ -29,6 +30,7 @@ interface SubAccountRepository : MongoRepository<SubAccount, String>, SubAccount
 }
 
 interface SubAccountRepositoryCustom {
+    fun replaceMailboxReserve(userId: String, accountId: String, expected: Long, reserve: MailboxReserve): SubAccount?
     fun fenceRecruitmentWrite(userId: String, accountId: String, expectedGame: String): Boolean
     fun updateDetails(userId: String, accountId: String, name: String, game: String, now: Instant)
     fun updateOperatorPanelAutoFill(userId: String, accountId: String, enabled: Boolean)
@@ -45,6 +47,20 @@ interface SubAccountRepositoryCustom {
 }
 
 class SubAccountRepositoryImpl(@param:Qualifier("hubMongoTemplate") private val template: MongoTemplate) : SubAccountRepositoryCustom {
+    override fun replaceMailboxReserve(userId: String, accountId: String, expected: Long, reserve: MailboxReserve): SubAccount? {
+        val version = if (expected == 0L) {
+            Criteria().orOperator(Criteria.where("mailboxReserve").`is`(null), Criteria.where("mailboxReserve.version").`is`(0L))
+        } else {
+            Criteria.where("mailboxReserve.version").`is`(expected)
+        }
+        return template.findAndModify(
+            owner(userId, accountId).addCriteria(version),
+            Update().set("mailboxReserve", reserve),
+            FindAndModifyOptions.options().returnNew(true),
+            SubAccount::class.java,
+        )
+    }
+
     override fun updateOperatorPanelAutoFill(userId: String, accountId: String, enabled: Boolean) {
         template.updateFirst(owner(userId, accountId), Update().set("operatorPanelAutoFill", enabled), SubAccount::class.java)
     }
