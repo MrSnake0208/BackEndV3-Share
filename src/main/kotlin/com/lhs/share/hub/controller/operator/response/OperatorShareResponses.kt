@@ -33,6 +33,15 @@ data class OperatorShareEntryDto(
     val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
     val levelBreakthroughStage: Int? = null,
     val panel: OperatorPanelResponse? = null,
+    val displayPanel: OperatorDisplayPanelResponse? = null,
+)
+
+/** Resolved values and their public source labels; account/operator preferences remain private. */
+data class OperatorDisplayPanelResponse(
+    val attack: Long?,
+    val hp: Long?,
+    val attackSource: String,
+    val hpSource: String,
 )
 
 /** Public combat values; observation provenance, signatures and display preferences stay private. */

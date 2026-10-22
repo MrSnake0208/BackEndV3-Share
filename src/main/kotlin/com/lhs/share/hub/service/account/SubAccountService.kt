@@ -114,12 +114,18 @@ class SubAccountService(
     fun list(userId: String): List<SubAccountResponse> =
         accountRepository.findAllByUserIdOrderByCreatedAtAsc(userId).map(SubAccountResponse::of)
 
-    fun update(userId: String, accountId: String, name: String?, game: String?): SubAccountResponse {
-        if (name == null && game == null) {
+    fun update(
+        userId: String,
+        accountId: String,
+        name: String?,
+        game: String?,
+        operatorPanelAutoFill: Boolean? = null,
+    ): SubAccountResponse {
+        if (name == null && game == null && operatorPanelAutoFill == null) {
             throw InventoryApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "schema_validation_failed",
-                "name 或 game 至少提供一项",
+                "name、game 或 operator_panel_auto_fill 至少提供一项",
             )
         }
         return try {
@@ -156,8 +162,18 @@ class SubAccountService(
                     }
                     val now = Instant.now()
                     accountRepository.updateDetails(userId, accountId, name ?: account.name, nextGame, now)
+                    if (operatorPanelAutoFill != null) {
+                        accountRepository.updateOperatorPanelAutoFill(userId, accountId, operatorPanelAutoFill)
+                    }
                     accountEvents?.publishChange(userId, accountId, "account_updated", mapOf("game" to nextGame))
-                    SubAccountResponse.of(account.copy(name = name ?: account.name, game = nextGame, updatedAt = now))
+                    SubAccountResponse.of(
+                        account.copy(
+                            name = name ?: account.name,
+                            game = nextGame,
+                            updatedAt = now,
+                            operatorPanelAutoFill = operatorPanelAutoFill ?: account.operatorPanelAutoFill,
+                        ),
+                    )
                 },
             )
         } catch (e: DuplicateKeyException) {

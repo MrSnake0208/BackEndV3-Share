@@ -14,6 +14,7 @@ data class SubAccountResponse(
     val game: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val operatorPanelAutoFill: Boolean = true,
 ) {
     companion object {
         fun of(account: SubAccount) = SubAccountResponse(
@@ -22,6 +23,7 @@ data class SubAccountResponse(
             game = account.game,
             createdAt = account.createdAt,
             updatedAt = account.updatedAt,
+            operatorPanelAutoFill = account.operatorPanelAutoFill,
         )
     }
 }
