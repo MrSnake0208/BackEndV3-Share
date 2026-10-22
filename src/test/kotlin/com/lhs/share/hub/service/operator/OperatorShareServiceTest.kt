@@ -173,7 +173,7 @@ class OperatorShareServiceTest {
         val sharedLoadout = jacksonObjectMapper().readTree(json).path("entries").path("recruited").path("disc_loadouts")[0]
         assertEquals("技能增伤", sharedLoadout.path("discs")[0].path("ot_name").asText())
         assertTrue(!sharedLoadout.has("target_discs"))
-        assertTrue(!sharedLoadout.has("status"))
+        assertEquals("reroll", sharedLoadout.path("status").asText())
         assertTrue("仅自己可见" !in json)
         assertEquals(0.5, values.path("special").path("current").doubleValue())
         assertTrue(values.path("attack").path("current").isIntegralNumber)
@@ -364,6 +364,41 @@ class OperatorShareServiceTest {
         game = "代号鸢",
         shareToken = shareToken,
     )
+
+    @ParameterizedTest
+    @ValueSource(strings = ["unmarked", "perfect", "reroll"])
+    fun `public disc states preserve manual marks and legacy defaults without exposing targets`(discStatus: String) {
+        every { accountRepository.findByShareToken("code") } returns account("code")
+        every { catalogService.currentCatalogVersion() } returns "fixture"
+        val current = entry(27)
+        every { operatorService.current("u1", "acc1", "代号鸢") } returns listOf(
+            OperatorCurrentResponse(
+                userId = "u1",
+                accountId = "acc1",
+                game = "代号鸢",
+                fullBaselineAt = Instant.EPOCH,
+                entries = mapOf(
+                    "owned" to current.copy(
+                        discLoadouts = listOf(
+                            current.discLoadouts.first().copy(status = discStatus),
+                            OperatorDiscLoadout("disc_2", "旧命盘", emptyList()),
+                        ),
+                    ),
+                ),
+                updatedAt = Instant.EPOCH,
+            ),
+        )
+        val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+        val json = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(service.view("code"))
+        val loadouts = json.path("entries").path("owned").path("disc_loadouts")
+        assertEquals(discStatus, loadouts[0].path("status").asText())
+        assertEquals("unmarked", loadouts[1].path("status").asText())
+        loadouts.forEach { loadout ->
+            assertEquals(setOf("id", "name", "discs", "status"), loadout.fieldNames().asSequence().toSet())
+        }
+        assertTrue("仅自己可见" !in json.toString())
+    }
 
     private fun entry(starLevel: Int) = OperatorCurrentEntryDto(
         elite = 17,
