@@ -787,7 +787,9 @@ class OperatorService(
             existing.starStones == merged.starStones && existing.combatStats == merged.combatStats
         if (sameFacts) merged = merged.copy(starLevel = existing.starLevel, huajiLegacy = existing.huajiLegacy)
         // An unrelated edit must not replace a historical invalid stage with its display-only unknown value.
-        if ("huaji" !in fields && "star_level" !in fields && existing.huaji?.stage?.let { OperatorHuajiRules.anomalous(it, catalog) } == true) {
+        if ("huaji" !in fields && "star_level" !in fields &&
+            existing.huaji?.stage?.let { OperatorHuajiRules.anomalous(it, catalog) } == true
+        ) {
             merged = merged.copy(huaji = existing.huaji, huajiLegacy = existing.huajiLegacy)
         }
         merged = merged.copy(

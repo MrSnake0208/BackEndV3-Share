@@ -19,9 +19,9 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 
 class OperatorPanelControllerContractTest {
@@ -38,18 +38,25 @@ class OperatorPanelControllerContractTest {
         val result = mvc.perform(post("/v1/operator/panel/preview").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(jsonPath("$.data.rule_version").value("synthetic")).andReturn()
-        assertEquals(setOf("status", "attack", "hp", "missing_fields", "reason", "rule_version"), mapper.readTree(result.response.contentAsString).path("data").fieldNames().asSequence().toSet())
+        assertEquals(
+            setOf("status", "attack", "hp", "missing_fields", "reason", "rule_version"),
+            mapper.readTree(result.response.contentAsString).path("data").fieldNames().asSequence().toSet(),
+        )
         mvc.perform(post("/v1/operator/panel/current").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(jsonPath("$.data.op.attack").value(123))
-        verify { panels.preview("jwt-owner", any()); panels.current("jwt-owner", any()) }
+        verify {
+            panels.preview("jwt-owner", any())
+            panels.current("jwt-owner", any())
+        }
         for (name in listOf("preview", "current")) {
             assertNotNull(OperatorPanelController::class.java.methods.single { it.name == name }.getAnnotation(AccessLimit::class.java))
         }
     }
 
     @Test fun `invalid input uses operator error envelope`() {
-        every { panels.preview("jwt-owner", any()) } throws OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "panel_invalid_input", "Invalid panel input", fieldPath = "level")
+        every { panels.preview("jwt-owner", any()) } throws
+            OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "panel_invalid_input", "Invalid panel input", fieldPath = "level")
         mvc.perform(post("/v1/operator/panel/preview").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isUnprocessableEntity).andExpect(jsonPath("$.error.code").value("panel_invalid_input"))
     }

@@ -59,7 +59,10 @@ class OperatorPanelServiceTest {
         )
         every { stars.findByUserIdAndAccountId("u", "a") } returns state
         every { loadouts.findByUserIdAndAccountId("u", "a") } returns StarLoadoutCurrent(
-            userId = "u", accountId = "a", generation = 1, loadouts = listOf(StarOperatorLoadout("operator.test", StarLoadoutSlots(main1 = "mine"))),
+            userId = "u",
+            accountId = "a",
+            generation = 1,
+            loadouts = listOf(StarOperatorLoadout("operator.test", StarLoadoutSlots(main1 = "mine"))),
         )
         every { rules.snapshot("如鸢") } returns panelRules()
     }
@@ -75,7 +78,14 @@ class OperatorPanelServiceTest {
             assertEquals("calculated", expected.status)
             for (awakened in listOf(false, null)) {
                 every { currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u", "a") } returns listOf(
-                    OperatorCurrent(userId = "u", accountId = "a", game = "如鸢", entries = mapOf("operator.test" to entry.copy(huaji = OperatorHuaji(true, stage, awakened)))),
+                    OperatorCurrent(
+                        userId = "u",
+                        accountId = "a",
+                        game = "如鸢",
+                        entries = mapOf(
+                            "operator.test" to entry.copy(huaji = OperatorHuaji(true, stage, awakened)),
+                        ),
+                    ),
                 )
                 assertEquals(expected, service.saved("u", "a", setOf("operator.test")).getValue("operator.test"))
             }
@@ -105,25 +115,39 @@ class OperatorPanelServiceTest {
         val expected = OperatorPanelCalculator.calculate(panelRules(), "operator.test", panelInput(), listOf(PanelStone("1025", 10, 1)))
         assertEquals(expected.attack, saved.attack)
         assertEquals(expected.hp, saved.hp)
-        assertEquals(setOf("status", "attack", "hp", "missingFields", "reason", "ruleVersion"), mapper.valueToTree<JsonNode>(saved).fieldNames().asSequence().toSet())
+        assertEquals(
+            setOf("status", "attack", "hp", "missingFields", "reason", "ruleVersion"),
+            mapper.valueToTree<JsonNode>(saved).fieldNames().asSequence().toSet(),
+        )
     }
 
     @Test fun `batch is bounded resolves repositories once and hides nonpublished source IDs`() {
         val result = service.current("u", mapper.readTree("""{"account_id":"a","operator_ids":["operator.test","123"]}"""))
         assertEquals("unsupported", result.getValue("123").status)
-        verify(exactly = 1) { rules.snapshot("如鸢"); catalogs.findAllByOrderByOperatorIdAsc(); stars.findByUserIdAndAccountId("u", "a") }
-        val tooMany = mapper.createObjectNode().put("account_id", "a").apply { putArray("operator_ids").also { array -> (1..101).forEach { array.add("op$it") } } }
+        verify(exactly = 1) {
+            rules.snapshot("如鸢")
+            catalogs.findAllByOrderByOperatorIdAsc()
+            stars.findByUserIdAndAccountId("u", "a")
+        }
+        val tooMany = mapper.createObjectNode().put("account_id", "a").apply {
+            putArray("operator_ids").also { array -> (1..101).forEach { array.add("op$it") } }
+        }
         assertThrows(OperatorApiException::class.java) { service.current("u", tooMany) }
     }
 
     @Test fun `account authorization runs before reading any private state or rules`() {
         every { accounts.requireAccount("stranger", "a") } throws OperatorApiException(HttpStatus.FORBIDDEN, "forbidden", "Forbidden")
         assertThrows(OperatorApiException::class.java) { service.preview("stranger", preview()) }
-        verify(exactly = 0) { rules.snapshot(any()); catalogs.findAllByOrderByOperatorIdAsc(); currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc(any(), any()) }
+        verify(exactly = 0) {
+            rules.snapshot(any())
+            catalogs.findAllByOrderByOperatorIdAsc()
+            currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc(any(), any())
+        }
     }
 
     @Test fun `unknown node states and legacy invalid history never manufacture values`() {
-        every { stars.findByUserIdAndAccountId("u", "a") } returns state.copy(inventory = state.inventory.map { it.copy(breakthroughStage = null) })
+        every { stars.findByUserIdAndAccountId("u", "a") } returns
+            state.copy(inventory = state.inventory.map { it.copy(breakthroughStage = null) })
         val result = service.preview("u", preview())
         assertEquals("incomplete", result.status)
         assertEquals(listOf("loadout.main1.breakthrough_stage"), result.missingFields)
@@ -138,7 +162,9 @@ class OperatorPanelServiceTest {
             preview().apply { putObject("loadout").put("main1", "mine").put("main2", "mine") },
             preview().apply { put("level", 11.5) },
             preview().apply { put("extra", 10000) },
-        )) assertThrows(OperatorApiException::class.java) { service.preview("u", payload) }
+        )) {
+            assertThrows(OperatorApiException::class.java) { service.preview("u", payload) }
+        }
     }
 
     @Test fun `game availability restrictions stale generation and unavailable rules fail closed`() {

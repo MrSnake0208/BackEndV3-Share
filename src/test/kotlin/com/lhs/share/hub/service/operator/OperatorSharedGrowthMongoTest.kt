@@ -376,7 +376,9 @@ class OperatorSharedGrowthMongoTest {
         every { catalog.getOperator("base") } returns hidden
         every { catalog.spFormsOf("base") } returns emptyList()
         val before = current.findById("state").orElseThrow()
-        val historical = before.entries.getValue("base").copy(starLevel = 22, huaji = com.lhs.share.hub.repository.entity.OperatorHuaji(true, 22, null))
+        val historical = before.entries.getValue(
+            "base",
+        ).copy(starLevel = 22, huaji = com.lhs.share.hub.repository.entity.OperatorHuaji(true, 22, null))
         current.save(before.copy(entries = mapOf("base" to historical)))
         val request = mapper.readTree("""{"expected_revision":7,"reason":"manual_correction","elite":17}""") as ObjectNode
         val shown = service.patchCurrent("owner", "account", "如鸢", "base", request)

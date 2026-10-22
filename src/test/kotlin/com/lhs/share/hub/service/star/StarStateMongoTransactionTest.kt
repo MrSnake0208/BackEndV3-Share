@@ -98,7 +98,9 @@ class StarStateMongoTransactionTest {
         val known = main("same").copy(level = 20, breakthroughStage = IntNode(2))
         stateService.rebuild("owner", "a", rebuild(0, 0, "pre_ocr_rebuild", listOf(known)))
         fun patch(revision: Long, entry: StarInventoryEntryRequest) = stateService.patch(
-            "owner", "a", StarStatePatchRequest(1, revision, listOf(entry), emptyMap(), StarWorkspaceExperienceRequest(), StarWorkspaceBagRequest()),
+            "owner",
+            "a",
+            StarStatePatchRequest(1, revision, listOf(entry), emptyMap(), StarWorkspaceExperienceRequest(), StarWorkspaceBagRequest()),
         )
         val legacy = known.copy(breakthroughStage = null)
         val preserved = patch(1, legacy)
@@ -114,7 +116,10 @@ class StarStateMongoTransactionTest {
     }
 
     @Test fun `star quality limits and explicit impossible breakthroughs fail before persisting`() {
-        for (entry in listOf(main("bad").copy(quality = "white", level = 31), main("bad").copy(level = 21, breakthroughStage = IntNode(1)))) {
+        for (entry in listOf(
+            main("bad").copy(quality = "white", level = 31),
+            main("bad").copy(level = 21, breakthroughStage = IntNode(1)),
+        )) {
             assertThrows(InventoryApiException::class.java) {
                 stateService.rebuild("owner", "a", rebuild(0, 0, "pre_ocr_rebuild", listOf(entry)))
             }

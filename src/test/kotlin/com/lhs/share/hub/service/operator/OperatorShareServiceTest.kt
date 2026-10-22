@@ -40,7 +40,15 @@ class OperatorShareServiceTest {
     private val authorization = mockk<com.lhs.share.hub.service.admin.AdminAuthorizationService>(relaxed = true)
     private val panels = mockk<OperatorPanelService>(relaxed = true)
     private val service =
-        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService, panels, authorization)
+        OperatorShareService(
+            accountRepository,
+            operatorService,
+            catalogService,
+            annotationRepository,
+            organizationService,
+            panels,
+            authorization,
+        )
 
     @AfterEach
     fun `sharing never replaces or upserts the account document`() {

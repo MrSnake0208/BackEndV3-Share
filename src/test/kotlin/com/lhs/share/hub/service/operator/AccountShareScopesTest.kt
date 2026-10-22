@@ -15,7 +15,8 @@ import org.junit.jupiter.api.Test
 
 class AccountShareScopesTest {
     private val repository = mockk<SubAccountRepository>()
-    private val service = OperatorShareService(repository, mockk(), mockk(), mockk<OperatorAnnotationRepository>(), mockk(), mockk(), mockk())
+    private val service =
+        OperatorShareService(repository, mockk(), mockk(), mockk<OperatorAnnotationRepository>(), mockk(), mockk(), mockk())
     private var current = SubAccount(userId = "u", accountId = "a", name = "Account", shareToken = "legacy")
 
     private fun wire() {

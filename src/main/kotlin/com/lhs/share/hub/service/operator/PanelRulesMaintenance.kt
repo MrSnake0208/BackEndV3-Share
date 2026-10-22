@@ -1,10 +1,10 @@
 package com.lhs.share.hub.service.operator
 
-import com.mongodb.ConnectionString
-import com.mongodb.client.MongoClients
 import com.lhs.share.hub.repository.PanelRulesRepository
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.PanelRuleBundle
+import com.mongodb.ConnectionString
+import com.mongodb.client.MongoClients
 import org.springframework.data.mongodb.MongoTransactionManager
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory
@@ -42,8 +42,11 @@ object PanelRulesMaintenance {
         val byId = catalog.associateBy { it.operatorId }
         require(catalog.size == byId.size) { "Published catalog has duplicate IDs" }
         bundle.operators.filter { it.operatorId != null }.forEach { rule ->
-            val entry = requireNotNull(byId[rule.operatorId]) { "Reviewed operator mapping is absent from the target catalog: ${rule.operatorId}" }
-            require(entry.rarity == rule.rarity && OperatorHuajiRules.maximum(entry) == rule.maxStar) { "Catalog capability differs from reviewed rule: ${rule.operatorId}" }
+            val entry =
+                requireNotNull(byId[rule.operatorId]) { "Reviewed operator mapping is absent from the target catalog: ${rule.operatorId}" }
+            require(entry.rarity == rule.rarity && OperatorHuajiRules.maximum(entry) == rule.maxStar) {
+                "Catalog capability differs from reviewed rule: ${rule.operatorId}"
+            }
         }
     }
 }

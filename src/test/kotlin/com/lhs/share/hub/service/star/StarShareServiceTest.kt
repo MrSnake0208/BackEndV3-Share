@@ -65,7 +65,9 @@ class StarShareServiceTest {
             JavaTimeModule(),
         ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).valueToTree<com.fasterxml.jackson.databind.JsonNode>(latest)
         assertEquals(setOf("game", "available_views", "has_state", "updated_at", "inventory"), json.fieldNames().asSequence().toSet())
-        json["inventory"].forEach { assertEquals(setOf("kind", "name", "quality", "level", "breakthrough_stage"), it.fieldNames().asSequence().toSet()) }
+        json["inventory"].forEach {
+            assertEquals(setOf("kind", "name", "quality", "level", "breakthrough_stage"), it.fieldNames().asSequence().toSet())
+        }
         assertFalse(json.toString().contains("private"))
         verify(exactly = 2) { states.findByUserIdAndAccountId("owner", "a") }
     }

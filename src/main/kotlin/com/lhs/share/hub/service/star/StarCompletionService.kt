@@ -156,7 +156,11 @@ class StarCompletionService(
                             selected[star.instanceId]?.let {
                                 star.copy(
                                     level = it.targetLevel!!,
-                                    breakthroughStage = StarBreakthroughRules.completed(it.targetLevel, star.quality, it.targetAlsoBroken == true),
+                                    breakthroughStage = StarBreakthroughRules.completed(
+                                        it.targetLevel,
+                                        star.quality,
+                                        it.targetAlsoBroken == true,
+                                    ),
                                 )
                             }
                                 ?: star
