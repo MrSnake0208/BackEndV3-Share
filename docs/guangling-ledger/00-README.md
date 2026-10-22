@@ -6,6 +6,8 @@
 
 ## 文档
 
+2026-10-22 个人价格、折扣与多币种扩展以 [05-multicurrency-pricing.md](05-multicurrency-pricing.md) 为准；以下旧版设计中的单一价格币种限制仅适用于未携带 `pricing` 的旧方案。
+
 | # | 文件 | 作者 | 内容 |
 |---|---|---|---|
 | 01 | 01-research.md | 调研员 | 前端状态模型（字段级+证据行号）× 后端 HubBackend 约定 × 10 条决策点 |

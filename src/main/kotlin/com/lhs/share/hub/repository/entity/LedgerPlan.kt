@@ -65,7 +65,16 @@ data class LedgerPlan(
     val shared: Boolean = false,
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now(),
+    val pricing: LedgerPricing? = null,
 ) : Serializable
+
+/** Personal budget settings; rates are CNY per unit of foreign currency. Null pricing denotes a legacy plan. */
+data class LedgerPricing(
+    val currency: String = "CNY",
+    val rates: Map<String, Double> = emptyMap(),
+    val discountPercent: Double = 100.0,
+    val customOnly: Boolean = false,
+)
 
 /**
  * 购物车条目:礼包 id + 数量 + 礼包快照
@@ -99,6 +108,9 @@ data class PackageSnapshot(
      * 是否自定义礼包(服务端按 content_id 归属回写)
      */
     val custom: Boolean = false,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 )
 
 /**
@@ -115,6 +127,9 @@ data class CustomPackage(
     val priceCny: Double? = null,
     val sortId: Int? = null,
     val extra: String? = null,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 )
 
 /**
@@ -133,4 +148,6 @@ data class PlanSummary(
      * 总抽数(可能为小数)
      */
     val totalDraws: Double = 0.0,
+    val totalAmount: Double? = null,
+    val currency: String = "CNY",
 )
