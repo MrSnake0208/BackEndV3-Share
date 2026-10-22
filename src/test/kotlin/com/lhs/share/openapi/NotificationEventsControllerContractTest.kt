@@ -47,6 +47,8 @@ import java.time.Instant
     DataTransferService::class,
 )
 class NotificationEventsControllerContractTest {
+    @MockitoBean lateinit var authorization: com.lhs.share.hub.service.admin.AdminAuthorizationService
+
     @Autowired lateinit var mvc: MockMvc
 
     @MockitoBean lateinit var service: NotificationService

@@ -188,7 +188,7 @@ class OperatorSubjectiveServiceTest {
                 """{"expected_revision":0,"huaji":{"owned":true,"stage":null,"awakened":true}}""",
             ) as com.fasterxml.jackson.databind.node.ObjectNode,
         )!!
-        assertEquals(null, first.huaji?.stage)
+        assertEquals(25, first.huaji?.stage)
         assertEquals(true, first.huaji?.awakened)
         val second = service.putTarget(
             "u1",
@@ -204,7 +204,7 @@ class OperatorSubjectiveServiceTest {
             mapper.readTree("""{"expected_revision":2,"huaji":{"awakened":false}}""") as com.fasterxml.jackson.databind.node.ObjectNode,
         )!!
         assertEquals(false, third.huaji?.awakened)
-        assertEquals(null, third.huaji?.stage)
+        assertEquals(25, third.huaji?.stage)
         assertEquals(1, service.targets("u1", "a1").items.size)
         assertThrows(OperatorApiException::class.java) {
             service.putTarget(
@@ -217,6 +217,14 @@ class OperatorSubjectiveServiceTest {
             )
         }
         assertEquals(third, service.targets("u1", "a1").items.single())
+        val unknown = service.putTarget(
+            "u1",
+            "a1",
+            "op1",
+            mapper.readTree("""{"expected_revision":3,"huaji":{"stage":null}}""") as com.fasterxml.jackson.databind.node.ObjectNode,
+        )!!
+        assertEquals(null, unknown.huaji?.stage)
+        assertEquals(false, unknown.huaji?.awakened)
     }
 
     @Test
