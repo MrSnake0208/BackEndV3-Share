@@ -30,6 +30,30 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
+    fun `restricted features require explicit roles and do not grant administrator capability`() {
+        for (role in AdminRole.entries) {
+            val userId = role.name
+            activeUser(userId)
+            every { roleRepository.findById(userId) } returns Optional.of(binding(userId, role))
+            every { feedbackRepository.findById(userId) } returns Optional.empty()
+            assertEquals(role in setOf(AdminRole.SUPER_ADMIN, AdminRole.ARCHIVE_USER), service.hasPermission(userId, AdminPermission.ARCHIVE_ACCESS))
+            assertEquals(role in setOf(AdminRole.SUPER_ADMIN, AdminRole.OPERATOR_PANEL_USER), service.hasPermission(userId, AdminPermission.OPERATOR_PANEL_USE))
+            if (role in setOf(AdminRole.ARCHIVE_USER, AdminRole.OPERATOR_PANEL_USER)) {
+                assertFalse(service.hasAnyAdminCapability(userId))
+                assertFalse(service.hasPermission(userId, AdminPermission.ADMIN_ROLE_MANAGE))
+                assertFalse(service.hasPermission(userId, AdminPermission.ACHIEVEMENT_CATALOG_WRITE))
+                every { userService.get(userId) } returns MaaUserInfo(userId, "disabled", activated = false)
+                assertFalse(service.hasPermission(userId, AdminPermission.ARCHIVE_ACCESS))
+                assertFalse(service.hasPermission(userId, AdminPermission.OPERATOR_PANEL_USE))
+            }
+        }
+        activeUser("ordinary")
+        every { roleRepository.findById("ordinary") } returns Optional.empty()
+        assertFalse(service.hasPermission("ordinary", AdminPermission.ARCHIVE_ACCESS))
+        assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_PANEL_USE))
+    }
+
+    @Test
     fun `平台管理员可维护公共图鉴和开发目标但不能治理角色或审核日志`() {
         activeUser("platform")
         every { roleRepository.findById("platform") } returns Optional.of(binding("platform", AdminRole.PLATFORM_ADMIN))

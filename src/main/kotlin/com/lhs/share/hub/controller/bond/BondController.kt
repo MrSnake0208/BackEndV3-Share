@@ -34,6 +34,7 @@ class BondController(
     private val helper: AuthenticationHelper,
     private val mapper: ObjectMapper,
 ) {
+    @RequireJwt
     @GetMapping("/catalog")
     fun catalog(@RequestParam game: String) = result(catalog.catalog(game))
 
