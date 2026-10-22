@@ -37,8 +37,9 @@ object OperatorPanelCalculator {
         if (!OperatorLevelBreakthroughRules.valid(input.level, stage)) fail("breakthrough_stage", "invalid")
         if (input.potential !in 0..17) fail("potential", "invalid")
         if (input.star !in 1..rule.maxStar || input.star !in rule.star) fail("star", "invalid")
-        val awakened = input.awakened ?: if (rule.awake == null) false else fail("awakened", "missing")
+        val awakened = input.awakened == true
         if (awakened && rule.awake == null) fail("awakened", "unsupported")
+        if (awakened && input.star != 25) fail("awakened", "requires_five_star")
         val oddityLimits = OperatorOddityRules.schema(rule.rarity, null)
         if (input.oddityHp !in 0..oddityLimits.hp.max) fail("oddity_hp", "invalid")
         if (input.oddityAttack !in 0..oddityLimits.attack.max) fail("oddity_attack", "invalid")

@@ -25,9 +25,12 @@ class OperatorHuajiRulesTest {
     }
 
     @Test
-    fun `31 confirms only awakening and never invents a stage`() {
-        assertEquals(OperatorHuaji(true, null, true), OperatorHuajiRules.legacy(31, ordinary))
-        assertEquals(OperatorHuaji(true, 19, true), OperatorHuajiRules.legacy(31, ordinary, OperatorHuaji(true, 19, false)))
+    fun `confirmed awakening and legacy 31 imply five stars without rewriting storage`() {
+        assertEquals(OperatorHuaji(true, 25, true), OperatorHuajiRules.legacy(31, ordinary))
+        assertEquals(OperatorHuaji(true, 25, true), OperatorHuajiRules.legacy(31, ordinary, OperatorHuaji(true, 19, false)))
+        val stored = OperatorEntry(17, 31, 100, huaji = OperatorHuaji(true, null, true))
+        assertEquals(OperatorHuaji(true, 25, true), OperatorHuajiRules.read(stored, ordinary))
+        assertEquals(null, stored.huaji!!.stage)
     }
 
     @Test
@@ -58,9 +61,12 @@ class OperatorHuajiRulesTest {
         for (id in listOf("char_084_chendengsp", "char_085_shizimiaosp")) {
             val sp = ordinary.copy(operatorId = id, spOf = "base")
             assertEquals(
-                OperatorHuaji(true, 19, true),
-                OperatorHuajiRules.patch(mapper.readTree("{\"awakened\":true}"), sp, OperatorHuaji(true, 19, false)),
+                OperatorHuaji(true, 25, true),
+                OperatorHuajiRules.patch(mapper.readTree("{\"awakened\":true}"), sp, OperatorHuaji(true, 25, false)),
             )
+            assertThrows(OperatorApiException::class.java) {
+                OperatorHuajiRules.patch(mapper.readTree("{\"awakened\":true}"), sp, OperatorHuaji(true, 19, false))
+            }
         }
     }
 
@@ -76,7 +82,7 @@ class OperatorHuajiRulesTest {
 
     @Test
     fun `missing preserves facts explicit null means unknown and owned stage may be unknown`() {
-        val prior = OperatorHuaji(true, 19, true)
+        val prior = OperatorHuaji(true, 25, true)
         assertEquals(prior, OperatorHuajiRules.patch(mapper.readTree("{\"owned\":true}"), ordinary, prior))
         assertEquals(
             OperatorHuaji(true, null, null),
@@ -85,5 +91,12 @@ class OperatorHuajiRulesTest {
         assertThrows(OperatorApiException::class.java) {
             OperatorHuajiRules.patch(mapper.readTree("{\"owned\":false}"), ordinary, prior)
         }
+        assertThrows(OperatorApiException::class.java) {
+            OperatorHuajiRules.patch(mapper.readTree("{\"stage\":19}"), ordinary, prior)
+        }
+        assertEquals(
+            OperatorHuaji(true, 19, false),
+            OperatorHuajiRules.patch(mapper.readTree("{\"stage\":19,\"awakened\":false}"), ordinary, prior),
+        )
     }
 }

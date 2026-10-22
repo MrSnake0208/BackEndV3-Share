@@ -17,7 +17,11 @@ object OperatorHuajiRules {
         (catalog.spOf == null || catalog.operatorId in setOf("char_084_chendengsp", "char_085_shizimiaosp"))
 
     fun read(entry: OperatorEntry, catalog: OperatorCatalogEntity?): OperatorHuaji = entry.huaji?.let { value ->
-        if (catalog != null && value.stage?.let { anomalous(it, catalog) } == true) value.copy(stage = null) else value
+        when {
+            catalog != null && value.stage?.let { anomalous(it, catalog) } == true -> value.copy(stage = null)
+            value.owned && value.awakened == true && catalog != null && awakeningSupported(catalog) -> value.copy(stage = 25)
+            else -> value
+        }
     } ?: when {
         catalog == null -> OperatorHuaji(entry.starLevel > 0, if (entry.starLevel == 0) 0 else null, null)
         entry.starLevel !in 0..(if (catalog.spOf == null) 31 else 5) -> OperatorHuaji(entry.starLevel > 0, null, null)
@@ -43,8 +47,8 @@ object OperatorHuajiRules {
             if (prior?.awakened == true) fail("huaji_conflict")
             return OperatorHuaji(false, 0, prior?.awakened)
         }
+        if (raw == 31 || prior?.awakened == true && awakeningSupported(catalog)) return OperatorHuaji(true, 25, true)
         if (catalog.spOf != null) return OperatorHuaji(true, 6 * (raw - 1) + 1, prior?.awakened)
-        if (raw == 31) return OperatorHuaji(true, prior?.stage?.takeIf { it > 0 }, true)
         return OperatorHuaji(true, minOf(raw, 25), prior?.awakened)
     }
 
@@ -69,7 +73,7 @@ object OperatorHuajiRules {
         } else {
             prior.awakened
         }
-        val result = OperatorHuaji(owned, stage, awakened)
+        val result = OperatorHuaji(owned, stage ?: if (awakened == true) 25 else null, awakened)
         validate(result, catalog)
         if (node.path("awakened").asBoolean(false) && !awakeningSupported(catalog)) fail("awakening_not_supported")
         return result
@@ -78,6 +82,7 @@ object OperatorHuajiRules {
     fun validate(value: OperatorHuaji, catalog: OperatorCatalogEntity) {
         if (value.stage != null && value.stage !in 0..maximum(catalog)) fail("invalid_huaji")
         if ((!value.owned && (value.stage != 0 || value.awakened == true)) || (value.owned && value.stage == 0)) fail("invalid_huaji")
+        if (value.awakened == true && value.stage != null && value.stage != 25) fail("awakening_requires_five_star")
         if (catalog.spOf != null && value.stage != null && value.stage != 0 && value.stage !in listOf(1, 7, 13, 19, 25)) {
             fail("invalid_huaji")
         }

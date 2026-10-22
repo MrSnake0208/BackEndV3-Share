@@ -35,7 +35,7 @@ for (const mapped of mapping.operators) {
   for (const level of [1, 10, 11, 50, 90, 100]) {
     for (let stage = Math.floor((level - 1) / 10); stage <= Math.min(Math.floor(level / 10), 9); stage++) {
       for (const potential of [0, 3, 17]) for (const star of [1, warrior.max_star]) {
-        for (const awakened of Object.keys(warrior.awake).length ? [false, true] : [false]) {
+        for (const awakened of star === 25 && Object.keys(warrior.awake).length ? [false, true] : [false]) {
           add(mapped, { level, breakthroughStage: stage, potential, star, awakened, oddityHp: 0, oddityAttack: 0 })
         }
       }

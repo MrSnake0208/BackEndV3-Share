@@ -102,7 +102,7 @@ class OperatorSharedGrowthMongoTest {
         client.close()
     }
 
-    private fun resetCurrent() {
+    private fun resetCurrent(starLevel: Int = 31) {
         current.save(
             OperatorCurrent(
                 "state",
@@ -113,7 +113,7 @@ class OperatorSharedGrowthMongoTest {
                     "base" to
                         OperatorEntry(
                             16,
-                            31,
+                            starLevel,
                             90,
                             revision = 7,
                             combatStats = OperatorCombatStats(observedAttack = 100, observedStatus = "valid"),
@@ -192,7 +192,7 @@ class OperatorSharedGrowthMongoTest {
             SubAccount(userId = "owner", accountId = "account", name = "test", game = "如鸢"),
         )
         for (awakened in listOf(true, false)) {
-            resetCurrent()
+            resetCurrent(25)
             service.patchCurrent(
                 "owner",
                 "account",
@@ -251,16 +251,22 @@ class OperatorSharedGrowthMongoTest {
     }
 
     @Test
-    fun `independent awakening uses CAS and survives Mongo read without stage promotion`() {
+    fun `five star awakening uses CAS and rejects lower star writes without side effects`() {
         val request = mapper.readTree(
-            """{"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":19,"awakened":false}}""",
+            """{"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":25,"awakened":false}}""",
         ) as ObjectNode
+        val beforeInvalid = current.findById("state").orElseThrow()
+        val invalid = request.deepCopy().apply {
+            (get("huaji") as ObjectNode).put("stage", 24).put("awakened", true)
+        }
+        assertThrows(OperatorApiException::class.java) { service.patchCurrent("owner", "account", "如鸢", "base", invalid) }
+        assertEquals(beforeInvalid, current.findById("state").orElseThrow())
         val first = service.patchCurrent("owner", "account", "如鸢", "base", request)
         val beforeSibling = current.findById("state").orElseThrow().entries.getValue("movie")
         request.put("expected_revision", first.revision)
         request.set<com.fasterxml.jackson.databind.JsonNode>("huaji", mapper.readTree("""{"awakened":true}"""))
         val second = service.patchCurrent("owner", "account", "如鸢", "base", request)
-        assertEquals(19, second.huaji?.stage)
+        assertEquals(25, second.huaji?.stage)
         assertEquals(true, service.current("owner", "account", "如鸢").single().entries.getValue("base").huaji?.awakened)
         assertEquals(beforeSibling, current.findById("state").orElseThrow().entries.getValue("movie"))
         val before = current.findById("state").orElseThrow()
@@ -271,7 +277,7 @@ class OperatorSharedGrowthMongoTest {
     }
 
     @Test
-    fun `v4 backup schema and import preserve independent unknown facts and legacy trace`() {
+    fun `v4 backup and import normalize confirmed awakening to five stars and preserve legacy trace`() {
         val source = current.findById("state").orElseThrow()
         val facts = com.lhs.share.hub.repository.entity.OperatorHuaji(true, null, true)
         val trace = com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(31, "legacy_current")
@@ -290,7 +296,7 @@ class OperatorSharedGrowthMongoTest {
         OperatorV3SchemaValidator(mapper).validate(exported)
         val firstRecord = exported.path("records").get(0) as ObjectNode
         val entry = firstRecord.path("entries").get(0)
-        assertEquals(true, entry.path("huaji").path("stage").isNull)
+        assertEquals(25, entry.path("huaji").path("stage").asInt())
         assertEquals(true, entry.path("huaji").path("awakened").asBoolean())
         assertEquals(31, entry.path("huaji_legacy").path("raw").asInt())
         (exported.path("records") as com.fasterxml.jackson.databind.node.ArrayNode).remove(1)
@@ -300,7 +306,7 @@ class OperatorSharedGrowthMongoTest {
         val committed = imports.commitBrowser("owner", transported)
         assertEquals(0, committed.rejected)
         val read = service.current("owner", "account", "如鸢").single().entries.getValue("base")
-        assertEquals(facts, read.huaji)
+        assertEquals(facts.copy(stage = 25), read.huaji)
         assertEquals(trace, read.huajiLegacy)
         assertEquals(1, imports.commitBrowser("owner", transported).unchanged)
         val invalid = transported.deepCopy()

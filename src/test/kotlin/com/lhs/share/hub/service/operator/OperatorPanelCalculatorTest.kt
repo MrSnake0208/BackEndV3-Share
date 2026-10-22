@@ -14,7 +14,7 @@ class OperatorPanelCalculatorTest {
 
     @Test fun `cumulative values are added once and final percentages are floored`() {
         assertEquals(OperatorPanelValues(254, 13), calculate(panelInput()))
-        assertEquals(OperatorPanelValues(278, 14), calculate(panelInput().copy(awakened = true)))
+        assertEquals(OperatorPanelValues(278, 40), calculate(panelInput().copy(star = 25, awakened = true)))
         assertEquals(OperatorPanelValues(285, 16), calculate(panelInput().copy(oddityHp = 30, oddityAttack = 3)))
         assertEquals(OperatorPanelValues(285, 13), calculate(panelInput().copy(potential = 6)))
     }
@@ -25,7 +25,6 @@ class OperatorPanelCalculatorTest {
         assertEquals(OperatorPanelValues(253, 13), calculate(panelInput().copy(level = 10, breakthroughStage = 1)))
         invalid("breakthrough_stage", "invalid") { calculate(panelInput().copy(level = 100, breakthroughStage = 0)) }
         invalid("level", "invalid") { calculate(panelInput().copy(level = 101)) }
-        invalid("awakened", "missing") { calculate(panelInput().copy(awakened = null)) }
         invalid("potential", "invalid") { calculate(panelInput().copy(potential = 18)) }
         invalid("oddity_hp", "invalid") { calculate(panelInput().copy(oddityHp = 2601)) }
     }
@@ -45,9 +44,19 @@ class OperatorPanelCalculatorTest {
         PanelRuleValidation.validate(sp)
         invalid("star", "invalid") { OperatorPanelCalculator.calculate(sp, "operator.test", panelInput().copy(star = 2), emptyList()) }
         assertEquals(
-            OperatorPanelValues(278, 14),
-            OperatorPanelCalculator.calculate(sp, "operator.test", panelInput().copy(awakened = true), emptyList()),
+            OperatorPanelValues(278, 40),
+            OperatorPanelCalculator.calculate(sp, "operator.test", panelInput().copy(star = 25, awakened = true), emptyList()),
         )
+    }
+
+    @Test fun `awakening is optional and only available after five stars`() {
+        for (star in 1..25) {
+            val input = panelInput().copy(star = star)
+            assertEquals(calculate(input), calculate(input.copy(awakened = null)))
+            if (star < 25) invalid("awakened", "requires_five_star") { calculate(input.copy(awakened = true)) }
+        }
+        assertEquals(OperatorPanelValues(254, 37), calculate(panelInput().copy(star = 25, awakened = null)))
+        assertEquals(OperatorPanelValues(278, 40), calculate(panelInput().copy(star = 25, awakened = true)))
     }
 
     @Test fun `stones use completed breakthrough counts and lowest combo quality`() {
