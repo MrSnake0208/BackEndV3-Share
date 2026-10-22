@@ -3,9 +3,9 @@
 等级突破、采集快照与当前推荐完整备份见[operator v5](./operator-level-breakthrough-v5.md)；旧版本继续兼容。
 ## 1. 权威事实与能力
 
-当前 API、持久化和 v4 使用 `huaji:{owned:boolean,stage:0..25|null,awakened:boolean|null}`。`true` 确认已觉醒，`false` 确认未觉醒，`null` 待确认。`owned=true` 可以阶段未知；不能用共享等级/修为推导拥有。未拥有必须 stage=0，觉醒不得 true；拥有时 stage 不能为0。
+当前 API、持久化和 v4 使用 `huaji:{owned:boolean,stage:0..25|null,awakened:boolean|null}`。`true` 确认已觉醒，`false` 确认未觉醒，`null` 未记录，计算与显示均按未觉醒处理，不强制确认。`owned=true` 可以阶段未知；不能用共享等级/修为推导拥有。未拥有必须 stage=0，觉醒不得 true；拥有时 stage 不能为0。
 
-普通密探 stage 1..6=一星0..5节点、7..12=二星、13..18=三星、19..24=四星、25=五星（没有第五颗星的小节点）。化极与觉醒是独立事实。隐密（catalog rarity=3）终点19，即满4星无后续节点、不能新确认已觉醒。SP 使用稳定 `spOf`，只允许0/1/7/13/19/25，分别表示未拥有和1..5星，不能写普通小节点；陈登·黍王、史子眇·赴烛允许独立记录觉醒，其余SP不自动开放；SP材料扣除继续禁止，升级继续422 `sp_huaji_upgrade_not_supported`。
+普通密探 stage 1..6=一星0..5节点、7..12=二星、13..18=三星、19..24=四星、25=五星（没有第五颗星的小节点）。字段分开保存，但觉醒是五星后的可选阶段；已确认觉醒的有效 stage 为25，新的低星+觉醒组合拒绝。隐密（catalog rarity=3）终点19，即满4星无后续节点、不能新确认已觉醒。SP 使用稳定 `spOf`，只允许0/1/7/13/19/25，分别表示未拥有和1..5星，不能写普通小节点；陈登·黍王、史子眇·赴烛允许在五星后记录觉醒，其余SP不自动开放；SP材料扣除继续禁止，升级继续422 `sp_huaji_upgrade_not_supported`。
 
 catalog `huaji_capabilities` 公开 `max_stage`、`has_nodes`、`awakening_supported`、`awakening_upgrade_supported`。普通 rarity=4/5 的最后一项为true，支持独立快捷觉醒；隐密和SP的快捷扣料能力为false；上述两名SP的awakening_supported为true。能力表示可调用动作，不表示已经觉醒。
 
@@ -18,9 +18,9 @@ v2/v3 原字段和语义继续接收，不原地更名或改版本含义。
 | 类型 | 旧值 | 归一化结果 |
 |---|---|---|
 | 普通绝密/机密 | 0 | 未拥有，stage0；缺失觉醒不确认false |
-| 普通绝密/机密 | 1..24 | 对应stage；保留已确认觉醒 |
+| 普通绝密/机密 | 1..24 | 对应stage；已有确认觉醒时仍按五星觉醒保留 |
 | 普通绝密/机密 | 25..30 | 全部stage25，永久接收30；保留已确认觉醒 |
-| 普通绝密/机密 | 31 | 只确认awakened=true；保留已确认stage，否则null；不推25/26 |
+| 普通绝密/机密 | 31 | stage25、awakened=true，表示五星之后已觉醒 |
 | SP | 0/1..5 | 0/1/7/13/19/25；无awake字段不覆盖已确认值 |
 | 隐密 | 0..19 | 正常适配 |
 | 隐密 | 20..31 | 保留原值，stage/awake未知；warning/review隔离，不映射合法19/觉醒 |
@@ -35,7 +35,7 @@ v2/v3 原字段和语义继续接收，不原地更名或改版本含义。
 
 `GET /v1/operator/current`兼容保留star_level并增加huaji/huaji_legacy。未存huaji时按catalog懒适配，仅返回，不写数据库。历史非法可读，材料/公式必须提示阶段不足，不猜测。
 
-PATCH支持部分huaji；缺失对象/子字段保留，显式null将stage或awakened设为未知。例：
+PATCH支持部分huaji；缺失对象/子字段保留，显式null表示未记录；awakened=null 按未觉醒计算。已觉醒且 stage=null 时有效 stage 为25；低于五星的新 stage 与 awakened=true 组合返回 `awakening_requires_five_star`。降星需同时设置 awakened=false，省略 awakened 不会清除历史确认值。下面的觉醒 PATCH 要求当前已是五星：
 
 ```json
 {"expected_revision":7,"reason":"manual_correction","huaji":{"awakened":true}}
@@ -61,7 +61,7 @@ PATCH支持部分huaji；缺失对象/子字段保留，显式null将stage或awa
 
 v2输出继续camelCase `starLevel/subProf/starStones`；v3继续snake_case。二者单一标量不能同时表达任意stage+awakened、已确认未觉醒与未知、owned且stage未知。v3会在条目warnings明确提醒；v2以响应头`X-Operator-Exchange-Warning`提醒信息损失，接入端须展示此限制并优先选v4备份。不要将旧字段解释成无损备份；导入独立未知事实必须使用v4。
 
-Schema：[正式v4 JSON Schema](../src/main/resources/schema/operator-growth-exchange-v4.schema.json)。样例：[正常独立状态](../src/test/resources/operator-growth-exchange-v4/independent.valid.json)、[旧31未知stage](../src/test/resources/operator-growth-exchange-v4/legacy31.valid.json)、[非法未拥有五星](../src/test/resources/operator-growth-exchange-v4/unowned-stage.invalid.json)。catalog约束由服务端补充，Schema不能凭目录外信息证明SP可觉醒。
+Schema：[正式v4 JSON Schema](../src/main/resources/schema/operator-growth-exchange-v4.schema.json)。样例：[正常独立状态](../src/test/resources/operator-growth-exchange-v4/independent.valid.json)、[旧31可空stage兼容输入](../src/test/resources/operator-growth-exchange-v4/legacy31.valid.json)、[非法未拥有五星](../src/test/resources/operator-growth-exchange-v4/unowned-stage.invalid.json)。catalog约束由服务端补充，Schema不能凭目录外信息证明SP可觉醒。
 
 ## 5. 懒迁移与显式迁移预案（不执行）
 
@@ -73,7 +73,7 @@ Schema：[正式v4 JSON Schema](../src/main/resources/schema/operator-growth-exc
 
 ## 6. 历史规则证据及计算边界
 
-2026-10-21 后续接入已改用成熟计算器的私有规则与服务端结果，详见[面板接口与维护](./operator-panel-rules.md)。三星终点19、两名SP觉醒支持以本页当前契约为准。下述2026-10-13记录只反映当时审查，不作为现在仍使用旧Wiki白值的声明。
+2026-10-21 后续接入已改用成熟计算器的私有规则与服务端结果，详见[面板接口与维护](./operator-panel-rules.md)。三星终点19、两名SP觉醒支持以本页当前契约为准。2026-10-22 已修正为觉醒可选、缺省按未觉醒、已觉醒蕴含五星；下述2026-10-13记录只反映当时审查，不作为现在仍使用旧Wiki白值的声明。
 
 2026-10-13读取Cal副本并实际核对`m_components.csv`（SHA-256 `3cd225accd05475cbab8b142eff06a91414f9a401d11f8cc9b9319acca3ae275`）：126密探、19994组件，124普通密探star1..25，史子眇·赴烛/陈登·黍王仅1/7/13/19/25；awake是独立组件。隐密的理论star25及SP的awake行不能证明游戏可达性或素材。
 

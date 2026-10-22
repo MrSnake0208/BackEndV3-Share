@@ -107,11 +107,11 @@ class OperatorPanelService(
         val rule = bundle.operators.singleOrNull { it.operatorId == id } ?: return unavailable(context, "operator_unsupported")
         val catalog = context.catalog.getValue(id)
         if (rule.rarity != catalog.rarity || rule.maxStar != OperatorHuajiRules.maximum(catalog)) return unavailable(context, "catalog_mismatch")
+        val stage = huaji.stage ?: if (huaji.awakened == true) 25 else null
         val missing = buildList {
             if (level == null || !strict && level == 0) add("level")
             if (potential == null) add("elite")
-            if (huaji.stage == null) add("huaji.stage")
-            if (huaji.awakened == null && rule.awake != null) add("huaji.awakened")
+            if (stage == null) add("huaji.stage")
             if (oddityHp == null) add("oddities.hp")
             if (oddityAttack == null) add("oddities.attack")
             if (legacyStones || !context.loadoutGenerationValid) add("loadout")
@@ -133,7 +133,7 @@ class OperatorPanelService(
                 PanelStone(stone.sourceId, star.level, star.breakthroughStage)
             }
             val values = OperatorPanelCalculator.calculate(
-                bundle, id, PanelCultivation(level!!, breakthrough, potential!!, huaji.stage!!, huaji.awakened, oddityHp.toInt(), oddityAttack!!.toInt()), stones,
+                bundle, id, PanelCultivation(level!!, breakthrough, potential!!, stage!!, huaji.awakened, oddityHp.toInt(), oddityAttack!!.toInt()), stones,
             )
             return OperatorPanelResponse("calculated", values.attack, values.hp, ruleVersion = bundle.ruleSet.id)
         } catch (error: PanelInputException) {

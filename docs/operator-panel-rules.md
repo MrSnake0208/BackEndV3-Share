@@ -75,17 +75,19 @@ node scripts/panel/source-cases.mjs /private/source/panel_calc_fixed /private/re
 
 等级、修为、突破、奇闻必须是整数或允许的 null，不接受数字字符串/小数；未知字段（包括 user_id、game、extra、系数、源 ID）拒绝。缺失养成返回 `incomplete`；格式、越界、非法组合返回 422。`huaji.owned` 必须为布尔；未拥有时 stage=0，awakened 不得 true。本体/SP 共享等级、突破、修为的既有档案语义不变。
 
+觉醒是五星后的可选阶段：`awakened` 缺失、null 或 false 均按未觉醒计算，不出现在 `missing_fields` 中；true 叠加觉醒加成，必须为 stage=25。已确认觉醒且 stage 缺失/null 的历史记录按五星读取；明确传入低于五星的 stage 与 true 组合返回 422。编辑降星须同时清除觉醒；PATCH 未提供 awakened 仍保留已有记录。规则包不需要因此重新导入。
+
 结果只有 `status, attack, hp, missing_fields, reason, rule_version`：
 
 - `calculated`：最终整数攻击/生命。
-- `incomplete`：需要确认等级突破、化极、觉醒、奇闻或星石突破等；`missing_fields` 定位对应输入。
+- `incomplete`：需要确认等级突破、化极、奇闻或星石突破等；`missing_fields` 定位对应输入。
 - `unsupported`：未拥有、游戏图鉴不支持、规则未映射或尚未启用；不返回伪造数值。
 
 批量返回 operatorId → 结果映射。公开分享通过既有分享范围检查后，向各密探条目的 `panel` 附加同样结果，不允许匿名提交任意养成参数；分享入口沿用限频。导出仍导出用户事实，不包含私有规则。
 
 ## 数值及兼容边界
 
-三星满 4★为 stage=19，无后续节点。历史超限值通过 `huaji_legacy` 保留、有效 stage 置未知；无关更新与导出不截断历史。两名已核对 SP 可独立记录觉醒，快捷扣料继续禁止，见[化极契约](./operator-huaji-compatibility.md)。
+三星满 4★为 stage=19，无后续节点。历史超限值通过 `huaji_legacy` 保留、有效 stage 置未知；无关更新与导出不截断历史。两名已核对 SP 满五星后可记录觉醒，快捷扣料继续禁止，见[化极契约](./operator-huaji-compatibility.md)。
 
 星石实际突破次数、旧 PATCH、重建、恢复和完成事务见[星石突破契约](./star-breakthrough-state.md)。未知整数十级节点不得猜为未突破。核心最多三主星、三辅星，命格取组合最低品质。基础/等级/突破/化极/修为使用累计行，额外修为按 step 累加，百分比用万分比整数，最后一次向下取整，Long 运算检查溢出。
 

@@ -68,6 +68,36 @@ class OperatorPanelServiceTest {
         """{"account_id":"a","operator_id":"operator.test","level":11,"elite":3,"huaji":{"owned":true,"stage":1,"awakened":false},"oddities":{"hp":0,"attack":0}}""",
     ) as ObjectNode
 
+    @Test fun `omitted null and false awakening calculate normally for saved and preview panels`() {
+        for (stage in listOf(1, 19, 24, 25)) {
+            val explicit = preview().apply { (get("huaji") as ObjectNode).put("stage", stage) }
+            val expected = service.preview("u", explicit)
+            assertEquals("calculated", expected.status)
+            for (awakened in listOf(false, null)) {
+                every { currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u", "a") } returns listOf(
+                    OperatorCurrent(userId = "u", accountId = "a", game = "如鸢", entries = mapOf("operator.test" to entry.copy(huaji = OperatorHuaji(true, stage, awakened)))),
+                )
+                assertEquals(expected, service.saved("u", "a", setOf("operator.test")).getValue("operator.test"))
+            }
+            val nullable = explicit.deepCopy().apply { (get("huaji") as ObjectNode).putNull("awakened") }
+            assertEquals(expected, service.preview("u", nullable))
+            (nullable.get("huaji") as ObjectNode).remove("awakened")
+            assertEquals(expected, service.preview("u", nullable))
+        }
+    }
+
+    @Test fun `awakening implies five stars and rejects contradictory lower stages`() {
+        val awakened = preview().apply { (get("huaji") as ObjectNode).put("stage", 25).put("awakened", true) }
+        val expected = service.preview("u", awakened)
+        assertEquals("calculated", expected.status)
+        val unawakened = awakened.deepCopy().apply { (get("huaji") as ObjectNode).put("awakened", false) }
+        assertTrue(expected.hp!! > service.preview("u", unawakened).hp!!)
+        (awakened.get("huaji") as ObjectNode).putNull("stage")
+        assertEquals(expected, service.preview("u", awakened))
+        (awakened.get("huaji") as ObjectNode).put("stage", 24)
+        assertThrows(OperatorApiException::class.java) { service.preview("u", awakened) }
+    }
+
     @Test fun `saved and preview use identical private snapshot and expose only final values`() {
         val saved = service.saved("u", "a", setOf("operator.test")).getValue("operator.test")
         assertEquals(saved, service.preview("u", preview()))
