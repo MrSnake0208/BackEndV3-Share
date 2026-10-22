@@ -12,6 +12,7 @@ import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorDailyTasksRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
+import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorMilestoneRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
@@ -69,6 +70,7 @@ class SubAccountServiceTest {
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
     private val organizationRepository = mockk<OperatorOrganizationRepository>(relaxed = true)
     private val staminaScheduleRepository = mockk<OperatorStaminaScheduleRepository>(relaxed = true)
+    private val relationships = mockk<OperatorRelationshipRepository>(relaxed = true)
     private val milestoneRepository = mockk<OperatorMilestoneRepository>(relaxed = true)
     private val dailyTasksRepository = mockk<OperatorDailyTasksRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
@@ -125,6 +127,7 @@ class SubAccountServiceTest {
         operatorOrganizationRepository = organizationRepository,
         operatorDailyTasksRepository = dailyTasksRepository,
         operatorMilestoneRepository = milestoneRepository,
+        operatorRelationships = relationships,
     )
 
     @Test
@@ -293,6 +296,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.deleteById("mongo-id") }
         verify(exactly = 1) { recruitmentRepository.deleteAccount("u1", "main") }
+        verify(exactly = 1) { relationships.deleteAccount("u1", "main") }
         verify(exactly = 1) { milestoneRepository.deleteAccount("u1", "main") }
         verify(exactly = 1) { accountRepository.fenceRecruitmentWrite("u1", "main", "代号鸢") }
     }
@@ -409,5 +413,14 @@ class SubAccountServiceTest {
         assertEquals("calendar_private_game_locked", error.code)
         verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), any(), any()) }
         assertEquals("改名", service.update("u1", "main", "改名", null).name)
+    }
+
+    @Test
+    fun `relationship facts prevent switching game`() {
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns SubAccount(userId = "u1", accountId = "main", name = "test", game = "如鸢")
+        every { relationships.hasSubstantiveData("u1", "main") } returns true
+        val error = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "代号鸢") }
+        assertEquals("operator_relationship_game_locked", error.code)
+        verify(exactly = 0) { relationships.deleteAccount(any(), any()) }
     }
 }

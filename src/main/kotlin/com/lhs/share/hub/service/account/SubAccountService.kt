@@ -17,6 +17,7 @@ import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorMilestoneRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
+import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
 import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
@@ -82,6 +83,7 @@ class SubAccountService(
     private val operatorMilestoneRepository: OperatorMilestoneRepository? = null,
     private val achievements: AchievementRepository? = null,
     private val achievementPreviews: AchievementImportPreviews? = null,
+    private val operatorRelationships: OperatorRelationshipRepository? = null,
     private val bonds: com.lhs.share.hub.repository.BondRepository? = null,
     private val bondPreviews: com.lhs.share.hub.service.bond.BondImportPreviews? = null,
 ) {
@@ -137,6 +139,10 @@ class SubAccountService(
                     val nextGame = game?.let(::normalizeGame) ?: account.game
                     fenceAccount(account)
                     if (nextGame != account.game) {
+                        if (operatorRelationships?.hasSubstantiveData(userId, accountId) == true) {
+                            throw InventoryApiException(HttpStatus.CONFLICT, "operator_relationship_game_locked", "已有信赖与传闻记录，不能修改所属游戏")
+                        }
+                        operatorRelationships?.deleteAccount(userId, accountId)
                         if (bonds?.hasSubstantiveData(userId, accountId) == true) {
                             throw InventoryApiException(HttpStatus.CONFLICT, "bond_game_locked", "已有羁绊档案，不能修改所属游戏；请使用另一个游戏账号")
                         }
@@ -220,6 +226,7 @@ class SubAccountService(
                 staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorDailyTasksRepository?.deleteAccount(userId, accountId)
                 operatorMilestoneRepository?.deleteAccount(userId, accountId)
+                operatorRelationships?.deleteAccount(userId, accountId)
                 plannerImportRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorOrganizationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starLoadoutCurrentRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
