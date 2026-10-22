@@ -990,7 +990,7 @@ class OperatorCurrentFoundationServiceTest {
             "acc1",
             "代号鸢",
             "op1",
-            patch(""""huaji":{"owned":true,"stage":19,"awakened":false},"combat_stats":{"source":"scan","observed_attack":100}"""),
+            patch(""""huaji":{"owned":true,"stage":25,"awakened":false},"combat_stats":{"source":"scan","observed_attack":100}"""),
         )
         val preview = service.previewCurrentPatch(
             "u1",
@@ -999,7 +999,7 @@ class OperatorCurrentFoundationServiceTest {
             "op1",
             patch(""""huaji":{"awakened":true}""", revision = before.revision),
         )
-        assertEquals(19, preview.after.huaji?.stage)
+        assertEquals(25, preview.after.huaji?.stage)
         assertEquals(true, preview.stale)
         assertEquals("stale", preview.after.combatStats?.observedStatus)
         val fresh = service.patchCurrent(

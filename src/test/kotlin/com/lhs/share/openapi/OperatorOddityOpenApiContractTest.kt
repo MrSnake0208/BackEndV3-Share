@@ -38,6 +38,9 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 )
 @TestPropertySource(properties = ["share.info.public-base-url=https://operator.example.test"])
 class OperatorOddityOpenApiContractTest {
+    @MockitoBean
+    lateinit var authorization: com.lhs.share.hub.service.admin.AdminAuthorizationService
+
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     lateinit var betaService: com.lhs.share.hub.service.beta.BetaService
 
