@@ -3,6 +3,7 @@ package com.lhs.share.hub.controller.ledger.response
 import com.lhs.share.hub.repository.entity.CartItem
 import com.lhs.share.hub.repository.entity.CustomPackage
 import com.lhs.share.hub.repository.entity.LedgerPlan
+import com.lhs.share.hub.repository.entity.LedgerPricing
 import com.lhs.share.hub.repository.entity.PackageSnapshot
 import com.lhs.share.hub.repository.entity.PlanSummary
 import io.swagger.v3.oas.annotations.media.Schema
@@ -23,6 +24,7 @@ data class LedgerPlanResponse(
     val summary: PlanSummaryDto?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val pricing: LedgerPricing? = null,
 ) {
     companion object {
         fun of(plan: LedgerPlan): LedgerPlanResponse = LedgerPlanResponse(
@@ -37,6 +39,7 @@ data class LedgerPlanResponse(
             summary = plan.summary?.let { PlanSummaryDto.of(it) },
             createdAt = plan.createdAt,
             updatedAt = plan.updatedAt,
+            pricing = plan.pricing,
         )
     }
 }
@@ -93,6 +96,9 @@ data class PackageSnapshotDto(
     val sortId: Int?,
     val extra: String?,
     val custom: Boolean,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 ) {
     companion object {
         fun of(snapshot: PackageSnapshot): PackageSnapshotDto = PackageSnapshotDto(
@@ -106,6 +112,9 @@ data class PackageSnapshotDto(
             sortId = snapshot.sortId,
             extra = snapshot.extra,
             custom = snapshot.custom,
+            priceAmount = snapshot.priceAmount,
+            priceCurrency = snapshot.priceCurrency,
+            discountEligible = snapshot.discountEligible,
         )
     }
 }
@@ -121,6 +130,9 @@ data class CustomPackageDto(
     val priceCny: Double?,
     val sortId: Int?,
     val extra: String?,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 ) {
     companion object {
         fun of(pkg: CustomPackage): CustomPackageDto = CustomPackageDto(
@@ -134,6 +146,9 @@ data class CustomPackageDto(
             priceCny = pkg.priceCny,
             sortId = pkg.sortId,
             extra = pkg.extra,
+            priceAmount = pkg.priceAmount,
+            priceCurrency = pkg.priceCurrency,
+            discountEligible = pkg.discountEligible,
         )
     }
 }
@@ -145,12 +160,16 @@ data class PlanSummaryDto(
     val totalPoints: Long,
     @Schema(description = "总抽数,可为小数")
     val totalDraws: Double,
+    val totalAmount: Double? = null,
+    val currency: String = "CNY",
 ) {
     companion object {
         fun of(summary: PlanSummary): PlanSummaryDto = PlanSummaryDto(
             totalCny = summary.totalCny,
             totalPoints = summary.totalPoints,
             totalDraws = summary.totalDraws,
+            totalAmount = summary.totalAmount,
+            currency = summary.currency,
         )
     }
 }

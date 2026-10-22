@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.ledger.request
 
+import com.lhs.share.hub.repository.entity.LedgerPricing
 import jakarta.validation.Valid
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.Max
@@ -31,6 +32,7 @@ data class LedgerPlanCreateRequest(
     @field:Valid
     @field:Size(max = 50, message = "自定义礼包最多 50 个")
     val customPackages: List<CustomPackageRequest> = emptyList(),
+    val pricing: LedgerPricing? = null,
 )
 
 /**
@@ -63,6 +65,9 @@ data class PackageSnapshotRequest(
     val priceCny: Double? = null,
     val sortId: Int? = null,
     val extra: String? = null,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 )
 
 /**
@@ -83,4 +88,7 @@ data class CustomPackageRequest(
     val priceCny: Double? = null,
     val sortId: Int? = null,
     val extra: String? = null,
+    val priceAmount: Double? = null,
+    val priceCurrency: String? = null,
+    val discountEligible: Boolean = true,
 )
