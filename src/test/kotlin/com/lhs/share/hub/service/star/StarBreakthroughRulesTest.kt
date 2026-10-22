@@ -23,6 +23,9 @@ class StarBreakthroughRulesTest {
         val base = """"instance_id":"s","kind":"main","name":"test","quality":"orange","level":10"""
         assertEquals(null, mapper.readValue<StarInventoryEntryRequest>("{$base}").breakthroughStage)
         assertEquals(true, mapper.readValue<StarInventoryEntryRequest>("{$base,\"breakthrough_stage\":null}").breakthroughStage?.isNull)
-        assertEquals(false, mapper.readValue<StarInventoryEntryRequest>("{$base,\"breakthrough_stage\":1.5}").breakthroughStage?.isIntegralNumber)
+        assertEquals(
+            false,
+            mapper.readValue<StarInventoryEntryRequest>("{$base,\"breakthrough_stage\":1.5}").breakthroughStage?.isIntegralNumber,
+        )
     }
 }

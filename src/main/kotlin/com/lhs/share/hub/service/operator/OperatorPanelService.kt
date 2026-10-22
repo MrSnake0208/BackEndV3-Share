@@ -40,7 +40,9 @@ class OperatorPanelService(
         return operatorIds.associateWith { id ->
             val catalog = context.catalog[id]
             val entry = context.entries[id]
-            if (catalog == null || entry == null) unavailable(context, "operator_unavailable") else {
+            if (catalog == null || entry == null) {
+                unavailable(context, "operator_unavailable")
+            } else {
                 val huaji = OperatorHuajiRules.read(entry, catalog)
                 calculate(
                     context, id, entry.level, entry.levelBreakthroughStage, entry.elite, huaji,
@@ -62,7 +64,11 @@ class OperatorPanelService(
         fields(huajiNode, setOf("owned", "stage", "awakened"))
         if (!huajiNode.path("owned").isBoolean) invalid("huaji.owned")
         val awakened = huajiNode.get("awakened")?.let {
-            when { it.isNull -> null; it.isBoolean -> it.booleanValue(); else -> invalid("huaji.awakened") }
+            when {
+                it.isNull -> null
+                it.isBoolean -> it.booleanValue()
+                else -> invalid("huaji.awakened")
+            }
         }
         val huaji = OperatorHuaji(huajiNode.path("owned").booleanValue(), integer(huajiNode, "stage"), awakened)
         OperatorHuajiRules.validate(huaji, catalog)
@@ -73,9 +79,17 @@ class OperatorPanelService(
             val node = request.path("loadout")
             fields(node, SLOT_KEYS)
             node.properties().associate { (slot, value) ->
-                slot to if (value.isNull) null else value.takeIf { it.isTextual && it.asText().length in 1..128 }?.asText() ?: invalid("loadout.$slot")
+                slot to
+                    if (value.isNull) {
+                        null
+                    } else {
+                        value.takeIf { it.isTextual && it.asText().length in 1..128 }?.asText()
+                            ?: invalid("loadout.$slot")
+                    }
             }
-        } else context.loadouts[id].orEmpty()
+        } else {
+            context.loadouts[id].orEmpty()
+        }
         return calculate(
             context, id, integer(request, "level"), integer(request, "level_breakthrough_stage"), integer(request, "elite"), huaji,
             integer(oddities, "hp")?.toDouble(), integer(oddities, "attack")?.toDouble(), slots, strict = true,
@@ -87,26 +101,42 @@ class OperatorPanelService(
         val account = accounts.requireAccount(userId, accountId)
         val records = currents.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId)
         val entries = records.firstOrNull { it.game == "*" }?.entries.orEmpty() +
-            records.firstOrNull { it.game == "universal" }?.entries.orEmpty() + records.firstOrNull { it.game == account.game }?.entries.orEmpty()
+            records.firstOrNull { it.game == "universal" }?.entries.orEmpty() +
+            records.firstOrNull { it.game == account.game }?.entries.orEmpty()
         val state = stars.findByUserIdAndAccountId(userId, accountId)
         val equipped = loadouts.findByUserIdAndAccountId(userId, accountId)
         return Context(
             rules.snapshot(account.game),
             catalogs.findAllByOrderByOperatorIdAsc().filter { account.game in it.games }.associateBy { it.operatorId },
-            entries, state, equipped?.loadouts.orEmpty().associate { it.operatorId to it.slots.asMap() },
+            entries,
+            state,
+            equipped?.loadouts.orEmpty().associate { it.operatorId to it.slots.asMap() },
             equipped == null || equipped.generation == (state?.generation ?: 0),
         )
     }
 
     private fun calculate(
-        context: Context, id: String, level: Int?, breakthrough: Int?, potential: Int?, huaji: OperatorHuaji,
-        oddityHp: Double?, oddityAttack: Double?, slots: Map<String, String?>, strict: Boolean, legacyStones: Boolean,
+        context: Context,
+        id: String,
+        level: Int?,
+        breakthrough: Int?,
+        potential: Int?,
+        huaji: OperatorHuaji,
+        oddityHp: Double?,
+        oddityAttack: Double?,
+        slots: Map<String, String?>,
+        strict: Boolean,
+        legacyStones: Boolean,
     ): OperatorPanelResponse {
         val bundle = context.rules ?: return unavailable(context, "rules_unavailable")
         if (!huaji.owned) return unavailable(context, "not_owned")
         val rule = bundle.operators.singleOrNull { it.operatorId == id } ?: return unavailable(context, "operator_unsupported")
         val catalog = context.catalog.getValue(id)
-        if (rule.rarity != catalog.rarity || rule.maxStar != OperatorHuajiRules.maximum(catalog)) return unavailable(context, "catalog_mismatch")
+        if (rule.rarity != catalog.rarity ||
+            rule.maxStar != OperatorHuajiRules.maximum(catalog)
+        ) {
+            return unavailable(context, "catalog_mismatch")
+        }
         val stage = huaji.stage ?: if (huaji.awakened == true) 25 else null
         val missing = buildList {
             if (level == null || !strict && level == 0) add("level")
@@ -133,7 +163,10 @@ class OperatorPanelService(
                 PanelStone(stone.sourceId, star.level, star.breakthroughStage)
             }
             val values = OperatorPanelCalculator.calculate(
-                bundle, id, PanelCultivation(level!!, breakthrough, potential!!, stage!!, huaji.awakened, oddityHp.toInt(), oddityAttack!!.toInt()), stones,
+                bundle,
+                id,
+                PanelCultivation(level!!, breakthrough, potential!!, stage!!, huaji.awakened, oddityHp.toInt(), oddityAttack!!.toInt()),
+                stones,
             )
             return OperatorPanelResponse("calculated", values.attack, values.hp, ruleVersion = bundle.ruleSet.id)
         } catch (error: PanelInputException) {
@@ -141,10 +174,17 @@ class OperatorPanelService(
                 "breakthrough_stage" -> "level_breakthrough_stage"
                 "star" -> "huaji.stage"
                 "awakened" -> "huaji.awakened"
-                else -> error.field.replace(Regex("stones\\[(\\d+)]")) { match -> "loadout.${slots.filterValues { it != null }.keys.elementAt(match.groupValues[1].toInt())}" }
+                else -> error.field.replace(Regex("stones\\[(\\d+)]")) { match ->
+                    "loadout.${slots.filterValues { it != null }.keys.elementAt(match.groupValues[1].toInt())}"
+                }
             }
             if (strict && error.reason !in setOf("missing", "unsupported")) invalid(field)
-            return OperatorPanelResponse("incomplete", missingFields = listOf(field), reason = error.reason, ruleVersion = bundle.ruleSet.id)
+            return OperatorPanelResponse(
+                "incomplete",
+                missingFields = listOf(field),
+                reason = error.reason,
+                ruleVersion = bundle.ruleSet.id,
+            )
         }
     }
 
@@ -173,12 +213,18 @@ class OperatorPanelService(
         if (it.isNull) null else it.takeIf { value -> value.isIntegralNumber && value.canConvertToInt() }?.intValue() ?: invalid(key)
     }
 
-    private fun unavailable(context: Context, reason: String) = OperatorPanelResponse("unsupported", reason = reason, ruleVersion = context.rules?.ruleSet?.id)
-    private fun invalid(field: String): Nothing = throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "panel_invalid_input", "Invalid panel input", fieldPath = field)
+    private fun unavailable(context: Context, reason: String) =
+        OperatorPanelResponse("unsupported", reason = reason, ruleVersion = context.rules?.ruleSet?.id)
+    private fun invalid(field: String): Nothing =
+        throw OperatorApiException(HttpStatus.UNPROCESSABLE_ENTITY, "panel_invalid_input", "Invalid panel input", fieldPath = field)
 
     private data class Context(
-        val rules: PanelRuleBundle?, val catalog: Map<String, OperatorCatalogEntity>, val entries: Map<String, OperatorEntry>,
-        val stars: StarStateCurrent?, val loadouts: Map<String, Map<String, String?>>, val loadoutGenerationValid: Boolean,
+        val rules: PanelRuleBundle?,
+        val catalog: Map<String, OperatorCatalogEntity>,
+        val entries: Map<String, OperatorEntry>,
+        val stars: StarStateCurrent?,
+        val loadouts: Map<String, Map<String, String?>>,
+        val loadoutGenerationValid: Boolean,
     )
 
     companion object {

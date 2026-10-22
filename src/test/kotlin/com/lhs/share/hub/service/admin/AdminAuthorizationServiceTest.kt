@@ -36,8 +36,14 @@ class AdminAuthorizationServiceTest {
             activeUser(userId)
             every { roleRepository.findById(userId) } returns Optional.of(binding(userId, role))
             every { feedbackRepository.findById(userId) } returns Optional.empty()
-            assertEquals(role in setOf(AdminRole.SUPER_ADMIN, AdminRole.ARCHIVE_USER), service.hasPermission(userId, AdminPermission.ARCHIVE_ACCESS))
-            assertEquals(role in setOf(AdminRole.SUPER_ADMIN, AdminRole.OPERATOR_PANEL_USER), service.hasPermission(userId, AdminPermission.OPERATOR_PANEL_USE))
+            assertEquals(
+                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.ARCHIVE_USER),
+                service.hasPermission(userId, AdminPermission.ARCHIVE_ACCESS),
+            )
+            assertEquals(
+                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.OPERATOR_PANEL_USER),
+                service.hasPermission(userId, AdminPermission.OPERATOR_PANEL_USE),
+            )
             if (role in setOf(AdminRole.ARCHIVE_USER, AdminRole.OPERATOR_PANEL_USER)) {
                 assertFalse(service.hasAnyAdminCapability(userId))
                 assertFalse(service.hasPermission(userId, AdminPermission.ADMIN_ROLE_MANAGE))

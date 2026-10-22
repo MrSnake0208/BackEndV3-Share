@@ -24,7 +24,13 @@ data class StarInventoryEntryRequest(
     @field:NotNull @field:Min(1) @field:Max(60)
     @field:JsonSetter(nulls = Nulls.FAIL) val level: Int?,
     // Missing preserves an unchanged instance on PATCH; explicit JSON null clears the fact.
-    @field:io.swagger.v3.oas.annotations.media.Schema(type = "integer", minimum = "0", maximum = "5", nullable = true, description = "实际完成突破次数；省略与显式 null 的语义不同，详见星石突破接入契约")
+    @field:io.swagger.v3.oas.annotations.media.Schema(
+        type = "integer",
+        minimum = "0",
+        maximum = "5",
+        nullable = true,
+        description = "实际完成突破次数；省略与显式 null 的语义不同，详见星石突破接入契约",
+    )
     val breakthroughStage: JsonNode? = null,
 ) {
     @JsonAnySetter fun rejectUnknownField(name: String, value: Any?) {
