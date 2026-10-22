@@ -73,9 +73,9 @@ data class OperatorCombatStatsPatchRequest(
 )
 
 data class OperatorCombatDisplayModePatchRequest(
-    @field:Schema(description = "auto=公式计算，manual=手动填写或自动采集值", nullable = true, allowableValues = ["auto", "manual"])
+    @field:Schema(description = "auto=优先自动计算，manual=手填或采集，null=跟随账号补全设置", nullable = true, allowableValues = ["auto", "manual"])
     val attack: String? = null,
-    @field:Schema(description = "auto=公式计算，manual=手动填写或自动采集值", nullable = true, allowableValues = ["auto", "manual"])
+    @field:Schema(description = "auto=优先自动计算，manual=手填或采集，null=跟随账号补全设置", nullable = true, allowableValues = ["auto", "manual"])
     val hp: String? = null,
 )
 

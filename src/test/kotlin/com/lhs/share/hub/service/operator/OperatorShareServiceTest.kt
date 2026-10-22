@@ -195,6 +195,40 @@ class OperatorShareServiceTest {
         assertEquals(null, view.updatedAt)
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `shared display honors account and per stat preferences without altering original values`(enabled: Boolean) {
+        every { accountRepository.findByShareToken("code") } returns account("code").copy(operatorPanelAutoFill = enabled)
+        every { catalogService.currentCatalogVersion() } returns "fixture"
+        val manual = OperatorCombatStats(manualAttack = 9000, manualHp = 30000, observedStatus = "stale")
+        val rows = mapOf(
+            "manual" to entry(3).copy(combatStats = manual),
+            "partial" to entry(3).copy(combatStats = OperatorCombatStats(manualHp = 30000)),
+            "observed" to entry(3).copy(combatStats = OperatorCombatStats(observedAttack = 8000, observedHp = 20000)),
+            "auto" to entry(3).copy(combatStats = manual.copy(displayMode = OperatorCombatDisplayMode("auto", "manual"))),
+            "unavailable" to entry(3).copy(combatStats = manual.copy(displayMode = OperatorCombatDisplayMode("auto", "auto"))),
+            "empty_manual" to entry(3).copy(combatStats = OperatorCombatStats(displayMode = OperatorCombatDisplayMode("manual", "manual"))),
+        )
+        every { operatorService.current("u1", "acc1", "代号鸢") } returns listOf(
+            OperatorCurrentResponse("u1", "acc1", "代号鸢", null, rows, Instant.EPOCH),
+        )
+        every { panels.saved("u1", "acc1", rows.keys) } returns rows.mapValues { (id, _) ->
+            if (id == "unavailable") OperatorPanelResponse("incomplete") else OperatorPanelResponse("calculated", 1000, 2000)
+        }
+        val entries = service.view("code").entries
+        fun values(id: String) = entries.getValue(id).displayPanel!!.let { it.attack to it.hp }
+        assertEquals(9000L to 30000L, values("manual"))
+        assertEquals((if (enabled) 1000L else null) to 30000L, values("partial"))
+        assertEquals(8000L to 20000L, values("observed"))
+        assertEquals(1000L to 30000L, values("auto"))
+        assertEquals(9000L to 30000L, values("unavailable"))
+        assertEquals(null to null, values("empty_manual"))
+        assertEquals("calculated", entries.getValue("auto").displayPanel!!.attackSource)
+        assertEquals(9000L, entries.getValue("auto").combatStats!!.manualAttack)
+        assertEquals("stale", rows.getValue("manual").combatStats!!.observedStatus)
+        verify(exactly = 0) { accountRepository.updateOperatorPanelAutoFill(any(), any(), any()) }
+    }
+
     @Test
     fun `invalid public code has one stable error and never exposes account data`() {
         every { accountRepository.findByShareToken("bad") } returns null

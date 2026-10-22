@@ -30,8 +30,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 
 class AccountControllerContractTest {
@@ -52,6 +52,19 @@ class AccountControllerContractTest {
             .setMessageConverters(MappingJackson2HttpMessageConverter(mapper))
             .setValidator(validator)
             .build()
+    }
+
+    @Test
+    fun `panel auto fill accepts explicit false and binds authenticated owner`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        val account = SubAccountResponse("main", "test", "如鸢", Instant.EPOCH, Instant.EPOCH, operatorPanelAutoFill = false)
+        every { accountService.update("jwt-user", "main", null, null, false) } returns account
+        mockMvc.perform(
+            patch("/v1/accounts/main").contentType(MediaType.APPLICATION_JSON).content("""{"operator_panel_auto_fill":false}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.operator_panel_auto_fill").value(false))
+        verify(exactly = 1) { accountService.update("jwt-user", "main", null, null, false) }
     }
 
     @Test

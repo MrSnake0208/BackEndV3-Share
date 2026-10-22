@@ -2,6 +2,8 @@ package com.lhs.share.hub.service.operator
 
 import com.lhs.share.hub.controller.account.response.AccountShareResponse
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
+import com.lhs.share.hub.controller.operator.response.OperatorDisplayPanelResponse
+import com.lhs.share.hub.controller.operator.response.OperatorPanelResponse
 import com.lhs.share.hub.controller.operator.response.OperatorShareCombatStats
 import com.lhs.share.hub.controller.operator.response.OperatorShareDisc
 import com.lhs.share.hub.controller.operator.response.OperatorShareDiscLoadout
@@ -50,7 +52,10 @@ class OperatorShareService(
         val owned = current?.entries.orEmpty().filterValues { it.huaji?.owned ?: (it.starLevel > 0) }
         val panels = panelService.saved(account.userId, account.accountId, owned.keys)
         val entries = owned.mapValues { (operatorId, entry) ->
-            entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE).copy(panel = panels[operatorId])
+            entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE).copy(
+                panel = panels[operatorId],
+                displayPanel = entry.displayPanel(panels[operatorId], account.operatorPanelAutoFill),
+            )
         }
         return OperatorShareViewResponse(
             game = account.game,
@@ -178,6 +183,23 @@ class OperatorShareService(
         "share_not_found",
         "Share not found",
     )
+
+    private fun OperatorCurrentEntryDto.displayPanel(panel: OperatorPanelResponse?, autoFill: Boolean): OperatorDisplayPanelResponse {
+        val available = panel?.status == "calculated" && panel.attack != null && panel.attack >= 0 && panel.hp != null && panel.hp >= 0
+        fun select(manual: Long?, observed: Long?, automatic: Long?, mode: String?): Pair<Long?, String> {
+            val saved = manual ?: observed
+            if (available && (mode == "auto" || (mode != "manual" && autoFill && saved == null))) return automatic to "calculated"
+            val source = when {
+                manual != null -> "manual"
+                observed != null -> "observed"
+                else -> "missing"
+            }
+            return saved to source
+        }
+        val attack = select(combatStats?.manualAttack, combatStats?.observedAttack, panel?.attack, combatStats?.displayMode?.attack)
+        val hp = select(combatStats?.manualHp, combatStats?.observedHp, panel?.hp, combatStats?.displayMode?.hp)
+        return OperatorDisplayPanelResponse(attack.first, hp.first, attack.second, hp.second)
+    }
 
     private fun OperatorCurrentEntryDto.toShareEntry(growthState: String) = OperatorShareEntryDto(
         level = level,

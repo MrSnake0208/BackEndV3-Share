@@ -63,7 +63,7 @@ class AccountController(
     @Operation(summary = "修改子账号")
     @PatchMapping("/{accountId}", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun update(@PathVariable accountId: String, @Valid @RequestBody request: AccountPatchRequest): ApiResult<SubAccountResponse> =
-        success(accountService.update(helper.requireUserId(), accountId, request.name, request.game))
+        success(accountService.update(helper.requireUserId(), accountId, request.name, request.game, request.operatorPanelAutoFill))
 
     @Operation(summary = "删除子账号及其全部数据")
     @DeleteMapping("/{accountId}")

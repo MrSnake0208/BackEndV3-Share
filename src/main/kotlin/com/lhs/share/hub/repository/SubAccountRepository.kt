@@ -31,6 +31,7 @@ interface SubAccountRepository : MongoRepository<SubAccount, String>, SubAccount
 interface SubAccountRepositoryCustom {
     fun fenceRecruitmentWrite(userId: String, accountId: String, expectedGame: String): Boolean
     fun updateDetails(userId: String, accountId: String, name: String, game: String, now: Instant)
+    fun updateOperatorPanelAutoFill(userId: String, accountId: String, enabled: Boolean)
     fun updateShareToken(userId: String, accountId: String, expectedToken: String?, newToken: String?, now: Instant): SubAccount?
     fun updateShareAuthorization(
         userId: String,
@@ -44,6 +45,10 @@ interface SubAccountRepositoryCustom {
 }
 
 class SubAccountRepositoryImpl(@param:Qualifier("hubMongoTemplate") private val template: MongoTemplate) : SubAccountRepositoryCustom {
+    override fun updateOperatorPanelAutoFill(userId: String, accountId: String, enabled: Boolean) {
+        template.updateFirst(owner(userId, accountId), Update().set("operatorPanelAutoFill", enabled), SubAccount::class.java)
+    }
+
     override fun fenceRecruitmentWrite(userId: String, accountId: String, expectedGame: String): Boolean = template.updateFirst(
         owner(userId, accountId).addCriteria(
             if (expectedGame ==

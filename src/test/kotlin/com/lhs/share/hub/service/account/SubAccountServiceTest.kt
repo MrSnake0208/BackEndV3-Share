@@ -346,6 +346,32 @@ class SubAccountServiceTest {
     }
 
     @Test
+    fun `panel preference defaults on supports false and unrelated changes preserve it`() {
+        val account = SubAccount(userId = "u1", accountId = "main", name = "test")
+        assertTrue(account.operatorPanelAutoFill)
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns account
+        every { accountRepository.updateDetails("u1", "main", any(), "代号鸢", any()) } just runs
+        every { accountRepository.updateOperatorPanelAutoFill("u1", "main", false) } just runs
+        val saved = service.update("u1", "main", null, null, false)
+        assertFalse(saved.operatorPanelAutoFill)
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns account.copy(operatorPanelAutoFill = false)
+        assertFalse(service.update("u1", "main", "renamed", null).operatorPanelAutoFill)
+        verify(exactly = 1) { accountRepository.updateOperatorPanelAutoFill("u1", "main", false) }
+        verify(exactly = 0) { operatorCurrentRepository.save(any()) }
+        verify(exactly = 0) { accountRepository.save(any()) }
+    }
+
+    @Test
+    fun `foreign panel preference cannot write or fence another account`() {
+        every { accountRepository.findByUserIdAndAccountId("intruder", "main") } returns null
+        val error = assertThrows(InventoryApiException::class.java) { service.update("intruder", "main", null, null, false) }
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        verify(exactly = 0) { accountRepository.updateOperatorPanelAutoFill(any(), any(), any()) }
+        verify(exactly = 0) { accountRepository.fenceRecruitmentWrite(any(), any(), any()) }
+        verify(exactly = 0) { accountRepository.updateDetails(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `preference-only game change clears empty recruitment state and lost fence rejects lifecycle`() {
         val account = SubAccount(id = "mongo-id", userId = "u1", accountId = "main", name = "大号")
         every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns account

@@ -23,4 +23,6 @@ data class AccountPatchRequest(
     val name: String? = null,
     @field:Schema(description = "账号游戏版本", allowableValues = ["代号鸢", "如鸢"])
     val game: String? = null,
+    @field:Schema(description = "自动补全未填写的密探面板；默认开启，已有手填/采集值优先，缺失或null保留设置")
+    val operatorPanelAutoFill: Boolean? = null,
 )

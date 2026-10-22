@@ -34,6 +34,7 @@ data class SubAccount(
     val shareScopes: List<String>? = null,
     // A write fence shared by recruitment mutations and account lifecycle transactions.
     val recruitmentFence: Long = 0,
+    val operatorPanelAutoFill: Boolean = true,
 )
 
 fun SubAccount.effectiveShareScopes(): List<String> = if (shareToken.isNullOrBlank()) {
