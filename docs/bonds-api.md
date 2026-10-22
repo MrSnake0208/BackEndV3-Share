@@ -2,6 +2,8 @@
 
 本模块原生复用网站JWT、Beta资格、游戏账号与密探目录；没有外部账号体系、个人localStorage权威存储或库存奖励写入。所有接口沿用ApiResult、snake_case及InventoryError，响应 `Cache-Control: no-store`。
 
+所有玩家及目录管理接口（含 catalog）要求网站登录和 `archive:access`：超级管理员自动拥有，其他用户须授予 `ARCHIVE_USER`。目录管理另须原有 `bond_catalog:write`；普通平台管理员不会自动获得访问权。
+
 ## 数据与计数
 
 `bond_catalogs` 每游戏一文档，含 revision、published、draft、永久 identities 及最近5份历史；`bond_archives` 按 userId/accountId 隔离，以确定性文档ID和 @Version 保证CAS。档案记录仅 bond_id/triggered/source/updated_at；时间和来源由服务生成，不代表游戏内首次触发。空档案只在响应中构造，读操作不创建档案或目录。
@@ -16,7 +18,7 @@ summary.triggered_count 每次从记录与目录重算，包含 active/retired �
 
 | 方法与路径 | 输入与行为 |
 | --- | --- |
-| GET /v1/bonds/catalog | game；匿名读取 published、版本，无草稿或个人信息，published_by为null |
+| GET /v1/bonds/catalog | game；授权用户读取 published、版本，无草稿或个人信息，published_by为null |
 | GET /v1/bonds/archive | account_id；返回账号、游戏、revision、catalog_version、records、summary |
 | PATCH /v1/bonds/records/{id} | account_id、expected_revision、catalog_version、triggered |
 | POST /v1/bonds/batch | 上述上下文和records数组，每项bond_id/triggered；1–50个不同ID，整批原子 |

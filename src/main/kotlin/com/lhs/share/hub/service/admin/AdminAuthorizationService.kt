@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service
 enum class AdminPermission(val value: String) {
     LEDGER_CATALOG_WRITE("ledger_catalog:write"),
     BETA_MANAGE("beta:manage"),
+    ARCHIVE_ACCESS("archive:access"),
+    OPERATOR_PANEL_USE("operator_panel:use"),
     OPERATOR_CATALOG_WRITE("operator_catalog:write"),
     RECRUITMENT_CATALOG_WRITE("recruitment_catalog:write"),
     ACHIEVEMENT_CATALOG_WRITE("achievement_catalog:write"),
@@ -45,7 +47,7 @@ class AdminAuthorizationService(
     fun hasAnyAdminCapability(userId: String): Boolean {
         if (userService.get(userId)?.activated != true) return false
         val roles = roleRepository.findById(userId).orElse(null)?.roles.orEmpty()
-        if (roles.isNotEmpty()) return true
+        if (roles.any { it != AdminRole.ARCHIVE_USER && it != AdminRole.OPERATOR_PANEL_USER }) return true
         val grant = feedbackAccessRepository.findById(userId).orElse(null)
         return grant?.manageAreas.orEmpty().isNotEmpty() || grant?.feedbackRoles.orEmpty().isNotEmpty()
     }
@@ -54,6 +56,8 @@ class AdminAuthorizationService(
         val roles = rolesFor(userId)
         if (AdminRole.SUPER_ADMIN in roles) return true
         return when (permission) {
+            AdminPermission.ARCHIVE_ACCESS -> AdminRole.ARCHIVE_USER in roles
+            AdminPermission.OPERATOR_PANEL_USE -> AdminRole.OPERATOR_PANEL_USER in roles
             AdminPermission.LEDGER_CATALOG_WRITE,
             AdminPermission.BETA_MANAGE,
             AdminPermission.OPERATOR_CATALOG_WRITE,

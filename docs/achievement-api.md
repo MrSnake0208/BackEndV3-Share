@@ -8,11 +8,11 @@
 
 日常资料通过网站「管理工作台 → 内容维护 → 成就目录管理」维护，详细接口及操作见 [成就目录管理](achievement-catalog-admin.md)。游戏和系统生成的稳定 ID 不可编辑；成就名称和有效分类必填，条件与奖励允许暂缺，不要求逐条核验后才发布。公共条目固定为 achievement_id、game、category_id、name、condition、sort、is_hidden、rewards、target、linked_metric；没有原游戏ID或替代映射。target=null 不提供数值进度；明确目标为1到1e12的正整数。公开 data_status 自动区分 empty/partial，coverage 可自动生成；complete 仅由管理员明确选择，不按条目数量推断完整程度。
 
-下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口仍受原统一 feature flag 控制；羁绊自动进度通过同账号只读指标接入，人工档案和备份继续独立。
+下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口受统一 feature flag 和 `archive:access` 双重控制；羁绊自动进度通过同账号只读指标接入，人工档案和备份继续独立。
 
 ## 接口与保存约束
 
-沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；公开目录匿名可读，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
+沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；目录及管理接口同样要求网站登录和 `archive:access`（`SUPER_ADMIN` 或 `ARCHIVE_USER`），目录管理另须原写权限，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
 
 | 方法与路径 | 输入 | 返回 |
 | --- | --- | --- |

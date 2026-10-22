@@ -177,7 +177,7 @@ class OperatorController(
     fun viewShare(@PathVariable shareCode: String): ResponseEntity<ApiResult<OperatorShareViewResponse>> {
         return ResponseEntity.ok()
             .header("Cache-Control", "no-store")
-            .body(success(requireNotNull(shareService).view(shareCode)))
+            .body(success(requireNotNull(shareService).view(shareCode, helper.obtainUserId())))
     }
 
     @Operation(summary = "读取子账号的密探主观养成标注", description = "未返回的密探默认 growth_state=active。")

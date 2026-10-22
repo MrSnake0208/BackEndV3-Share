@@ -37,9 +37,10 @@ class OperatorShareServiceTest {
     private val catalogService = mockk<OperatorCatalogService>()
     private val annotationRepository = mockk<OperatorAnnotationRepository>(relaxed = true)
     private val organizationService = mockk<OperatorOrganizationService>()
+    private val authorization = mockk<com.lhs.share.hub.service.admin.AdminAuthorizationService>(relaxed = true)
     private val panels = mockk<OperatorPanelService>(relaxed = true)
     private val service =
-        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService, panels)
+        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService, panels, authorization)
 
     @AfterEach
     fun `sharing never replaces or upserts the account document`() {
@@ -68,7 +69,7 @@ class OperatorShareServiceTest {
               {"id":"hidden","name":"私人空标签","operator_ids":["unowned"]}
             ]}""",
         ) as com.fasterxml.jackson.databind.node.ObjectNode
-        val view = service.view("code")
+        val view = service.view("code", "viewer")
         assertEquals(setOf("owned"), view.entries.keys)
         assertEquals(if (enabled) 1 else 0, view.tags.size)
         if (enabled) {
@@ -124,6 +125,7 @@ class OperatorShareServiceTest {
     @ParameterizedTest
     @ValueSource(strings = ["active", "graduated", "skip", "discarded"])
     fun `public view filters un recruited entries and omits private current fields`(state: String) {
+        every { authorization.hasPermission("viewer", com.lhs.share.hub.service.admin.AdminPermission.OPERATOR_PANEL_USE) } returns true
         val panel = OperatorPanelResponse("calculated", 123, 456, ruleVersion = "synthetic")
         every { panels.saved("u1", "acc1", setOf("recruited")) } returns mapOf("recruited" to panel)
         every { accountRepository.findByShareToken("code") } returns account("code")
@@ -145,7 +147,7 @@ class OperatorShareServiceTest {
             ),
         )
 
-        val view = service.view("code")
+        val view = service.view("code", "viewer")
 
         assertEquals("代号鸢", view.game)
         assertEquals("2026-09-03", view.catalogVersion)
@@ -189,7 +191,7 @@ class OperatorShareServiceTest {
         every { catalogService.currentCatalogVersion() } returns "2026-09-03"
         every { operatorService.current("u1", "acc1", "代号鸢") } returns emptyList()
 
-        val view = service.view("code")
+        val view = service.view("code", "viewer")
 
         assertTrue(view.entries.isEmpty())
         assertEquals(null, view.updatedAt)
@@ -215,7 +217,8 @@ class OperatorShareServiceTest {
         every { panels.saved("u1", "acc1", rows.keys) } returns rows.mapValues { (id, _) ->
             if (id == "unavailable") OperatorPanelResponse("incomplete") else OperatorPanelResponse("calculated", 1000, 2000)
         }
-        val entries = service.view("code").entries
+        every { authorization.hasPermission("viewer", com.lhs.share.hub.service.admin.AdminPermission.OPERATOR_PANEL_USE) } returns true
+        val entries = service.view("code", "viewer").entries
         fun values(id: String) = entries.getValue(id).displayPanel!!.let { it.attack to it.hp }
         assertEquals(9000L to 30000L, values("manual"))
         assertEquals((if (enabled) 1000L else null) to 30000L, values("partial"))
@@ -226,6 +229,14 @@ class OperatorShareServiceTest {
         assertEquals("calculated", entries.getValue("auto").displayPanel!!.attackSource)
         assertEquals(9000L, entries.getValue("auto").combatStats!!.manualAttack)
         assertEquals("stale", rows.getValue("manual").combatStats!!.observedStatus)
+        every { authorization.hasPermission("viewer", com.lhs.share.hub.service.admin.AdminPermission.OPERATOR_PANEL_USE) } returns false
+        for (viewer in listOf(null, "viewer")) {
+            val restricted = service.view("code", viewer).entries
+            assertTrue(restricted.values.all { it.panel == null })
+            assertEquals(9000L, restricted.getValue("auto").displayPanel!!.attack)
+            assertEquals("manual", restricted.getValue("auto").displayPanel!!.attackSource)
+        }
+        verify(exactly = 1) { panels.saved("u1", "acc1", rows.keys) }
         verify(exactly = 0) { accountRepository.updateOperatorPanelAutoFill(any(), any(), any()) }
     }
 

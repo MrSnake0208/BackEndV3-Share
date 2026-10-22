@@ -17,6 +17,8 @@ import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.repository.entity.effectiveShareScopes
+import com.lhs.share.hub.service.admin.AdminAuthorizationService
+import com.lhs.share.hub.service.admin.AdminPermission
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -31,6 +33,7 @@ class OperatorShareService(
     private val annotationRepository: OperatorAnnotationRepository,
     private val organizationService: OperatorOrganizationService,
     private val panelService: OperatorPanelService,
+    private val authorization: AdminAuthorizationService,
 ) {
     fun get(userId: String, accountId: String): OperatorShareResponse = response(requireAccount(userId, accountId))
 
@@ -44,13 +47,17 @@ class OperatorShareService(
         return response(change(userId, accountId, disabling = true) { it.effectiveShareScopes() - "operator" })
     }
 
-    fun view(shareCode: String): OperatorShareViewResponse {
+    fun view(shareCode: String, viewerId: String? = null): OperatorShareViewResponse {
         val account = sharedAccount(shareCode, "operator")
         val current = operatorService.current(account.userId, account.accountId, account.game).firstOrNull()
         val growthStates = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(account.userId, account.accountId)
             .associate { it.operatorId to it.growthState }
         val owned = current?.entries.orEmpty().filterValues { it.huaji?.owned ?: (it.starLevel > 0) }
-        val panels = panelService.saved(account.userId, account.accountId, owned.keys)
+        val panels = if (viewerId != null && authorization.hasPermission(viewerId, AdminPermission.OPERATOR_PANEL_USE)) {
+            panelService.saved(account.userId, account.accountId, owned.keys)
+        } else {
+            emptyMap()
+        }
         val entries = owned.mapValues { (operatorId, entry) ->
             entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE).copy(
                 panel = panels[operatorId],

@@ -43,6 +43,7 @@ class OperatorShareControllerContractTest {
 
     @BeforeEach
     fun setUp() {
+        every { helper.obtainUserId() } returns null
         val mapper = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)

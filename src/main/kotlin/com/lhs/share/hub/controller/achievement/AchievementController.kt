@@ -32,6 +32,7 @@ class AchievementController(
     private val helper: AuthenticationHelper,
     private val mapper: ObjectMapper,
 ) {
+    @RequireJwt
     @GetMapping("/catalog")
     fun catalog(@RequestParam game: String) = privateResult(catalog.catalog(game))
 
