@@ -321,3 +321,11 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 `inventory_records.sourceConnectionId` 是可空的服务端连接编号，取自已通过 `inventory:write` 验证的 Open API 连接，随真实流水在原库存事务内落库。交换正文不能声明该字段；JWT 导入及旧记录默认无来源。幂等重传不更新来源，不改变库存基线、数量或 revision 语义。
 
 本人 JWT `GET /user/open-api/tokens/{tokenId}/first-sync` 先校验 token 归属，再按 userId/accountId/sourceConnectionId/stockEffect=applied 查询已有流水。只返回记录编号与服务端接收时间等证据，不返回库存全量或 token 明文；无缓存、无写入。history_only/superseded、手工记录与普通更新时间均不是成功证据。删除记录或撤销连接后，以重新查询结果为准，不信任客户端历史完成标记。
+
+## 邮箱月卡储备（独立于库存事实）
+
+本人 JWT `GET/PUT /v1/inventory/mailbox-reserve?account_id=...`，沿用 ApiResult 成功封装和库存错误响应，禁止缓存。PUT：`{expected_version, white_coin_mails:[{count,coins_per_mail}], fu_chuan_mail_count}`；响应：`{account_id,white_coin_mails,fu_chuan_mail_count,version,updated_at}`。普通符传按每封3个折算；白金币按行相乘求和，不含体力/购买赠送。
+
+`SubAccount.mailboxReserve` 是可空嵌入文档，旧账号只读返回版本0/空数组/0封/null时间。单文档定向 CAS 只更新该字段，过滤 userId+accountId+版本，不 upsert；删除账号自然清除且并发写入不会复活账号。版本冲突409、账号归属不存在404、字段/数量错误422。每项数量0..1000000，最多20行，expected_version 0..9007199254740990；保存覆盖而不累加。保留用户记录的单封数值，当前月卡档位变化不改写历史邮件。
+
+不写 `inventory_current` / `inventory_records`，不改变库存revision，不计入奖励统计，不包含在库存交换导入导出中。无需新集合、索引或数据迁移。定向证据：`MailboxReserveControllerContractTest` 和使用 TestMongo 自有可抛弃容器的 `MailboxReserveMongoTest`。
