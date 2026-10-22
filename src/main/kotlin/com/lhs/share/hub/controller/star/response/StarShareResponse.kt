@@ -11,4 +11,4 @@ data class StarShareResponse(
     val inventory: List<StarShareEntry>,
 )
 
-data class StarShareEntry(val kind: String, val name: String, val quality: String, val level: Int)
+data class StarShareEntry(val kind: String, val name: String, val quality: String, val level: Int, val breakthroughStage: Int? = null)

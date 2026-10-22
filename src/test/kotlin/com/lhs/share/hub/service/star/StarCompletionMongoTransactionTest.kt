@@ -487,7 +487,7 @@ class StarCompletionMongoTransactionTest {
                         if (it.instanceId ==
                             "s1"
                         ) {
-                            it.copy(level = 40)
+                            it.copy(level = 40, breakthroughStage = 3)
                         } else {
                             it
                         }

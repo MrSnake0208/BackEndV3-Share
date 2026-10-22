@@ -33,18 +33,34 @@ class OperatorHuajiRulesTest {
     @Test
     fun `hidden historical invalid scalars stay unknown and raw is untouched`() {
         val hidden = ordinary.copy(rarity = 3)
-        for (raw in listOf(25, 30, 31)) {
+        for (raw in (20..25).toList() + listOf(30, 31)) {
             val entry = OperatorEntry(17, raw, 100)
             assertEquals(OperatorHuaji(true, null, null), OperatorHuajiRules.read(entry, hidden))
             assertEquals(raw, entry.starLevel)
         }
         assertEquals(OperatorHuaji(true, null, null), OperatorHuajiRules.read(OperatorEntry(17, 31, 100), null))
-        assertEquals(24, OperatorHuajiRules.maximum(hidden))
+        assertEquals(19, OperatorHuajiRules.maximum(hidden))
         assertThrows(OperatorApiException::class.java) {
             OperatorHuajiRules.patch(mapper.readTree("{\"stage\":25}"), hidden, OperatorHuaji(true, 24, null))
         }
         assertThrows(OperatorApiException::class.java) {
             OperatorHuajiRules.patch(mapper.readTree("{\"awakened\":true}"), hidden, OperatorHuaji(true, 24, null))
+        }
+    }
+
+    @Test
+    fun `three star historical normalized nodes keep raw trace and known SP supports independent awakening`() {
+        val hidden = ordinary.copy(rarity = 3)
+        val entry = OperatorEntry(1, 20, 1, huaji = OperatorHuaji(true, 20, null))
+        assertEquals(null, OperatorHuajiRules.read(entry, hidden).stage)
+        assertEquals(20, OperatorHuajiRules.trace(entry, hidden).raw)
+        assertEquals(20, entry.huaji!!.stage)
+        for (id in listOf("char_084_chendengsp", "char_085_shizimiaosp")) {
+            val sp = ordinary.copy(operatorId = id, spOf = "base")
+            assertEquals(
+                OperatorHuaji(true, 19, true),
+                OperatorHuajiRules.patch(mapper.readTree("{\"awakened\":true}"), sp, OperatorHuaji(true, 19, false)),
+            )
         }
     }
 

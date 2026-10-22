@@ -28,6 +28,7 @@ class OperatorShareService(
     private val catalogService: OperatorCatalogService,
     private val annotationRepository: OperatorAnnotationRepository,
     private val organizationService: OperatorOrganizationService,
+    private val panelService: OperatorPanelService,
 ) {
     fun get(userId: String, accountId: String): OperatorShareResponse = response(requireAccount(userId, accountId))
 
@@ -46,9 +47,11 @@ class OperatorShareService(
         val current = operatorService.current(account.userId, account.accountId, account.game).firstOrNull()
         val growthStates = annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(account.userId, account.accountId)
             .associate { it.operatorId to it.growthState }
-        val entries = current?.entries.orEmpty()
-            .filterValues { it.huaji?.owned ?: (it.starLevel > 0) }
-            .mapValues { (operatorId, entry) -> entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE) }
+        val owned = current?.entries.orEmpty().filterValues { it.huaji?.owned ?: (it.starLevel > 0) }
+        val panels = panelService.saved(account.userId, account.accountId, owned.keys)
+        val entries = owned.mapValues { (operatorId, entry) ->
+            entry.toShareEntry(growthStates[operatorId] ?: OperatorSubjectiveService.ACTIVE).copy(panel = panels[operatorId])
+        }
         return OperatorShareViewResponse(
             game = account.game,
             catalogVersion = catalogService.currentCatalogVersion(),

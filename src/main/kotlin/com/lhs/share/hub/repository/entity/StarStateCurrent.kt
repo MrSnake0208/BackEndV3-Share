@@ -29,6 +29,7 @@ data class StarStateEntry(
     val name: String,
     val quality: String,
     val level: Int,
+    val breakthroughStage: Int? = null,
 )
 
 data class StarStatePlanTarget(val instanceId: String, val targetLevel: Int)

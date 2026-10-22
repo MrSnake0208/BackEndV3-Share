@@ -19,6 +19,10 @@ plugins {
 group = "com.lhs"
 version = "0.1.0-SNAPSHOT"
 
+springBoot {
+    mainClass.set("com.lhs.share.ShareApplicationKt")
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)

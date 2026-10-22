@@ -414,7 +414,7 @@ class OperatorService(
                 entry.copy(
                     huaji = OperatorHuajiRules.read(entry, catalogService.getOperator(id)),
                     huajiLegacy =
-                    entry.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(entry.starLevel, "legacy_current"),
+                    OperatorHuajiRules.trace(entry, catalogService.getOperator(id)),
                     combatStats = entry.combatStats?.let { stats ->
                         if (stats.observedStatus == "valid" &&
                             (
@@ -494,9 +494,9 @@ class OperatorService(
         return OperatorCurrentPatchPreview(
             before = prepared.existing.takeIf { prepared.entryExisted }?.let { entry ->
                 val catalog = checkNotNull(catalogService.getOperator(operatorId))
-                OperatorCurrentEntryDto.of(entry.copy(huaji = OperatorHuajiRules.read(entry, catalog)))
+                OperatorCurrentEntryDto.of(OperatorHuajiRules.forDisplay(entry, catalog))
             },
-            after = OperatorCurrentEntryDto.of(prepared.merged),
+            after = OperatorCurrentEntryDto.of(OperatorHuajiRules.forDisplay(prepared.merged, catalogService.getOperator(operatorId))),
             stale = prepared.stale,
         )
     }
@@ -547,7 +547,9 @@ class OperatorService(
                 ),
             )
         }
-        return OperatorCurrentEntryDto.of(checkNotNull(saved).entries.getValue(operatorId))
+        return OperatorCurrentEntryDto.of(
+            OperatorHuajiRules.forDisplay(checkNotNull(saved).entries.getValue(operatorId), catalogService.getOperator(operatorId)),
+        )
     }
 
     fun completeFullImport(userId: String, accountId: String, game: String, operatorIds: Set<String>, effectiveAt: Instant) {
@@ -784,6 +786,10 @@ class OperatorService(
             OperatorHuajiRules.read(existing, catalog) == merged.huaji && existing.discLoadouts == merged.discLoadouts &&
             existing.starStones == merged.starStones && existing.combatStats == merged.combatStats
         if (sameFacts) merged = merged.copy(starLevel = existing.starLevel, huajiLegacy = existing.huajiLegacy)
+        // An unrelated edit must not replace a historical invalid stage with its display-only unknown value.
+        if ("huaji" !in fields && "star_level" !in fields && existing.huaji?.stage?.let { OperatorHuajiRules.anomalous(it, catalog) } == true) {
+            merged = merged.copy(huaji = existing.huaji, huajiLegacy = existing.huajiLegacy)
+        }
         merged = merged.copy(
             revision = if (sameFacts) expectedRevision else expectedRevision + 1,
             updatedAt = if (sameFacts) existing.updatedAt else now,

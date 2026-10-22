@@ -22,7 +22,7 @@ data class StarStateCurrentResponse(
 
         fun of(state: StarStateCurrent) = StarStateCurrentResponse(
             state.accountId, state.generation, state.revision,
-            state.inventory.map { StarStateEntryResponse(it.instanceId, it.kind, it.name, it.quality, it.level) },
+            state.inventory.map { StarStateEntryResponse(it.instanceId, it.kind, it.name, it.quality, it.level, it.breakthroughStage) },
             state.planTargets.associate { it.instanceId to it.targetLevel },
             StarWorkspaceExperienceResponse(state.experience.orange, state.experience.purple, state.experience.white),
             StarWorkspaceBagResponse(state.bag.currentCount, state.bag.capacity), state.updatedAt,
@@ -30,7 +30,14 @@ data class StarStateCurrentResponse(
     }
 }
 
-data class StarStateEntryResponse(val instanceId: String, val kind: String, val name: String, val quality: String, val level: Int)
+data class StarStateEntryResponse(
+    val instanceId: String,
+    val kind: String,
+    val name: String,
+    val quality: String,
+    val level: Int,
+    val breakthroughStage: Int? = null,
+)
 
 data class StarRecoveryPointResponse(
     val recoveryPointId: String,

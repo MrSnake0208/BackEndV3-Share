@@ -32,6 +32,7 @@ data class OperatorShareEntryDto(
     val combatStats: OperatorShareCombatStats?,
     val huaji: com.lhs.share.hub.repository.entity.OperatorHuaji? = null,
     val levelBreakthroughStage: Int? = null,
+    val panel: OperatorPanelResponse? = null,
 )
 
 /** Public combat values; observation provenance, signatures and display preferences stay private. */

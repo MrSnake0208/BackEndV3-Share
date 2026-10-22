@@ -11,6 +11,7 @@ import com.lhs.share.hub.repository.entity.OperatorRecordEntry
 import com.lhs.share.hub.repository.entity.OperatorStarStone
 import com.lhs.share.hub.repository.entity.OperatorStarStoneCatalog
 import com.lhs.share.hub.repository.entity.normalized
+import com.lhs.share.hub.service.operator.OperatorHuajiRules
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 
@@ -154,9 +155,9 @@ data class OperatorCatalogEntryResponse(
             e.spOf,
             e.avatar,
             OperatorHuajiCapabilities(
-                maxStage = if (e.spOf == null && e.rarity == 3) 24 else 25,
+                maxStage = OperatorHuajiRules.maximum(e),
                 hasNodes = e.spOf == null,
-                awakeningSupported = e.spOf == null && e.rarity != 3,
+                awakeningSupported = OperatorHuajiRules.awakeningSupported(e),
                 awakeningUpgradeSupported = e.spOf == null && e.rarity in 4..5,
             ),
         )
