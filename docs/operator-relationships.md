@@ -1,6 +1,6 @@
 # 密探信赖与传闻
 
-首版入口位于密探名册内。记录独立存储于 `operator_relationships`，不改变练度导入 v5、库存、成就或领取状态。当前两款游戏的奖励目录均为空：允许手动记录，前端显示资料待核准，不计算虚构收益。
+首版入口位于密探名册内。记录独立存储于 `operator_relationships`，不改变练度导入 v5、库存、成就或领取状态。两款游戏现共用提取的信赖奖励规则；传闻奖励资料仍为空，可记录数量但不估算传闻收益。
 
 ## 接口
 
@@ -15,7 +15,7 @@
 PATCH 必须且仅包含 `expected_revision`、`catalog_version`、`entries`。例如下列密探 ID 仅作示意，调用时须使用当前游戏目录真实 ID：
 
 ```json
-{"expected_revision":0,"catalog_version":"relationships-2026-10-22-empty","entries":{"operator_id":{"trust":0,"rumors":null}}}
+{"expected_revision":0,"catalog_version":"从当前目录响应读取的完整 version","entries":{"operator_id":{"trust":0,"rumors":null}}}
 ```
 
 未传字段保持原值，`null` 清除记录，`0` 明确记录为零；不接受字符串、负数、小数或非安全整数。批次最多 1000 位密探、1 MiB，保存后总记录最多 1000 位。已知上限会校验；上限未知仅做类型校验。共享信赖归并到规则明确指定的主体，传闻按卡独立；同批共享信赖值冲突时整批拒绝。
@@ -24,14 +24,20 @@ PATCH 必须且仅包含 `expected_revision`、`catalog_version`、`entries`。�
 
 ## 维护奖励资料
 
-静态目录：`src/main/resources/operator/relationships.json`。修改规则须更新 `version`，区分两款游戏和每张卡，不能按稀有度猜测传闻总数。
+静态数据：`src/main/resources/operator/relationships.json`，保留全部 124 位原密探、40 档奖励及原始导出摘要。数据来自 2026-10-22 信赖配置提取；双服同步、原形态与电影形态共用信赖及奖励按产品确认执行。更新数据时运行：
 
-每位密探定义 `trust_owner_id`、`trust`、`rumors`。未知领域为 `null`；已收录领域必须包含 `max/complete/source/verified_on/milestones`，档位为 `{at,rewards:[{item_key,name,quantity}]}`。阈值严格递增且不超过上限；奖励数量为正安全整数；日期为 ISO 日期；同一档位物品键不重复。共享主体必须存在、指向自身，关联卡的信赖规则必须完全相同。
+```sh
+python3 scripts/operator/import_trust_rules.py /path/to/trust_export src/main/resources/operator/relationships.json
+```
 
-只有人工核准完整且 `complete=true` 的领域才纳入奖励计算。物品按稳定 `item_key` 汇总，达标档位不再计入未解锁奖励；不能据此判断是否已领取。禁止把测试数据填入正式目录。
+转换器交叉检查完整等级奖励和突破表。每位密探使用自己的最终上限：22 位为 2000（15 档），102 位为 10000（40 档），不能把化极星级当作初始品质。15 档累计奖励为兵书残卷 75、白金币 100、阴符 3、阴符·异 1；40 档为 200、260、7、4。声音、功能解锁和赠礼偏好不作为物品奖励。
 
-首次补充或变更共享主体前，须核对已有独立记录并设计冲突处理，先备份再迁移；本版没有自动迁移既有共享关系的功能。不能直接改映射后宣称历史数据已归并。
+运行时按当前游戏的真实服务器图鉴精确匹配原密探名称，电影形态通过图鉴 `spOf` 归属原密探。名称歧义或资料缺失时信赖规则为 `null`；关系无效时不提供该条规则。本地种子缺少的密探仍保留在数据中，服务器图鉴存在后即可匹配。目录版本由数据版本和完整数据、实际映射的摘要组成；客户端必须读取当前版本，不能硬编码。
+
+接口中的每位密探包含 `trust_owner_id/trust/rumors`。已收录领域包含 `max/complete/source/verified_on/milestones`，档位为 `{at,rewards:[{item_key,name,quantity}]}`；未知领域为 `null`。完整领域才纳入计算，物品按 `item_key` 汇总，共享信赖只统计一次；已达标档位不再计入未解锁收益，不能据此判断是否已领取。
+
+读取不会迁移或修改旧记录。只有显式保存信赖字段时，才在同一事务中归并到原密探并清理同组旧别名的信赖，保留各自传闻；`null` 清除本组信赖，`0` 仍是有效记录。客户端对不一致的历史共享值提示人工核对，不静默选值；仅修改传闻不会清理信赖。规则在保存期间改变时拒绝保存，需重新核对。
 
 ## 定向验证
 
-`OperatorRelationshipServiceTest` 覆盖字段语义、校验、共享、版本与纯读取；`OperatorRelationshipControllerTest` 覆盖身份传递和响应；`OperatorRelationshipMongoTest` 使用 TestMongo 独立可抛弃容器验证隔离、CAS 与回滚；`SubAccountServiceTest` 覆盖账号生命周期。
+`OperatorRelationshipCatalogTest` 覆盖全部 124 位映射、15/40 档总额、双服与动态图鉴版本；`OperatorRelationshipServiceTest` 覆盖字段语义、校验、共享、版本与纯读取；`OperatorRelationshipControllerTest` 覆盖身份传递和响应；`OperatorRelationshipMongoTest` 使用 TestMongo 独立可抛弃容器验证隔离、CAS 与回滚；`SubAccountServiceTest` 覆盖账号生命周期。

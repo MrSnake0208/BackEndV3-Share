@@ -50,8 +50,7 @@ class OperatorRelationshipServiceTest {
             }
         }
         every { accounts.fenceRecruitmentWrite("u", "a", "如鸢") } returns true
-        every { rules.version() } returns "test"
-        every { rules.get("如鸢") } returns mapper.createObjectNode()
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test", mapper.createObjectNode())
         every { operators.getOperator(any()) } answers {
             val id = firstArg<String>()
             if (id in
@@ -115,8 +114,8 @@ class OperatorRelationshipServiceTest {
 
     @Test
     fun `shared trust canonicalizes once and rejects conflicting restore values`() {
-        every { rules.get("如鸢") } returns
-            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}""")
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test",
+            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""))
         service.patch("u", "a", body("""{"sp":{"trust":500,"rumors":3}}"""))
         val entries = mapper.readTree(stored!!.entriesJson)
         assertEquals(500, entries.path("op").path("trust").asInt())
@@ -137,15 +136,6 @@ class OperatorRelationshipServiceTest {
     }
 
     @Test
-    fun `shipping catalog contains no guessed rewards and rejects malformed rules`() {
-        val catalog = OperatorRelationshipCatalog(mapper)
-        assertTrue(catalog.get("如鸢").isEmpty)
-        assertTrue(catalog.get("代号鸢").isEmpty)
-        assertThrows(IllegalArgumentException::class.java) {
-            OperatorRelationshipCatalog.validate(mapper.readTree("""{"version":"x","games":{"如鸢":{"op":{}},"代号鸢":{}}}"""))
-        }
-    }
-    @Test
     fun `catalog validates reward boundaries and explicit sharing`() {
         val valid = mapper.readTree(
             """{"version":"fixture","games":{"如鸢":{"op":{"trust_owner_id":"op","trust":{
@@ -161,6 +151,38 @@ class OperatorRelationshipServiceTest {
         )) {
             assertThrows(IllegalArgumentException::class.java) { OperatorRelationshipCatalog.validate(mapper.readTree(invalid)) }
         }
+    }
+
+    @Test
+    fun `legacy trust is read without writes and only explicit trust edit resolves aliases`() {
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test",
+            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""))
+        stored = OperatorRelationships("id", "u", "a", "如鸢", """{"op":{"trust":100},"sp":{"trust":200,"rumors":3}}""", 1, Instant.now())
+        val before = stored
+        service.get("u", "a")
+        assertEquals(before, stored)
+        verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any()) }
+        service.patch("u", "a", body("""{"sp":{"rumors":4}}"""))
+        assertEquals(200, mapper.readTree(stored!!.entriesJson).path("sp").path("trust").asInt())
+        service.patch("u", "a", body("""{"sp":{"trust":0}}"""))
+        var entries = mapper.readTree(stored!!.entriesJson)
+        assertEquals(0, entries.path("op").path("trust").asInt())
+        assertFalse(entries.path("sp").has("trust"))
+        assertEquals(4, entries.path("sp").path("rumors").asInt())
+        service.patch("u", "a", body("""{"op":{"trust":null}}"""))
+        entries = mapper.readTree(stored!!.entriesJson)
+        assertFalse(entries.has("op"))
+        assertFalse(entries.path("sp").has("trust"))
+    }
+
+    @Test
+    fun `mapping changes inside transaction reject the write before replacing records`() {
+        every { rules.snapshot("如鸢") } returnsMany listOf(
+            OperatorRelationshipCatalog.Snapshot("test", mapper.createObjectNode()),
+            OperatorRelationshipCatalog.Snapshot("changed", mapper.createObjectNode()),
+        )
+        assertThrows(OperatorApiException::class.java) { service.patch("u", "a", body("""{"op":{"trust":0}}""")) }
+        verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any()) }
     }
 
 }

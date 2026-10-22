@@ -23,7 +23,8 @@ class OperatorRelationshipService(
 ) {
     fun catalog(game: String): Map<String, Any> {
         if (game !in setOf("如鸢", "代号鸢")) invalid("请选择有效游戏")
-        return mapOf("game" to game, "version" to rules.version(), "operators" to rules.get(game))
+        val snapshot = rules.snapshot(game)
+        return mapOf("game" to game, "version" to snapshot.version, "operators" to snapshot.operators)
     }
     fun get(user: String, account: String): Map<String, Any> {
         val game = accountGame(user, account)
@@ -40,10 +41,11 @@ class OperatorRelationshipService(
         ) {
             invalid("记录版本无效")
         }
-        if (!body.path("catalog_version").isTextual || body.path("catalog_version").asText() != rules.version()) conflict()
+        val snapshot = rules.snapshot(game)
+        if (!body.path("catalog_version").isTextual || body.path("catalog_version").asText() != snapshot.version) conflict()
         val changes = body.path("entries")
         if (!changes.isObject || changes.size() !in 1..1000 || body.toString().toByteArray().size > 1024 * 1024) invalid("修改内容无效或过大")
-        val catalog = rules.get(game)
+        val catalog = snapshot.operators
         val canonical = mapper.createObjectNode()
         changes.fields().forEach { (id, fields) ->
             val subject = operators.getOperator(id)?.takeIf { game in it.games } ?: invalid("密探不存在或不属于当前游戏：$id")
@@ -74,10 +76,24 @@ class OperatorRelationshipService(
         try {
             transaction.executeWithoutResult {
                 if (accountGame(user, account) != game || !accounts.fenceRecruitmentWrite(user, account, game)) conflict()
+                if (rules.snapshot(game).version != snapshot.version) conflict()
                 val current = repository.find(user, account, game)
                 if ((current?.revision ?: 0) != revision.asLong()) conflict()
                 val entries = current?.let { mapper.readTree(it.entriesJson) as ObjectNode } ?: mapper.createObjectNode()
                 val before = entries.deepCopy()
+                // Only an explicit trust edit resolves legacy values; reading or editing rumors never discards them.
+                canonical.fields().forEach { (owner, patch) ->
+                    if (patch.has("trust")) {
+                        catalog.fields().forEach { (id, rule) ->
+                            if (id != owner && rule.path("trust_owner_id").asText(id) == owner) {
+                                (entries.path(id) as? ObjectNode)?.let { legacy ->
+                                    legacy.remove("trust")
+                                    if (legacy.isEmpty) entries.remove(id)
+                                }
+                            }
+                        }
+                    }
+                }
                 canonical.fields().forEach { (id, patch) ->
                     val entry = entries.path(id).takeIf { it.isObject } as? ObjectNode ?: mapper.createObjectNode()
                     patch.fields().forEach { (key, value) ->
@@ -102,7 +118,7 @@ class OperatorRelationshipService(
             "account_id" to account,
             "game" to game,
             "revision" to (saved?.revision ?: 0L),
-            "catalog_version" to rules.version(),
+            "catalog_version" to rules.snapshot(game).version,
             "entries" to (
                 saved?.let {
                     mapper.readTree(it.entriesJson)
