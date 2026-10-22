@@ -5,6 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentEntryDto
 import com.lhs.share.hub.controller.operator.response.OperatorCurrentResponse
+import com.lhs.share.hub.controller.operator.response.OperatorPanelResponse
 import com.lhs.share.hub.repository.OperatorAnnotationRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.OperatorAnnotation
@@ -36,8 +37,9 @@ class OperatorShareServiceTest {
     private val catalogService = mockk<OperatorCatalogService>()
     private val annotationRepository = mockk<OperatorAnnotationRepository>(relaxed = true)
     private val organizationService = mockk<OperatorOrganizationService>()
+    private val panels = mockk<OperatorPanelService>(relaxed = true)
     private val service =
-        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService)
+        OperatorShareService(accountRepository, operatorService, catalogService, annotationRepository, organizationService, panels)
 
     @AfterEach
     fun `sharing never replaces or upserts the account document`() {
@@ -122,6 +124,8 @@ class OperatorShareServiceTest {
     @ParameterizedTest
     @ValueSource(strings = ["active", "graduated", "skip", "discarded"])
     fun `public view filters un recruited entries and omits private current fields`(state: String) {
+        val panel = OperatorPanelResponse("calculated", 123, 456, ruleVersion = "synthetic")
+        every { panels.saved("u1", "acc1", setOf("recruited")) } returns mapOf("recruited" to panel)
         every { accountRepository.findByShareToken("code") } returns account("code")
         every { catalogService.currentCatalogVersion() } returns "2026-09-03"
         every { annotationRepository.findAllByUserIdAndAccountIdOrderByOperatorIdAsc("u1", "acc1") } returns listOf(
@@ -149,6 +153,8 @@ class OperatorShareServiceTest {
         assertEquals(27, view.entries.getValue("recruited").starLevel)
         assertEquals(9, view.entries.getValue("recruited").levelBreakthroughStage)
         assertEquals(state, view.entries.getValue("recruited").growthState)
+        assertEquals(panel, view.entries.getValue("recruited").panel)
+        verify(exactly = 1) { panels.saved("u1", "acc1", setOf("recruited")) }
         val json = jacksonObjectMapper()
             .registerModule(JavaTimeModule())
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
@@ -170,7 +176,10 @@ class OperatorShareServiceTest {
             "observed_at",
             "combat_input_signature",
             "display_mode",
-        ).forEach { field -> assertTrue("$field must stay private" !in json) }
+            "potential_extra",
+            "kizunas",
+            "source_id",
+        ).forEach { field -> assertTrue("\"$field\":" !in json, "$field must stay private") }
         verify { operatorService.current("u1", "acc1", "代号鸢") }
     }
 
@@ -196,6 +205,7 @@ class OperatorShareServiceTest {
         assertEquals("share_not_found", error.code)
         assertTrue(error.message!!.contains("not found"))
         verify(exactly = 0) { operatorService.current(any(), any(), any()) }
+        verify(exactly = 0) { panels.saved(any(), any(), any()) }
     }
 
     @Test

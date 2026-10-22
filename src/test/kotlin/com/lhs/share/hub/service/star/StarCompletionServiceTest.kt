@@ -134,6 +134,7 @@ class StarCompletionServiceTest {
     @Test fun `single completion updates state resources plan history and persistent receipt`() {
         val result = service.complete("u", request())
         assertEquals(50, result.state.inventory.first().level)
+        assertEquals(4, result.state.inventory.first().breakthroughStage)
         assertEquals(mapOf("s2" to 50), result.state.planTargets)
         assertEquals(StarStateExperience(9, 18, 27), state.experience)
         assertEquals(150L, result.bottleBalances["jiezheping"])
@@ -148,6 +149,13 @@ class StarCompletionServiceTest {
         assertEquals(mapOf("jiezheping" to 50L, "jieyangping" to 20L), history.single().entries.associate { it.id to it.count })
         assertEquals(result, service.receipt("u", "a", "op"))
         verify(exactly = 1) { manager.commit(any()) }
+    }
+
+    @Test fun `known breakthrough conflicting with cost choice is rejected without consuming inventory`() {
+        state = state.copy(inventory = state.inventory.map { if (it.instanceId == "s1") it.copy(breakthroughStage = 4) else it })
+        assertEquals("star_breakthrough_changed", assertThrows(InventoryApiException::class.java) { service.complete("u", request()) }.code)
+        assertEquals(7, revision)
+        assertTrue(history.isEmpty())
     }
 
     @Test fun `multiple selected stars complete once with summed costs`() {

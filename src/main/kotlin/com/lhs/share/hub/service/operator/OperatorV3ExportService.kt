@@ -98,7 +98,7 @@ class OperatorV3ExportService(
                     node.set<JsonNode>(
                         "huaji_legacy",
                         objectMapper.valueToTree(
-                            entry.huajiLegacy ?: com.lhs.share.hub.repository.entity.OperatorHuajiLegacy(entry.starLevel, "legacy_current"),
+                            OperatorHuajiRules.trace(entry, catalog),
                         ),
                     )
                 } else {

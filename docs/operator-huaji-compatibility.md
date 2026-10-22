@@ -5,9 +5,9 @@
 
 当前 API、持久化和 v4 使用 `huaji:{owned:boolean,stage:0..25|null,awakened:boolean|null}`。`true` 确认已觉醒，`false` 确认未觉醒，`null` 待确认。`owned=true` 可以阶段未知；不能用共享等级/修为推导拥有。未拥有必须 stage=0，觉醒不得 true；拥有时 stage 不能为0。
 
-普通密探 stage 1..6=一星0..5节点、7..12=二星、13..18=三星、19..24=四星、25=五星（没有第五颗星的小节点）。化极与觉醒是独立事实。隐密（catalog rarity=3）终点24、不能新确认已觉醒。SP 使用稳定 `spOf`，只允许0/1/7/13/19/25，分别表示未拥有和1..5星，不能写普通小节点；SP觉醒和材料暂未开放，升级继续422 `sp_huaji_upgrade_not_supported`。
+普通密探 stage 1..6=一星0..5节点、7..12=二星、13..18=三星、19..24=四星、25=五星（没有第五颗星的小节点）。化极与觉醒是独立事实。隐密（catalog rarity=3）终点19，即满4星无后续节点、不能新确认已觉醒。SP 使用稳定 `spOf`，只允许0/1/7/13/19/25，分别表示未拥有和1..5星，不能写普通小节点；陈登·黍王、史子眇·赴烛允许独立记录觉醒，其余SP不自动开放；SP材料扣除继续禁止，升级继续422 `sp_huaji_upgrade_not_supported`。
 
-catalog `huaji_capabilities` 公开 `max_stage`、`has_nodes`、`awakening_supported`、`awakening_upgrade_supported`。普通 rarity=4/5 的最后一项为true，支持独立快捷觉醒；隐密和SP为false。能力表示可调用动作，不表示已经觉醒。
+catalog `huaji_capabilities` 公开 `max_stage`、`has_nodes`、`awakening_supported`、`awakening_upgrade_supported`。普通 rarity=4/5 的最后一项为true，支持独立快捷觉醒；隐密和SP的快捷扣料能力为false；上述两名SP的awakening_supported为true。能力表示可调用动作，不表示已经觉醒。
 
 本体/SP仅同步level/elite；拥有、stage、awakened、命盘、奇闻和战斗形态保持独立。缺失形态的共享占位是未拥有。规划同组共享level/elite需求取最大值并只计一次；形态目标独立。
 
@@ -22,10 +22,10 @@ v2/v3 原字段和语义继续接收，不原地更名或改版本含义。
 | 普通绝密/机密 | 25..30 | 全部stage25，永久接收30；保留已确认觉醒 |
 | 普通绝密/机密 | 31 | 只确认awakened=true；保留已确认stage，否则null；不推25/26 |
 | SP | 0/1..5 | 0/1/7/13/19/25；无awake字段不覆盖已确认值 |
-| 隐密 | 0..24 | 正常适配 |
-| 隐密 | 25/26..30/31 | 保留原值，stage/awake未知；warning/review隔离，不映射合法25/24/觉醒 |
+| 隐密 | 0..19 | 正常适配 |
+| 隐密 | 20..31 | 保留原值，stage/awake未知；warning/review隔离，不映射合法19/觉醒 |
 
-`huaji_legacy:{raw,source}` 仅供来源追溯，不能作为第二个可写事实源。已有legacy值在首次校正时保留来源；历史标量未批量更新。来源`legacy_current`表示存量文档缺少明确生产者，不冒称已确认来源。
+`huaji_legacy:{raw,source}` 仅供来源追溯，不能作为第二个可写事实源。已有legacy值在首次校正时保留来源；历史标量未批量更新。来源`legacy_current`表示存量文档缺少明确生产者，不冒称已确认来源。历史显式huaji.stage超出三星上限时，读时stage返回null，`huaji_legacy`用`historical_invalid_stage`保留原阶段；无关字段更新不覆盖存储中的原值，v4/v5导出保留追溯。
 
 旧31与新huaji同时提供时，只允许不矛盾的明确事实；冲突返回 `huaji_conflict`。旧0与已确认觉醒冲突时不抹除确认值。v2/v3没有觉醒字段的扫描不能将true/false改为unknown。
 
@@ -47,7 +47,7 @@ PATCH支持部分huaji；缺失对象/子字段保留，显式null将stage或awa
 {"expected_revision":7,"reason":"manual_correction","huaji":{"owned":true,"stage":19,"awakened":null}}
 ```
 
-该请求不扣库存。新客户端不得用31作为新huaji target。快捷化极仅到catalog终点；普通24->25消耗最后一步80心纸、展示160000五铢钱估算（沿用现行协议，钱不扣库存），不收装金玻璃；25不升26..30。快捷觉醒使用独立 `dimension=awakening,target=1`，仅已拥有的普通紫/金五星且未确认已觉醒可执行；扣对应心纸100、装金玻璃1，30万五铢钱仅估算。沿用preview/execute事务、双版本和幂等，保留stage25并写入awakened=true。非法状态返回422 `awakening_not_available`。隐密24及SP拒绝路径不写库存、revision、升级事务或消耗流水，旧token重新校验能力。
+该请求不扣库存。新客户端不得用31作为新huaji target。快捷化极仅到catalog终点；普通24->25消耗最后一步80心纸、展示160000五铢钱估算（沿用现行协议，钱不扣库存），不收装金玻璃；25不升26..30。快捷觉醒使用独立 `dimension=awakening,target=1`，仅已拥有的普通紫/金五星且未确认已觉醒可执行；扣对应心纸100、装金玻璃1，30万五铢钱仅估算。沿用preview/execute事务、双版本和幂等，保留stage25并写入awakened=true。非法状态返回422 `awakening_not_available`。隐密19及SP拒绝路径不写库存、revision、升级事务或消耗流水，旧token重新校验能力。
 
 `growth-targets`及custom规划targets支持独立huaji；与star_level不得同时提供。旧目标仍可读取，未知阶段不伪装已达成。共享level/elite目标不复制形态目标。
 
@@ -65,13 +65,15 @@ Schema：[正式v4 JSON Schema](../src/main/resources/schema/operator-growth-exc
 
 ## 5. 懒迁移与显式迁移预案（不执行）
 
-发布不会批量UPDATE/DELETE历史数据，读时适配、合法写入时保存新事实。历史隐密异常只复核，不清理、不猜到24/25。升级旧版本时不得回滚到只认识标量的业务代码再写新数据。
+发布不会批量UPDATE/DELETE历史数据，读时适配、合法写入时保存新事实。历史隐密异常只复核，不清理、不猜到19/25。升级旧版本时不得回滚到只认识标量的业务代码再写新数据。
 
 生产迁移必须另立任务、先取得用户授权，明确环境，再只读按rarity/spOf核对候选计数和来源；不输出用户标识。2026-10-12的2405条是待核实异常entry基线，不是用户数，也未由本专项复核。确认真实进度、备份和回滚方案后再决定逐条校正；旧raw/source和导入审计永久保留。
 
 本专项未访问生产或共享开发数据库。27018测试转发不证明目标可用于本任务测试，事务测试仅用本进程owned disposable Mongo。
 
-## 6. 规则证据及计算边界
+## 6. 历史规则证据及计算边界
+
+2026-10-21 后续接入已改用成熟计算器的私有规则与服务端结果，详见[面板接口与维护](./operator-panel-rules.md)。三星终点19、两名SP觉醒支持以本页当前契约为准。下述2026-10-13记录只反映当时审查，不作为现在仍使用旧Wiki白值的声明。
 
 2026-10-13读取Cal副本并实际核对`m_components.csv`（SHA-256 `3cd225accd05475cbab8b142eff06a91414f9a401d11f8cc9b9319acca3ae275`）：126密探、19994组件，124普通密探star1..25，史子眇·赴烛/陈登·黍王仅1/7/13/19/25；awake是独立组件。隐密的理论star25及SP的awake行不能证明游戏可达性或素材。
 

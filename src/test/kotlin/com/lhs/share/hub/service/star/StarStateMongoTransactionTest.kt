@@ -1,5 +1,7 @@
 package com.lhs.share.hub.service.star
 
+import com.fasterxml.jackson.databind.node.IntNode
+import com.fasterxml.jackson.databind.node.NullNode
 import com.lhs.share.hub.controller.star.request.StarInventoryEntryRequest
 import com.lhs.share.hub.controller.star.request.StarLoadoutCurrentRequest
 import com.lhs.share.hub.controller.star.request.StarStatePatchRequest
@@ -90,6 +92,34 @@ class StarStateMongoTransactionTest {
     @AfterEach fun cleanup() {
         TestMongo.dropDatabase(client, database)
         client.close()
+    }
+
+    @Test fun `legacy PATCH preserves breakthroughs explicit null clears and rebuild never inherits`() {
+        val known = main("same").copy(level = 20, breakthroughStage = IntNode(2))
+        stateService.rebuild("owner", "a", rebuild(0, 0, "pre_ocr_rebuild", listOf(known)))
+        fun patch(revision: Long, entry: StarInventoryEntryRequest) = stateService.patch(
+            "owner", "a", StarStatePatchRequest(1, revision, listOf(entry), emptyMap(), StarWorkspaceExperienceRequest(), StarWorkspaceBagRequest()),
+        )
+        val legacy = known.copy(breakthroughStage = null)
+        val preserved = patch(1, legacy)
+        assertEquals(2, preserved.state.inventory.single().breakthroughStage)
+        assertEquals(1, preserved.state.revision)
+        val cleared = patch(1, known.copy(breakthroughStage = NullNode.instance))
+        assertEquals(null, cleared.state.inventory.single().breakthroughStage)
+        patch(cleared.state.revision, known)
+        val rebuilt = stateService.rebuild("owner", "a", rebuild(1, 3, "import_data_safety", listOf(legacy)))
+        assertEquals(null, rebuilt.state.inventory.single().breakthroughStage)
+        val restored = stateService.restore("owner", "a", rebuilt.recoveryPoint!!.recoveryPointId, StarStateRestoreRequest(2, 4))
+        assertEquals(2, restored.state.inventory.single().breakthroughStage)
+    }
+
+    @Test fun `star quality limits and explicit impossible breakthroughs fail before persisting`() {
+        for (entry in listOf(main("bad").copy(quality = "white", level = 31), main("bad").copy(level = 21, breakthroughStage = IntNode(1)))) {
+            assertThrows(InventoryApiException::class.java) {
+                stateService.rebuild("owner", "a", rebuild(0, 0, "pre_ocr_rebuild", listOf(entry)))
+            }
+        }
+        assertEquals(null, states.findByUserIdAndAccountId("owner", "a"))
     }
 
     @Test fun `OCR rebuild checkpoints StarState and Loadout then restore creates a new generation`() {

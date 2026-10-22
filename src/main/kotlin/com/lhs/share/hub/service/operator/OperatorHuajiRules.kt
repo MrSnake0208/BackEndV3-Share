@@ -4,19 +4,37 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.OperatorHuaji
+import com.lhs.share.hub.repository.entity.OperatorHuajiLegacy
 import org.springframework.http.HttpStatus
 
 /** Legacy scalars are observations, never an independent second writable fact. */
 object OperatorHuajiRules {
-    fun maximum(catalog: OperatorCatalogEntity) = if (catalog.spOf == null && catalog.rarity == 3) 24 else 25
+    fun maximum(catalog: OperatorCatalogEntity) = if (catalog.spOf == null && catalog.rarity == 3) 19 else 25
 
-    fun anomalous(raw: Int, catalog: OperatorCatalogEntity) = catalog.spOf == null && catalog.rarity == 3 && raw > 24
+    fun anomalous(raw: Int, catalog: OperatorCatalogEntity) = catalog.spOf == null && catalog.rarity == 3 && raw > 19
 
-    fun read(entry: OperatorEntry, catalog: OperatorCatalogEntity?): OperatorHuaji = entry.huaji ?: when {
+    fun awakeningSupported(catalog: OperatorCatalogEntity): Boolean = catalog.rarity in 4..5 &&
+        (catalog.spOf == null || catalog.operatorId in setOf("char_084_chendengsp", "char_085_shizimiaosp"))
+
+    fun read(entry: OperatorEntry, catalog: OperatorCatalogEntity?): OperatorHuaji = entry.huaji?.let { value ->
+        if (catalog != null && value.stage?.let { anomalous(it, catalog) } == true) value.copy(stage = null) else value
+    } ?: when {
         catalog == null -> OperatorHuaji(entry.starLevel > 0, if (entry.starLevel == 0) 0 else null, null)
         entry.starLevel !in 0..(if (catalog.spOf == null) 31 else 5) -> OperatorHuaji(entry.starLevel > 0, null, null)
         else -> legacy(entry.starLevel, catalog)
     }
+
+    fun trace(entry: OperatorEntry, catalog: OperatorCatalogEntity?): OperatorHuajiLegacy {
+        val stage = entry.huaji?.stage
+        return if (catalog != null && stage != null && anomalous(stage, catalog)) {
+            OperatorHuajiLegacy(stage, "historical_invalid_stage")
+        } else {
+            entry.huajiLegacy ?: OperatorHuajiLegacy(entry.starLevel, "legacy_current")
+        }
+    }
+
+    fun forDisplay(entry: OperatorEntry, catalog: OperatorCatalogEntity?): OperatorEntry =
+        entry.copy(huaji = read(entry, catalog), huajiLegacy = trace(entry, catalog))
 
     fun legacy(raw: Int, catalog: OperatorCatalogEntity, prior: OperatorHuaji? = null): OperatorHuaji {
         if (raw !in 0..(if (catalog.spOf == null) 31 else 5)) fail("invalid_star_level")
@@ -53,7 +71,7 @@ object OperatorHuajiRules {
         }
         val result = OperatorHuaji(owned, stage, awakened)
         validate(result, catalog)
-        if (node.path("awakened").asBoolean(false) && (catalog.spOf != null || catalog.rarity == 3)) fail("awakening_not_supported")
+        if (node.path("awakened").asBoolean(false) && !awakeningSupported(catalog)) fail("awakening_not_supported")
         return result
     }
 

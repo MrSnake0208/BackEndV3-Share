@@ -173,6 +173,7 @@ class OperatorController(
         description = "无需登录；仅返回当前分享代码对应子账号的已招募客观养成数据，不缓存响应。",
     )
     @GetMapping("/share/view/{shareCode}")
+    @com.lhs.share.config.accesslimit.AccessLimit(times = 30, second = 60)
     fun viewShare(@PathVariable shareCode: String): ResponseEntity<ApiResult<OperatorShareViewResponse>> {
         return ResponseEntity.ok()
             .header("Cache-Control", "no-store")

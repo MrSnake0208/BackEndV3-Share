@@ -35,7 +35,7 @@ class StarShareServiceTest {
 
     private val accounts = mockk<SubAccountRepository>()
     private val states = mockk<StarStateCurrentRepository>()
-    private val service = StarShareService(OperatorShareService(accounts, mockk(), mockk(), mockk(), mockk()), states)
+    private val service = StarShareService(OperatorShareService(accounts, mockk(), mockk(), mockk(), mockk(), mockk()), states)
     private val account =
         SubAccount(userId = "owner", accountId = "a", name = "Private name", game = "如鸢", shareToken = "code", shareScopes = listOf("star"))
     private fun state(generation: Long, level: Int) = StarStateCurrent(
@@ -65,7 +65,7 @@ class StarShareServiceTest {
             JavaTimeModule(),
         ).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE).valueToTree<com.fasterxml.jackson.databind.JsonNode>(latest)
         assertEquals(setOf("game", "available_views", "has_state", "updated_at", "inventory"), json.fieldNames().asSequence().toSet())
-        json["inventory"].forEach { assertEquals(setOf("kind", "name", "quality", "level"), it.fieldNames().asSequence().toSet()) }
+        json["inventory"].forEach { assertEquals(setOf("kind", "name", "quality", "level", "breakthrough_stage"), it.fieldNames().asSequence().toSet()) }
         assertFalse(json.toString().contains("private"))
         verify(exactly = 2) { states.findByUserIdAndAccountId("owner", "a") }
     }

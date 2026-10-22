@@ -96,6 +96,19 @@ class StarCompletionService(
                         if (star.level != selected.currentLevel) {
                             conflict("star_level_changed", "Selected instance level changed")
                         }
+                        val startingStage = try {
+                            StarBreakthroughRules.completed(star.level, star.quality, selected.startAlreadyBroken == true)
+                        } catch (_: IllegalArgumentException) {
+                            invalid("Starting breakthrough does not match star level and quality")
+                        }
+                        if (star.breakthroughStage != null && star.breakthroughStage != startingStage) {
+                            conflict("star_breakthrough_changed", "Starting breakthrough disagrees with the recorded state")
+                        }
+                        try {
+                            StarBreakthroughRules.completed(selected.targetLevel!!, star.quality, selected.targetAlsoBroken == true)
+                        } catch (_: IllegalArgumentException) {
+                            invalid("Target breakthrough does not match star level and quality")
+                        }
                         if (plans[selected.instanceId] !=
                             selected.targetLevel
                         ) {
@@ -140,7 +153,12 @@ class StarCompletionService(
                     val selected = request.stars.associateBy { it.instanceId }
                     val next = current.snapshot().copy(
                         inventory = current.inventory.map { star ->
-                            selected[star.instanceId]?.let { star.copy(level = it.targetLevel!!) }
+                            selected[star.instanceId]?.let {
+                                star.copy(
+                                    level = it.targetLevel!!,
+                                    breakthroughStage = StarBreakthroughRules.completed(it.targetLevel, star.quality, it.targetAlsoBroken == true),
+                                )
+                            }
                                 ?: star
                         },
                         planTargets = current.planTargets.filter { it.instanceId !in selected },

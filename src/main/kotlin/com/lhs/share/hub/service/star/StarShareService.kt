@@ -17,7 +17,7 @@ class StarShareService(private val shares: OperatorShareService, private val sta
             account.effectiveShareScopes().filter { it in setOf("operator", "star") },
             state != null,
             state?.updatedAt,
-            state?.inventory.orEmpty().map { StarShareEntry(it.kind, it.name, it.quality, it.level) },
+            state?.inventory.orEmpty().map { StarShareEntry(it.kind, it.name, it.quality, it.level, it.breakthroughStage) },
         )
     }
 }

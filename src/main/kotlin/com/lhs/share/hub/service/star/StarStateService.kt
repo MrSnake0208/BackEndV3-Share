@@ -58,7 +58,7 @@ class StarStateService(
             checkVersion(current, expectedGeneration, expectedRevision)
             val incomingIds = request.inventory?.map { it.instanceId }?.toSet().orEmpty()
             val removedIds = current?.inventory.orEmpty().map { it.instanceId }.toSet() - incomingIds
-            val next = normalize(request.inventory, request.planTargets?.filterKeys { it !in removedIds }, request.experience, request.bag)
+            val next = normalize(request.inventory, request.planTargets?.filterKeys { it !in removedIds }, request.experience, request.bag, current?.inventory.orEmpty())
             val oldKinds = current?.inventory.orEmpty().associate { it.instanceId to it.kind }
             if (next.inventory.any { oldKinds[it.instanceId]?.let { oldKind -> oldKind != it.kind } == true }) {
                 throw invalid("Changing a star's kind in place is not allowed; delete and create a new instance")
@@ -232,10 +232,17 @@ class StarStateService(
         })
     }
 
-    private fun normalize(inventory: List<StarInventoryEntryRequest>?, targets: Map<String, Int>?, experience: StarWorkspaceExperienceRequest?, bag: StarWorkspaceBagRequest?): StarStateSnapshot {
+    private fun normalize(
+        inventory: List<StarInventoryEntryRequest>?,
+        targets: Map<String, Int>?,
+        experience: StarWorkspaceExperienceRequest?,
+        bag: StarWorkspaceBagRequest?,
+        previousInventory: List<StarStateEntry> = emptyList(),
+    ): StarStateSnapshot {
         val entries = inventory ?: throw invalid("inventory is required")
         if (entries.size > 1000) throw invalid("inventory exceeds 1000 entries")
         val seen = HashSet<String>()
+        val previousById = previousInventory.associateBy { it.instanceId }
         val normalizedEntries = entries.map { entry ->
             if (!INSTANCE_ID.matches(entry.instanceId) || !seen.add(entry.instanceId)) throw invalid("instance_id must be unique and valid")
             if (entry.kind !in setOf("main", "support")) throw invalid("star kind is invalid")
@@ -244,7 +251,27 @@ class StarStateService(
             if (entry.quality !in setOf("orange", "purple", "blue", "green", "white")) throw invalid("star quality is invalid")
             val level = entry.level ?: throw invalid("star level is required")
             if (level !in 1..60) throw invalid("star level is invalid")
-            StarStateEntry(entry.instanceId, entry.kind, name, entry.quality, level)
+            val previous = previousById[entry.instanceId]
+            val unchanged = previous != null && previous.kind == entry.kind && previous.name == name &&
+                previous.quality == entry.quality && previous.level == level
+            val raw = entry.breakthroughStage
+            // Keep historical facts during unrelated legacy PATCHes, including values needing review.
+            if (raw == null && unchanged) {
+                previous!!
+            } else {
+                val allowed = try {
+                    StarBreakthroughRules.allowed(level, entry.quality)
+                } catch (_: IllegalArgumentException) {
+                    throw invalid("star level exceeds its quality limit")
+                }
+                val stage = when {
+                    raw == null -> StarBreakthroughRules.inferred(level, entry.quality)
+                    raw.isNull -> null
+                    raw.isIntegralNumber && raw.canConvertToInt() && raw.intValue() in allowed -> raw.intValue()
+                    else -> throw invalid("breakthrough_stage must match star level and quality")
+                }
+                StarStateEntry(entry.instanceId, entry.kind, name, entry.quality, level, stage)
+            }
         }.sortedBy { it.instanceId }
         val plan = targets ?: throw invalid("plan_targets is required")
         if (plan.size > 1000) throw invalid("plan_targets exceeds 1000 entries")

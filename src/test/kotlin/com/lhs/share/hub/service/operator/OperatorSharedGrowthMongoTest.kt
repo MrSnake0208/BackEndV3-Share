@@ -21,7 +21,6 @@ import com.lhs.share.hub.service.star.StarStateService
 import com.lhs.share.testinfra.TestMongo
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.spyk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -70,6 +69,7 @@ class OperatorSharedGrowthMongoTest {
         mapper, OperatorV3SchemaValidator(mapper), accounts, catalog, service, audits,
         mockk<AccountEventService>(relaxed = true), mockk<OperatorScanReviewRepository>(relaxed = true),
         transactionTemplate = transactions,
+        subjectiveService = mockk(relaxed = true),
     )
 
     @BeforeEach
@@ -343,7 +343,7 @@ class OperatorSharedGrowthMongoTest {
         val hidden = catalog.getOperator("base")!!.copy(operatorId = "hidden", rarity = 3)
         every { catalog.getOperator("hidden") } returns hidden
         every { catalog.spFormsOf("hidden") } returns emptyList()
-        for (raw in listOf(25, 30, 31)) {
+        for (raw in listOf(20, 24, 25, 30, 31)) {
             val command = document("hidden-$raw")
             val record = command.path("document").path("records").get(0) as ObjectNode
             record.put("source_kind", "backup")
@@ -362,6 +362,36 @@ class OperatorSharedGrowthMongoTest {
             assertEquals(raw, mapper.readTree(audit.payload).path("entries").get(0).path("star_level").asInt())
             assertEquals(1, imports.commitBrowser("owner", command).review)
         }
+    }
+
+    @Test
+    fun `three star historical normalized nodes survive unrelated PATCH and export as review trace`() {
+        val hidden = catalog.getOperator("base")!!.copy(rarity = 3)
+        every { catalog.getOperator("base") } returns hidden
+        every { catalog.spFormsOf("base") } returns emptyList()
+        val before = current.findById("state").orElseThrow()
+        val historical = before.entries.getValue("base").copy(starLevel = 22, huaji = com.lhs.share.hub.repository.entity.OperatorHuaji(true, 22, null))
+        current.save(before.copy(entries = mapOf("base" to historical)))
+        val request = mapper.readTree("""{"expected_revision":7,"reason":"manual_correction","elite":17}""") as ObjectNode
+        val shown = service.patchCurrent("owner", "account", "如鸢", "base", request)
+        assertNull(shown.huaji?.stage)
+        assertEquals(22, shown.huajiLegacy?.raw)
+        val stored = current.findById("state").orElseThrow().entries.getValue("base")
+        assertEquals(22, stored.huaji?.stage)
+        assertEquals(22, stored.starLevel)
+        val annotations = mockk<com.lhs.share.hub.repository.OperatorAnnotationRepository>()
+        val targets = mockk<com.lhs.share.hub.repository.OperatorGrowthTargetRepository>()
+        val favorites = mockk<com.lhs.share.hub.repository.InventoryAgentFavoriteRepository>()
+        every { annotations.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(any(), any()) } returns emptyList()
+        every { targets.findAllByUserIdAndAccountIdOrderByOperatorIdAsc(any(), any()) } returns emptyList()
+        every { favorites.findAllByUserIdAndAccountIdOrderByAgentIdAsc(any(), any()) } returns emptyList()
+        every { catalog.currentCatalogVersion() } returns "test"
+        val exports = OperatorV3ExportService(mapper, accounts, current, annotations, targets, favorites, catalog)
+        val document = exports.export("owner", "account", null, 5)
+        OperatorV3SchemaValidator(mapper).validate(document)
+        val exported = document.path("records")[0].path("entries")[0]
+        assertEquals(true, exported.path("huaji").path("stage").isNull)
+        assertEquals(22, exported.path("huaji_legacy").path("raw").asInt())
     }
 
     @Test
@@ -451,15 +481,17 @@ class OperatorSharedGrowthMongoTest {
                 accountId = "account",
                 entityType = "agent",
                 entries = mapOf("base" to com.lhs.share.hub.repository.entity.StockEntry(500)),
+                updatedAt = Instant.EPOCH,
             ),
         )
         val awakeningRequest = request.copy(dimension = "awakening", target = 1, expectedOperatorRevision = 8)
         val beforeAwakening = current.findById("state").orElseThrow()
         val stockBeforeAwakening = inventories.findAll().associateBy { it.id }
         val correctionsBefore = corrections.count()
-        val failingUpgrades = spyk(upgrades)
-        every { failingUpgrades.save(any<com.lhs.share.hub.repository.entity.OperatorUpgradeTransaction>()) } throws
-            IllegalStateException("injected late write failure")
+        val failingUpgrades = object : com.lhs.share.hub.repository.OperatorUpgradeTransactionRepository by upgrades {
+            override fun <S : com.lhs.share.hub.repository.entity.OperatorUpgradeTransaction> save(entity: S): S =
+                throw IllegalStateException("injected late write failure")
+        }
         val failingService = OperatorUpgradeService(
             accounts, catalog, current, inventories, inventoryRecords, revisions, failingUpgrades,
             mockk<AccountEventService>(relaxed = true), transactions, corrections,
