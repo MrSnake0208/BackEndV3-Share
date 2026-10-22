@@ -57,6 +57,7 @@ data class OperatorShareDiscLoadout(
     val id: String,
     val name: String,
     val discs: List<OperatorShareDisc>,
+    val status: String = "unmarked",
 )
 
 data class OperatorShareDisc(

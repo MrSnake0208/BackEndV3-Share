@@ -219,6 +219,7 @@ class OperatorShareService(
             OperatorShareDiscLoadout(
                 id = loadout.id,
                 name = loadout.name,
+                status = loadout.status,
                 discs = loadout.discs.map { disc ->
                     OperatorShareDisc(disc.otName, disc.abbreviation, disc.color, disc.desp)
                 },
