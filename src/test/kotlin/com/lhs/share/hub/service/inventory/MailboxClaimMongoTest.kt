@@ -107,6 +107,43 @@ class MailboxClaimMongoTest {
 
     private fun balance(id: String) = current.findByUserIdAndAccountIdAndEntityType("owner", "main", "item")!!.entries[id]?.count ?: 0L
 
+    private fun selected(coins: String = "1,0", tickets: String = "1", operation: String = "partial", version: Long = 1) =
+        mapper.readTree("""{"expected_version":$version,"operation_id":"$operation","selection":{"white_coin_mail_counts":[$coins],"fu_chuan_mail_count":$tickets}}""")
+
+    @Test
+    fun `partial claim keeps unclaimed groups and retries cannot increase stock twice`() {
+        val command = selected(operation = "a".repeat(64))
+        val response = service.claim("owner", "main", command)
+        assertEquals(listOf(1, 1), response.whiteCoinMails.map { it.count })
+        assertEquals(listOf(65, 90), response.whiteCoinMails.map { it.coinsPerMail })
+        assertEquals(1, response.fuChuanMailCount)
+        assertEquals(10065L, balance("baijinbi"))
+        assertEquals(3L, balance("fuchuan"))
+        repeat(2) { service.claim("owner", "main", command) }
+        assertEquals(10065L, balance("baijinbi"))
+        val receipt = records.findAll().single { it.recordType == "reward_delta" }
+        assertTrue(receipt.recordId.length <= 128)
+        assertThrows(InventoryApiException::class.java) { service.claim("owner", "main", selected("0,1", operation = "a".repeat(64))) }
+        assertEquals(10065L, balance("baijinbi"))
+        service.claim("owner", "main", selected("1,1", "1", version = 2))
+        assertEquals(10220L, balance("baijinbi"))
+        assertEquals(6L, balance("fuchuan"))
+        assertEquals(listOf(0, 0), accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve!!.whiteCoinMails.map { it.count })
+    }
+
+    @Test
+    fun `invalid selections cannot alter stock or reserves`() {
+        listOf(
+            selected("3,0"), selected("1"), selected("1,0,0"), selected("-1,0"), selected("0.5,0"),
+            selected("0,0", "0"), selected(tickets = "3"), selected(tickets = "null"),
+            mapper.readTree("""{"expected_version":1,"operation_id":"bad","selection":null}"""),
+            mapper.readTree("""{"expected_version":1,"operation_id":"bad","selection":{"white_coin_mail_counts":[1,0],"fu_chuan_mail_count":1,"extra":1}}"""),
+        ).forEach { invalid -> assertThrows(InventoryApiException::class.java) { service.claim("owner", "main", invalid) } }
+        assertEquals(reserve, accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve)
+        assertEquals(10000L, balance("baijinbi"))
+        assertEquals(1L, records.count())
+    }
+
     @Test
     fun `claim atomically clears reserve and records real amounts and retries never apply twice`() {
         val response = service.claim("owner", "main", body())

@@ -14,8 +14,10 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.HexFormat
 
 @Service
 class MailboxClaimService(
@@ -28,13 +30,27 @@ class MailboxClaimService(
     fun claim(userId: String, accountId: String, body: JsonNode): MailboxReserveResponse {
         val version = body.path("expected_version")
         val operation = body.path("operation_id")
-        if (!body.isObject || body.fieldNames().asSequence().toSet() != setOf("expected_version", "operation_id") ||
+        val selection = body.get("selection")
+        val fields = setOf("expected_version", "operation_id") + if (selection != null) setOf("selection") else emptySet()
+        if (!body.isObject || body.fieldNames().asSequence().toSet() != fields ||
             !version.isIntegralNumber || !version.canConvertToLong() || version.longValue() !in 0L until 9007199254740991L ||
             !operation.isTextual || !Regex("[A-Za-z0-9._-]{1,64}").matches(operation.textValue())
         ) {
             invalid("邮件领取参数无效，请重新读取储备")
         }
-        val recordId = "yuanhub:mail:${version.longValue()}:${operation.textValue()}"
+        if (selection != null && (
+                !selection.isObject || selection.fieldNames().asSequence().toSet() != setOf("white_coin_mail_counts", "fu_chuan_mail_count") ||
+                    !selection.path("white_coin_mail_counts").isArray || selection.path("white_coin_mail_counts").size() > 20 ||
+                    selection.path("white_coin_mail_counts").any { !validCount(it) } || !validCount(selection.path("fu_chuan_mail_count"))
+                )
+        ) invalid("请选择正确的邮件领取封数")
+        val chosenCoins = selection?.path("white_coin_mail_counts")?.map { it.intValue() }
+        val chosenTickets = selection?.path("fu_chuan_mail_count")?.intValue()
+        // Selection is part of the receipt ID, so changing a timed-out request cannot falsely confirm another claim.
+        val suffix = if (chosenCoins == null) "" else ":" + HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest((chosenCoins.joinToString(",") + ":" + chosenTickets).toByteArray()), 0, 16,
+        )
+        val recordId = "yuanhub:mail:${version.longValue()}:${operation.textValue()}$suffix"
         return checkNotNull(
             transactions.execute {
                 val account = accounts.findByUserIdAndAccountId(userId, accountId)
@@ -47,8 +63,13 @@ class MailboxClaimService(
                     conflict("领取记录已删除，请到最近记录恢复，不要重新领取")
                 }
                 if (reserve.version != version.longValue()) conflict("邮件储备已变更，请重新读取后核对")
-                val coins = reserve.whiteCoinMails.sumOf { it.count.toLong() * it.coinsPerMail }
-                val tickets = reserve.fuChuanMailCount.toLong() * 3
+                val coinCounts = chosenCoins ?: reserve.whiteCoinMails.map { it.count }
+                val ticketCount = chosenTickets ?: reserve.fuChuanMailCount
+                if (coinCounts.size != reserve.whiteCoinMails.size ||
+                    coinCounts.zip(reserve.whiteCoinMails).any { (count, row) -> count > row.count } || ticketCount > reserve.fuChuanMailCount
+                ) invalid("领取封数不能超过已保存储备")
+                val coins = coinCounts.zip(reserve.whiteCoinMails).sumOf { (count, row) -> count.toLong() * row.coinsPerMail }
+                val tickets = ticketCount.toLong() * 3
                 if (coins > Int.MAX_VALUE || tickets > Int.MAX_VALUE) invalid("邮件奖励超过支持上限，请分批维护储备")
                 val entries = buildList {
                     if (coins > 0) add(InventoryEntryRequest("baijinbi", "白金币", coins))
@@ -57,8 +78,8 @@ class MailboxClaimService(
                 if (entries.isEmpty()) invalid("没有可记录领取的邮件奖励")
                 val now = Instant.now().truncatedTo(ChronoUnit.MILLIS)
                 val cleared = reserve.copy(
-                    whiteCoinMails = reserve.whiteCoinMails.map { it.copy(count = 0) },
-                    fuChuanMailCount = 0,
+                    whiteCoinMails = reserve.whiteCoinMails.mapIndexed { index, row -> row.copy(count = row.count - coinCounts[index]) },
+                    fuChuanMailCount = reserve.fuChuanMailCount - ticketCount,
                     version = reserve.version + 1,
                     updatedAt = now,
                 )
@@ -89,6 +110,8 @@ class MailboxClaimService(
             },
         )
     }
+
+    private fun validCount(value: JsonNode): Boolean = value.isIntegralNumber && value.canConvertToInt() && value.intValue() in 0..1000000
 
     private fun invalid(message: String): Nothing =
         throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", message)
