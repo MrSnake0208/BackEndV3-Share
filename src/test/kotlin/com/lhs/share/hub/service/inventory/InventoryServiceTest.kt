@@ -22,6 +22,7 @@ import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.SubAccount
+import com.mongodb.MongoException
 import com.mongodb.client.AggregateIterable
 import com.mongodb.client.MongoCollection
 import com.mongodb.client.MongoCursor
@@ -89,6 +90,19 @@ class InventoryServiceTest {
         nextRecordId = 1
         every { catalogService.exists(any(), any()) } returns true
         every { catalogService.agentMatchesGame(any(), any()) } returns true
+        every { catalogService.existsReadOnly(any(), any()) } returns true
+        every { catalogService.agentMatchesGameReadOnly(any(), any()) } returns true
+        every { accountRepository.fenceRecruitmentWrite(any(), any(), any()) } returns true
+        every { revisionRepository.compareAndIncrement(any(), any(), any(), any()) } answers {
+            val key = firstArg<String>() to secondArg<String>()
+            val expected = thirdArg<Long>()
+            if ((revisions[key]?.revision ?: 0L) != expected) {
+                null
+            } else {
+                InventoryRevision(id = "${key.first}:${key.second}", userId = key.first, accountId = key.second, revision = expected + 1)
+                    .also { revisions[key] = it }
+            }
+        }
         every { catalogService.catalog() } returns InventoryCatalogResponse(catalogVersion = "2026-08-16", entities = emptyList())
         every { accountRepository.findByUserIdAndAccountId(any(), any()) } answers {
             accounts[firstArg<String>() to secondArg<String>()]
@@ -171,6 +185,92 @@ class InventoryServiceTest {
             mongoTemplate,
             transactionTemplate,
             revisionRepository,
+        )
+    }
+
+    @Test
+    fun `pending concurrent writer keeps annotation result unknown until a revision change is visible`() {
+        service.import("u1", document(snapshot("base", "2026-10-23T10:00:00Z", "full", InventoryEntryRequest("baijinbi", count = 100))))
+        val request = document(reward("annotation", "2026-10-23T09:00:00Z", "baijinbi", 3))
+        val expected = checkNotNull(revisions["u1" to "main"]).revision
+        every { revisionRepository.compareAndIncrement(any(), any(), any(), any()) } throws MongoException(112, "WriteConflict")
+        val error = assertThrows(InventoryApiException::class.java) { service.annotateRewards("u1", request, expected) }
+        assertEquals("annotation_result_unknown", error.code)
+        assertEquals(503, error.status.value())
+        assertEquals(null, records[Triple("u1", "main", "annotation")])
+        revisions["u1" to "main"] = checkNotNull(revisions["u1" to "main"]).copy(revision = expected + 1)
+        assertEquals(
+            "inventory_state_stale",
+            assertThrows(InventoryApiException::class.java) {
+                service.annotateRewards("u1", request, expected)
+            }.code,
+        )
+    }
+
+    @Test
+    fun `annotation preview covers all entries without writes or catalog seeding`() {
+        service.import("u1", document(snapshot("base", "2026-10-23T10:00:00Z", "listed", InventoryEntryRequest("baijinbi", count = 100))))
+        val before = revisions["u1" to "main"]
+        val request = document(
+            reward("annotation", "2026-10-23T09:00:00Z", "baijinbi", 3).copy(
+                entries = listOf(InventoryEntryRequest("baijinbi", count = 3), InventoryEntryRequest("zhuyu", count = 1)),
+            ),
+        )
+        val preview = service.previewRewardAnnotations("u1", request)
+        assertEquals(listOf(true, false), preview.entries.map { it.historyOnly })
+        assertEquals(false, preview.canConfirm)
+        assertEquals(null, preview.entries.last().baselineAt)
+        assertEquals(before, revisions["u1" to "main"])
+        assertEquals(1, records.size)
+        verify(exactly = 0) { catalogService.exists("item", "zhuyu") }
+    }
+
+    @Test
+    fun `annotations keep stock unchanged and exact retry ignores old revision without bumping it`() {
+        service.import("u1", document(snapshot("base", "2026-10-23T10:00:00Z", "full", InventoryEntryRequest("baijinbi", count = 100))))
+        val request = document(reward("annotation", "2026-10-23T09:00:00Z", "baijinbi", 3))
+        val preview = service.previewRewardAnnotations("u1", request)
+        assertEquals(true, preview.canConfirm)
+        val before = currents.toMap()
+        assertEquals(1, service.annotateRewards("u1", request, preview.expectedInventoryRevision).historyOnly)
+        val revision = revisions["u1" to "main"]
+        assertEquals(before, currents)
+        assertEquals(1, service.annotateRewards("u1", request, preview.expectedInventoryRevision).duplicates)
+        assertEquals(revision, revisions["u1" to "main"])
+        assertEquals("history_only", records[Triple("u1", "main", "annotation")]?.stockEffect)
+        assertEquals(
+            "record_conflict",
+            assertThrows(InventoryApiException::class.java) {
+                service.annotateRewards(
+                    "u1",
+                    document(request.records.single().copy(entries = listOf(InventoryEntryRequest("baijinbi", count = 4)))),
+                    0,
+                )
+            }.code,
+        )
+    }
+
+    @Test
+    fun `annotation rejects applied duplicates and non reward or mixed account documents`() {
+        val request = document(reward("applied", "2026-10-23T09:00:00Z", "baijinbi", 3))
+        service.import("u1", request)
+        assertEquals(
+            "annotation_would_change_stock",
+            assertThrows(InventoryApiException::class.java) {
+                service.annotateRewards("u1", request, 0)
+            }.code,
+        )
+        assertEquals(
+            "schema_validation_failed",
+            assertThrows(InventoryApiException::class.java) {
+                service.previewRewardAnnotations("u1", document(request.records.single(), request.records.single().copy(accountId = "alt")))
+            }.code,
+        )
+        assertEquals(
+            "schema_validation_failed",
+            assertThrows(InventoryApiException::class.java) {
+                service.previewRewardAnnotations("u1", document(snapshot("base", "2026-10-23T10:00:00Z", "full")))
+            }.code,
         )
     }
 

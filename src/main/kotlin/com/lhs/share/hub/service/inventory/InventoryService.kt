@@ -6,6 +6,8 @@ import com.lhs.share.hub.controller.inventory.request.ProducerDto
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryItem
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAnnotationEntry
+import com.lhs.share.hub.controller.inventory.response.InventoryAnnotationPreview
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportAccountDto
 import com.lhs.share.hub.controller.inventory.response.InventoryExportEntryDto
@@ -26,6 +28,7 @@ import com.lhs.share.hub.repository.entity.InventoryRevision
 import com.lhs.share.hub.repository.entity.ProducerInfo
 import com.lhs.share.hub.repository.entity.RecordEntry
 import com.lhs.share.hub.repository.entity.StockEntry
+import com.mongodb.MongoException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.bson.Document
 import org.springframework.beans.factory.annotation.Qualifier
@@ -94,46 +97,118 @@ class InventoryService(
             "applied",
         )
 
+    fun previewRewardAnnotations(userId: String, request: InventoryImportRequest): InventoryAnnotationPreview {
+        val accountId = annotationAccount(request)
+        validateDocument(request)
+        val games = validateAccounts(userId, request, accountId)
+        val revision = checkNotNull(inventoryRevisionRepository).findByUserIdAndAccountId(userId, accountId)?.revision ?: 0L
+        val prepared = prepareRecords(userId, validateAndSort(request), games, mutableSetOf(), annotation = true, readOnly = true)
+        val entries = prepared.flatMap { annotationEntries(userId, it.validated) }
+        return InventoryAnnotationPreview(revision, entries, entries.all { it.historyOnly })
+    }
+
+    fun annotateRewards(userId: String, request: InventoryImportRequest, expectedInventoryRevision: Long): InventoryImportResult {
+        if (expectedInventoryRevision !in 0..9007199254740990L) throw schemaError("Invalid inventory revision")
+        return import(userId, request, annotationAccount(request), annotationRevision = expectedInventoryRevision)
+    }
+
+    private fun annotationAccount(request: InventoryImportRequest): String {
+        val ids = request.records.map { it.accountId }.toSet()
+        if (ids.size != 1 || request.records.any { it.recordType != REWARD_DELTA } ||
+            request.accounts.orEmpty().any { it.id !in ids }
+        ) {
+            throw schemaError("Reward annotations require reward_delta records for one account")
+        }
+        return ids.single()
+    }
+
+    private fun annotationEntries(userId: String, validated: ValidatedRecord): List<InventoryAnnotationEntry> {
+        val record = validated.record
+        val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, record.accountId, record.entityType)
+        return record.entries.map { entry ->
+            val baseline = maxOfNotNull(current?.fullBaselineAt, current?.entries?.get(entry.id)?.listedBaselineAt)
+            InventoryAnnotationEntry(
+                record.recordId,
+                record.entityType,
+                entry.id,
+                baseline,
+                validated.effectiveAt,
+                existing?.stockEffect == "history_only" || (baseline != null && !validated.effectiveAt.isAfter(baseline)),
+            )
+        }
+    }
+
+    private fun annotationRejected(record: InventoryRecord, entryId: String): Nothing {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(record.userId, record.accountId, record.entityType)
+        val baseline = maxOfNotNull(current?.fullBaselineAt, current?.entries?.get(entryId)?.listedBaselineAt)
+        throw InventoryApiException(
+            HttpStatus.CONFLICT,
+            if (baseline == null) "annotation_baseline_missing" else "annotation_would_change_stock",
+            "${record.entries.first { it.id == entryId }.name ?: entryId}未被库存盘点覆盖，请回到盘点核对实际领取时间和库存后再补记",
+            record.recordId,
+            entryId,
+        )
+    }
+
+    private fun annotationStale(): Nothing = throw InventoryApiException(
+        HttpStatus.CONFLICT,
+        "inventory_state_stale",
+        "库存盘点已变化，请回到盘点核对，再重新预览补记",
+    )
+
     private fun import(
         userId: String,
         request: InventoryImportRequest,
         restrictedAccountId: String?,
         sourceConnectionId: String? = null,
+        annotationRevision: Long? = null,
     ): InventoryImportResult {
-        if (request.format != FORMAT) {
-            throw schemaError("format must be $FORMAT")
-        }
-        if (request.version != SUPPORTED_VERSION) {
-            throw InventoryApiException(
-                HttpStatus.UNPROCESSABLE_ENTITY,
-                "unsupported_version",
-                "Unsupported inventory exchange version: ${request.version}",
-            )
-        }
-        parseInstant(request.exportedAt, "exported_at")
-        validateProducer(request.producer)
-        if (request.catalogVersion != null && request.catalogVersion.isEmpty()) {
-            throw schemaError("catalog_version must not be empty")
-        }
-
+        validateDocument(request)
         val accountGames = validateAccounts(userId, request, restrictedAccountId)
         val ordered = validateAndSort(request)
         repeat(MAX_TRANSACTION_ATTEMPTS) { attempt ->
             try {
                 val warnings = mutableSetOf<String>()
-                val prepared = prepareRecords(userId, ordered, accountGames, warnings)
+                val prepared = prepareRecords(userId, ordered, accountGames, warnings, annotationRevision != null)
                 return checkNotNull(
                     transactionTemplate.execute {
+                        val transactionRecords = if (annotationRevision == null) {
+                            prepared
+                        } else {
+                            val games = validateAccounts(userId, request, restrictedAccountId)
+                            if (games != accountGames) annotationStale()
+                            prepareRecords(userId, ordered, games, warnings, annotation = true)
+                        }
+                        if (annotationRevision != null && transactionRecords.any { !it.duplicate }) {
+                            val accountId = checkNotNull(restrictedAccountId)
+                            if (!accountRepository.fenceRecruitmentWrite(userId, accountId, accountGames.getValue(accountId))) {
+                                annotationStale()
+                            }
+                            if (checkNotNull(inventoryRevisionRepository)
+                                    .compareAndIncrement(userId, accountId, annotationRevision, Instant.now()) == null
+                            ) {
+                                annotationStale()
+                            }
+                        }
                         var accepted = 0
                         var duplicates = 0
                         var historyOnly = 0
                         var superseded = 0
                         val changedAccounts = mutableSetOf<String>()
-                        prepared.forEach { item ->
+                        transactionRecords.forEach { item ->
                             if (item.duplicate) {
                                 duplicates++
                             } else {
-                                when (applyRecord(userId, request.producer, item.validated, sourceConnectionId)) {
+                                when (
+                                    applyRecord(
+                                        userId,
+                                        request.producer,
+                                        item.validated,
+                                        sourceConnectionId,
+                                        annotationRevision != null,
+                                    )
+                                ) {
                                     Effect.HISTORY_ONLY -> {
                                         historyOnly++
                                         accepted++
@@ -155,11 +230,62 @@ class InventoryService(
                     },
                 )
             } catch (e: DuplicateKeyException) {
-                if (attempt == MAX_TRANSACTION_ATTEMPTS - 1) throw e
+                if (attempt == MAX_TRANSACTION_ATTEMPTS - 1) {
+                    if (annotationRevision !=
+                        null
+                    ) {
+                        return resolveAnnotationConflict(userId, request, accountGames, ordered, annotationRevision)
+                    }
+                    throw e
+                }
                 log.info { "Concurrent inventory import detected; retrying preflight for userId=$userId" }
+            } catch (e: Exception) {
+                if (annotationRevision != null) {
+                    val mongo = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<MongoException>().toList()
+                    if (mongo.any { it.hasErrorLabel("UnknownTransactionCommitResult") }) {
+                        throw InventoryApiException(HttpStatus.SERVICE_UNAVAILABLE, "annotation_result_unknown", "补记结果尚未确认，请原样重试")
+                    }
+                    if (mongo.any { it.code == 112 || it.hasErrorLabel("TransientTransactionError") } ||
+                        (e is InventoryApiException && e.code == "inventory_state_stale")
+                    ) {
+                        return resolveAnnotationConflict(userId, request, accountGames, ordered, annotationRevision)
+                    }
+                }
+                throw e
             }
         }
         error("Unreachable")
+    }
+
+    private fun resolveAnnotationConflict(
+        userId: String,
+        request: InventoryImportRequest,
+        games: Map<String, String>,
+        ordered: List<ValidatedRecord>,
+        expectedRevision: Long,
+    ): InventoryImportResult {
+        val accountId = annotationAccount(request)
+        val latestGames = validateAccounts(userId, request, accountId)
+        // Read revision before records so a committed exact retry is visible with its revision.
+        val revision = checkNotNull(inventoryRevisionRepository).findByUserIdAndAccountId(userId, accountId)?.revision ?: 0L
+        val prepared = prepareRecords(userId, ordered, latestGames, mutableSetOf(), annotation = true, readOnly = true)
+        if (prepared.all { it.duplicate }) return InventoryImportResult(accepted = 0, duplicates = prepared.size)
+        if (revision != expectedRevision || latestGames != games) annotationStale()
+        throw InventoryApiException(HttpStatus.SERVICE_UNAVAILABLE, "annotation_result_unknown", "另一次库存提交尚未确认，请保持原文档重试")
+    }
+
+    private fun validateDocument(request: InventoryImportRequest) {
+        if (request.format != FORMAT) throw schemaError("format must be $FORMAT")
+        if (request.version != SUPPORTED_VERSION) {
+            throw InventoryApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "unsupported_version",
+                "Unsupported inventory exchange version: ${request.version}",
+            )
+        }
+        parseInstant(request.exportedAt, "exported_at")
+        validateProducer(request.producer)
+        if (request.catalogVersion != null && request.catalogVersion.isEmpty()) throw schemaError("catalog_version must not be empty")
     }
 
     private fun prepareRecords(
@@ -167,6 +293,8 @@ class InventoryService(
         ordered: List<ValidatedRecord>,
         accountGames: Map<String, String>,
         warnings: MutableSet<String>,
+        annotation: Boolean = false,
+        readOnly: Boolean = false,
     ): List<PreparedRecord> {
         val requestRecords = mutableMapOf<Pair<String, String>, ValidatedRecord>()
         return ordered.map { validated ->
@@ -180,7 +308,16 @@ class InventoryService(
                 requestRecords[key] = validated
                 val existing = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, record.accountId, record.recordId)
                 if (existing != null && !sameBody(existing, record)) throw recordConflict(record.recordId)
-                if (existing == null) validateCatalogEntries(record, accountGames.getValue(record.accountId), warnings)
+                if (annotation && existing != null && existing.stockEffect != "history_only") {
+                    throw InventoryApiException(
+                        HttpStatus.CONFLICT,
+                        "annotation_would_change_stock",
+                        "同一记录已影响库存，请核对操作历史，不能当作补记成功",
+                        record.recordId,
+                        record.entries.firstOrNull()?.id,
+                    )
+                }
+                if (existing == null) validateCatalogEntries(record, accountGames.getValue(record.accountId), warnings, readOnly)
                 PreparedRecord(validated, duplicate = existing != null)
             }
         }
@@ -315,9 +452,22 @@ class InventoryService(
     }
 
     // 已接收的同正文记录仍需幂等成功，即使其密探后来被公共图鉴删除。
-    private fun validateCatalogEntries(record: InventoryRecordRequest, accountGame: String, warnings: MutableSet<String>) {
+    private fun validateCatalogEntries(
+        record: InventoryRecordRequest,
+        accountGame: String,
+        warnings: MutableSet<String>,
+        readOnly: Boolean = false,
+    ) {
         record.entries.forEach { entry ->
-            if (!catalogService.exists(record.entityType, entry.id)) {
+            val exists = if (readOnly) {
+                catalogService.existsReadOnly(
+                    record.entityType,
+                    entry.id,
+                )
+            } else {
+                catalogService.exists(record.entityType, entry.id)
+            }
+            if (!exists) {
                 throw InventoryApiException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     "unknown_entity_id",
@@ -326,7 +476,12 @@ class InventoryService(
                     entry.id,
                 )
             }
-            if (record.entityType == "agent" && !catalogService.agentMatchesGame(entry.id, accountGame)) {
+            val matchesGame = record.entityType != "agent" || if (readOnly) {
+                catalogService.agentMatchesGameReadOnly(entry.id, accountGame)
+            } else {
+                catalogService.agentMatchesGame(entry.id, accountGame)
+            }
+            if (!matchesGame) {
                 if (record.recordType == STOCK_SNAPSHOT && entry.count == 0L) {
                     warnings += "已忽略${accountGame}不支持的零值密探：${entry.name ?: entry.id}"
                     return@forEach
@@ -346,7 +501,13 @@ class InventoryService(
      * 应用单条记录:先幂等检查,再按类型分派。
      * 返回该记录产生的效果(供 accepted/duplicates/history_only/superseded 统计)。
      */
-    private fun applyRecord(userId: String, producer: ProducerDto, validated: ValidatedRecord, sourceConnectionId: String?): Effect {
+    private fun applyRecord(
+        userId: String,
+        producer: ProducerDto,
+        validated: ValidatedRecord,
+        sourceConnectionId: String?,
+        annotation: Boolean = false,
+    ): Effect {
         val record = validated.record
 
         val entity = InventoryRecord(
@@ -366,7 +527,7 @@ class InventoryService(
         )
 
         return when (record.recordType) {
-            REWARD_DELTA -> applyRewardDelta(userId, record.accountId, entity)
+            REWARD_DELTA -> applyRewardDelta(userId, record.accountId, entity, annotation)
             STOCK_SNAPSHOT -> applyStockSnapshot(userId, record.accountId, entity)
             else -> throw IllegalStateException("已校验,不应到达")
         }
@@ -417,8 +578,9 @@ class InventoryService(
      * stock_effect 为记录级标记:存在任一 applied 条目 → applied,否则 history_only。
      * 幂等唯一索引兜底:并发重复由外层 transaction 回滚并重新预检。
      */
-    private fun applyRewardDelta(userId: String, accountId: String, entity: InventoryRecord): Effect {
+    private fun applyRewardDelta(userId: String, accountId: String, entity: InventoryRecord, annotation: Boolean = false): Effect {
         val comp = computeReward(userId, accountId, entity)
+        if (annotation && comp.appliedEntries.isNotEmpty()) annotationRejected(entity, comp.appliedEntries.first().id)
         val stored = entity.copy(stockEffect = comp.effect.stock())
         recordRepository.save(stored)
         applyRewardToCurrent(userId, accountId, entity.entityType, comp)

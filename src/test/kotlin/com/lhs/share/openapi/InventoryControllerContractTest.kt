@@ -12,6 +12,8 @@ import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryI
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAnnotationEntry
+import com.lhs.share.hub.controller.inventory.response.InventoryAnnotationPreview
 import com.lhs.share.hub.controller.inventory.response.InventoryImportEvent
 import com.lhs.share.hub.controller.inventory.response.InventoryImportResult
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -71,6 +73,74 @@ class InventoryControllerContractTest {
             .setValidator(validator)
             .build()
         every { eventService.publish(any(), any(), any(), any(), any()) } just runs
+    }
+
+    @Test
+    fun `reward annotation routes bind JWT owner and revision and preserve entry diagnostics`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        every { inventoryService.previewRewardAnnotations("jwt-user", any()) } returns InventoryAnnotationPreview(
+            7,
+            listOf(
+                InventoryAnnotationEntry(
+                    "test:1",
+                    "item",
+                    "baijinbi",
+                    Instant.parse("2026-08-16T11:00:00Z"),
+                    Instant.parse("2026-08-16T10:00:00Z"),
+                    true,
+                ),
+            ),
+            true,
+        )
+        every { inventoryService.annotateRewards("jwt-user", any(), 7) } returns InventoryImportResult(accepted = 1, historyOnly = 1)
+        mockMvc.perform(post("/v1/inventory/reward-annotations/preview").contentType(MediaType.APPLICATION_JSON).content(validDocument))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.expected_inventory_revision").value(7))
+            .andExpect(jsonPath("$.data.can_confirm").value(true))
+            .andExpect(jsonPath("$.data.entries[0].history_only").value(true))
+            .andExpect(jsonPath("$.data.entries[0].record_id").value("test:1"))
+        mockMvc.perform(
+            post("/v1/inventory/reward-annotations").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"document":$validDocument,"expected_inventory_revision":7}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.history_only").value(1))
+        verify(exactly = 1) { inventoryService.annotateRewards("jwt-user", any(), 7) }
+        verify(exactly = 0) { inventoryService.import(any(), any()) }
+    }
+
+    @Test
+    fun `reward annotation command rejects invalid revisions and exposes located stock errors`() {
+        every { helper.requireUserId() } returns "jwt-user"
+        for (revision in listOf("-1", "9007199254740991", "null")) {
+            mockMvc.perform(
+                post("/v1/inventory/reward-annotations").contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"document":$validDocument,"expected_inventory_revision":$revision}"""),
+            )
+                .andExpect(status().isUnprocessableEntity)
+        }
+        verify(exactly = 0) { inventoryService.annotateRewards(any(), any(), any()) }
+        mockMvc.perform(
+            post("/v1/inventory/reward-annotations").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"document":$validDocument}"""),
+        )
+            .andExpect(status().isUnprocessableEntity)
+        every { inventoryService.annotateRewards("jwt-user", any(), 7) } throws InventoryApiException(
+            HttpStatus.CONFLICT,
+            "annotation_baseline_missing",
+            "请核对盘点",
+            "test:1",
+            "baijinbi",
+        )
+        mockMvc.perform(
+            post("/v1/inventory/reward-annotations").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"document":$validDocument,"expected_inventory_revision":7}"""),
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.record_id").value("test:1"))
+            .andExpect(jsonPath("$.error.entry_id").value("baijinbi"))
+        mockMvc.perform(post("/open-api/inventory/reward-annotations").contentType(MediaType.APPLICATION_JSON).content(validDocument))
+            .andExpect(status().isNotFound)
     }
 
     @Test

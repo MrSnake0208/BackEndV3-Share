@@ -50,6 +50,17 @@ class EntityCatalogServiceTest {
     }
 
     @Test
+    fun `annotation catalog checks never seed an empty catalog`() {
+        every { operatorCatalog.getOperatorReadOnly(any()) } returns null
+        assertEquals(false, service.existsReadOnly("item", "baijinbi"))
+        assertEquals(false, service.existsReadOnly("agent", "char_001_yangxiu"))
+        assertEquals(false, service.agentMatchesGameReadOnly("char_001_yangxiu", "代号鸢"))
+        verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { operatorCatalog.exists(any()) }
+        verify(exactly = 0) { operatorCatalog.getOperator(any()) }
+    }
+
+    @Test
     fun `packaged items preserve category metadata`() {
         service.seedFromResources(ClassPathResource("inventory/items.json"))
 

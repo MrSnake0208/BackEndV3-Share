@@ -9,11 +9,13 @@ import com.lhs.share.config.doc.RequireJwt
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
+import com.lhs.share.hub.controller.inventory.request.InventoryAnnotationRequest
 import com.lhs.share.hub.controller.inventory.request.InventoryImportRequest
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAcquiredSummaryResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteListResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryAgentFavoriteResponse
+import com.lhs.share.hub.controller.inventory.response.InventoryAnnotationPreview
 import com.lhs.share.hub.controller.inventory.response.InventoryCatalogResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryCurrentResponse
 import com.lhs.share.hub.controller.inventory.response.InventoryExportResponse
@@ -96,6 +98,21 @@ class InventoryController(
     @PostMapping("/import", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun import(@Valid @RequestBody request: InventoryImportRequest): ApiResult<InventoryImportResult> =
         success(inventoryService.import(helper.requireUserId(), request))
+
+    @Operation(summary = "预览已计入库存的奖励补记（只读）")
+    @InventoryWriteResponses
+    @RequireJwt
+    @PostMapping("/reward-annotations/preview", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun previewRewardAnnotations(@Valid @RequestBody request: InventoryImportRequest): ApiResult<InventoryAnnotationPreview> =
+        success(inventoryService.previewRewardAnnotations(helper.requireUserId(), request))
+
+    @Operation(summary = "补记已计入库存的奖励，事务内保证不增加库存")
+    @InventoryWriteResponses
+    @RequireJwt
+    @PostMapping("/reward-annotations", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun annotateRewards(@Valid @RequestBody request: InventoryAnnotationRequest): ApiResult<InventoryImportResult> = success(
+        inventoryService.annotateRewards(helper.requireUserId(), request.document, request.expectedInventoryRevision),
+    )
 
     /**
      * 当前库存查询(需登录;entity_type 可选,缺省返回全部类型)。
