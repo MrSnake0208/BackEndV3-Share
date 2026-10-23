@@ -5,6 +5,7 @@ import com.lhs.share.hub.controller.operator.OperatorController
 import com.lhs.share.hub.controller.operator.OperatorDailyTasksController
 import com.lhs.share.hub.controller.operator.OperatorOrganizationController
 import com.lhs.share.hub.controller.operator.OperatorPlannerController
+import com.lhs.share.hub.controller.operator.OperatorReserveWorkspaceController
 import com.lhs.share.hub.controller.operator.response.OperatorError
 import com.lhs.share.hub.controller.operator.response.OperatorErrorResponse
 import com.lhs.share.hub.service.inventory.InventoryApiException
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
         OperatorController::class,
         com.lhs.share.hub.controller.operator.OperatorPanelController::class,
         OperatorPlannerController::class,
+        OperatorReserveWorkspaceController::class,
         OperatorDailyTasksController::class,
         OperatorOrganizationController::class,
         OpenApiOperatorController::class,
