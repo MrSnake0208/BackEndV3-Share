@@ -49,7 +49,13 @@ class StarStateService(
             ?.let(StarStateCurrentResponse::of) ?: StarStateCurrentResponse.empty(accountId)
     }
 
-    fun patch(userId: String, accountId: String, request: StarStatePatchRequest): StarStateCommandResponse {
+    fun patch(
+        userId: String,
+        accountId: String,
+        request: StarStatePatchRequest,
+        expectedLoadoutRevision: Long? = null,
+        recoveryReason: String? = null,
+    ): StarStateCommandResponse {
         accounts.requireAccount(userId, accountId)
         val expectedGeneration = nonNegative(request.expectedGeneration, "expected_generation")
         val expectedRevision = nonNegative(request.expectedRevision, "expected_revision")
@@ -58,6 +64,11 @@ class StarStateService(
                 transactions.execute {
                     val current = states.findByUserIdAndAccountId(userId, accountId)
                     checkVersion(current, expectedGeneration, expectedRevision)
+                    if (expectedLoadoutRevision != null &&
+                        expectedLoadoutRevision != (loadouts.findByUserIdAndAccountId(userId, accountId)?.revision ?: 0L)
+                    ) {
+                        throw InventoryApiException(HttpStatus.CONFLICT, "star_loadout_conflict", "佩戴关系已变化，请重新核对")
+                    }
                     val incomingIds = request.inventory?.map { it.instanceId }?.toSet().orEmpty()
                     val removedIds = current?.inventory.orEmpty().map { it.instanceId }.toSet() - incomingIds
                     val next =
@@ -75,13 +86,22 @@ class StarStateService(
                         throw invalid("Changing a star's kind in place is not allowed; delete and create a new instance")
                     }
                     val now = Instant.now()
+                    val point = if (recoveryReason != null && current != null && current.snapshot() != next) {
+                        checkpoint(userId, accountId, current, recoveryReason, null, now)
+                    } else {
+                        null
+                    }
                     val saved = if (current?.snapshot() == next || current == null && next == emptySnapshot()) {
                         current
                     } else {
                         save(userId, accountId, expectedGeneration, expectedRevision, expectedGeneration, next, now)
                     }
                     val pruned = reconcileLoadout(userId, accountId, next.inventory, now)
-                    StarStateCommandResponse(stateResponse(saved, accountId), loadoutResponse(pruned, accountId), null)
+                    StarStateCommandResponse(
+                        stateResponse(saved, accountId),
+                        loadoutResponse(pruned, accountId),
+                        point?.let(StarRecoveryPointResponse::of),
+                    )
                 },
             )
         }
