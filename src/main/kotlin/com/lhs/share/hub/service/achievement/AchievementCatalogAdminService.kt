@@ -91,6 +91,20 @@ class AchievementCatalogAdminService(
         return persist(current, next)
     }
 
+    /** Called by suggestion acceptance inside the Hub transaction; one complete entry, one CAS. */
+    fun appendReviewedEntry(candidate: com.lhs.share.hub.repository.entity.AchievementCandidate, revision: Long): AchievementEntry {
+        val current = current(candidate.game, revision)
+        AchievementSuggestionValidation.candidate(candidate, current.draft)
+        val entry = candidate.entry(newId(candidate.game), current.draft.entries.size)
+        val next = current.copy(
+            draft = withCoverage(current.draft.copy(entries = current.draft.entries + entry, catalogVersion = "")),
+            issuedIds = current.issuedIds + entry.achievementId,
+        )
+        validate(next.draft, false)
+        persist(current, next)
+        return entry
+    }
+
     fun addCategory(game: String, revision: Long, name: String): CatalogAdminView {
         val current = current(game, revision)
         val id = "cat_${UUID.randomUUID().toString().replace("-", "")}"
