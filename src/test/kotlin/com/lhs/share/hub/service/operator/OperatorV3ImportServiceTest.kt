@@ -32,6 +32,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
@@ -74,6 +75,8 @@ class OperatorV3ImportServiceTest {
         every { importRecordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "scan:1") } returns null
         every { importRecordRepository.save(any()) } answers { firstArg<OperatorV3ImportRecord>() }
         every { scanReviewRepository.findByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) } returns null
+        every { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc(any(), any(), any()) } returns emptyList()
+        every { scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(any(), any(), any(), any()) } just runs
         every { scanReviewRepository.save(any()) } answers { firstArg() }
         every { scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) } just runs
         every { accountEventService.publish(any(), any(), any(), any(), any()) } just runs
@@ -225,7 +228,101 @@ class OperatorV3ImportServiceTest {
 
         verify(exactly = 0) { scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(any(), any()) }
         verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) }
+        verify(exactly = 0) { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc(any(), any(), any()) }
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `historical backlog lists only the latest result per operator without writing`() {
+        val newest = pendingReview("latest")
+        val other = pendingReview("other", "op2")
+        val backlog = (1..112).map { pendingReview("old:$it") }
+        every { scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc("u1", "acc1") } returns
+            listOf(newest, other) + backlog
+
+        val result = service.listScanReviews("u1", "acc1")
+
+        assertEquals(listOf("latest", "other"), result.map { it.recordId })
+        assertEquals(listOf("op1", "op2"), result.map { it.operatorId })
+        verify(exactly = 0) { scanReviewRepository.save(any()) }
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new pending scan saves before pruning the previous records and publishing`() {
+        every { catalogService.getOperator("op1") } returns null
+        val oldRecords = listOf("old:1", "old:2")
+        every { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc("u1", "acc1", "op1") } returns
+            oldRecords.map { pendingReview(it) }
+
+        assertEquals(1, service.commitScan("u1", "acc1", document()).rejected)
+
+        verifyOrder {
+            scanReviewRepository.save(match { it.recordId == "scan:1" && it.accountId == "acc1" && it.operatorId == "op1" })
+            scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn("u1", "acc1", "op1", oldRecords)
+            accountEventService.publish("u1", "acc1", any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `completing one review clears its entire older backlog but preserves a newer scan`() {
+        val backlog = (1..112).map { pendingReview("old:$it") }
+        every { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc("u1", "acc1", "op1") } returns
+            listOf(pendingReview("newer"), pendingReview("selected")) + backlog
+
+        service.closeScanReview("u1", "acc1", "selected", "op1")
+
+        verify(exactly = 1) {
+            scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(
+                "u1",
+                "acc1",
+                "op1",
+                listOf("selected") + backlog.map { it.recordId },
+            )
+        }
+    }
+
+    @Test
+    fun `closing an already replaced review leaves its replacement intact`() {
+        every { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc("u1", "acc1", "op1") } returns
+            listOf(pendingReview("newer"))
+
+        service.closeScanReview("u1", "acc1", "gone", "op1")
+
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `audited scan retry never recreates or removes pending reviews`() {
+        val request = document()
+        val record = request.path("records").get(0)
+        (record.path("entries").get(0).path("section_status") as com.fasterxml.jackson.databind.node.ObjectNode)
+            .put("basic", "review").put("combat_stats", "review")
+        every { importRecordRepository.findByUserIdAndAccountIdAndRecordId("u1", "acc1", "scan:1") } returns
+            OperatorV3ImportRecord(
+                userId = "u1", accountId = "acc1", sourceAccountId = "local", recordId = "scan:1",
+                game = "如鸢", sourceKind = "scan", snapshotScope = "listed",
+                payload = mapper.writeValueAsString(record), revisions = emptyMap(), statuses = mapOf("op1" to "review"),
+            )
+
+        service.commitScan("u1", "acc1", request)
+
+        verify(exactly = 0) { scanReviewRepository.save(any()) }
+        verify(exactly = 0) { scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc(any(), any(), any()) }
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(any(), any(), any(), any()) }
+        verify(exactly = 0) { scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(any(), any(), any(), any()) }
+    }
+
+    private fun pendingReview(recordId: String, operatorId: String = "op1") = OperatorScanReview(
+        userId = "u1",
+        accountId = "acc1",
+        recordId = recordId,
+        operatorId = operatorId,
+        status = "review",
+        document = mapper.writeValueAsString(document()),
+        warnings = emptyList(),
+        blockingErrors = emptyList(),
+    )
 
     @Test
     fun `commit creates revision one and writes an idempotency audit`() {

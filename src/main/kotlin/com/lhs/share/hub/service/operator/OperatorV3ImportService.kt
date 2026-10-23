@@ -54,8 +54,9 @@ class OperatorV3ImportService(
 
     fun listScanReviews(userId: String, accountId: String): List<OperatorScanReviewResponse> {
         requireOwnedAccount(userId, accountId)
-        // ponytail: list the account queue directly; paginate if real scan backlogs make this slow.
-        return scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId).map { review ->
+        return scanReviewRepository.findByUserIdAndAccountIdOrderByUpdatedAtDesc(userId, accountId).distinctBy {
+            it.operatorId
+        }.map { review ->
             OperatorScanReviewResponse(
                 accountId = review.accountId,
                 recordId = review.recordId,
@@ -71,7 +72,12 @@ class OperatorV3ImportService(
 
     fun closeScanReview(userId: String, accountId: String, recordId: String, operatorId: String) {
         requireOwnedAccount(userId, accountId)
-        scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(userId, accountId, recordId, operatorId)
+        val recordIds = scanReviewRepository.findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc(userId, accountId, operatorId)
+            .dropWhile { it.recordId != recordId }.map { it.recordId }
+        // Delete only this snapshot of the queue so later scans survive an older review's completion.
+        if (recordIds.isNotEmpty()) {
+            scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(userId, accountId, operatorId, recordIds)
+        }
     }
 
     private fun commit(userId: String, command: ImportCommand): OperatorV3ImportCommitResponse {
@@ -199,7 +205,7 @@ class OperatorV3ImportService(
                         ),
                     )
                 }
-                if (command.scanAccountId != null) {
+                if (command.scanAccountId != null && priorAudit == null) {
                     written.forEach { item ->
                         if (item.status == REVIEW || item.status == REJECTED) {
                             val selected = entries(record).firstOrNull { text(it, "operator_id") == item.operatorId } ?: return@forEach
@@ -219,6 +225,9 @@ class OperatorV3ImportService(
                                 item.recordId,
                                 item.operatorId,
                             )
+                            val replacedRecordIds = scanReviewRepository
+                                .findByUserIdAndAccountIdAndOperatorIdOrderByUpdatedAtDesc(userId, targetAccountId, item.operatorId)
+                                .filter { it.recordId != item.recordId }.map { it.recordId }
                             scanReviewRepository.save(
                                 OperatorScanReview(
                                     id = prior?.id,
@@ -233,6 +242,14 @@ class OperatorV3ImportService(
                                     updatedAt = Instant.now(),
                                 ),
                             )
+                            if (replacedRecordIds.isNotEmpty()) {
+                                scanReviewRepository.deleteByUserIdAndAccountIdAndOperatorIdAndRecordIdIn(
+                                    userId,
+                                    targetAccountId,
+                                    item.operatorId,
+                                    replacedRecordIds,
+                                )
+                            }
                         } else if (item.status == ACCEPTED || item.status == PARTIAL) {
                             scanReviewRepository.deleteByUserIdAndAccountIdAndRecordIdAndOperatorId(
                                 userId,
