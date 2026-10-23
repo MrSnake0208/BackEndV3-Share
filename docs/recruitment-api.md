@@ -45,10 +45,11 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 - `permanent_known_total_pulls`：无限期常驻池已知累计。以投影后池快照的 `pool_type` 为准，忽略大小写及首尾空格，接受 permanent、standard、常驻、常驻卡池、常驻招募且 `end_date=null`，与前端常驻识别一致；累计所有对应个人池的有效独立记录抽数、有效批次总量和已知 progress，不含 baseline，不重复累计批次间隔；没有对应池/已知抽数时为0。
 - `most_obtained_gold_agents`：本账号未删除五星中获得次数最多的密探，包含普池、照影SP、批次事件及未知间隔。
 - `most_non_up_gold_agents`：非普池中显式 `non_up` 的五星记录次数最多的密探；排除 UP状态未知、普池及无法识别所属池的记录。
+- `most_permanent_gold_agents`：所有常驻池合计，未删除五星中获得次数最多的密探。常驻判定与 `permanent_known_total_pulls` 相同，使用 `mapped_snapshot` 优先的投影快照，不按池名或 `non_up` 猜测；不受当前选中卡池影响。隐藏、停用池保留历史，目录缺失回退档案快照；池类型无法确认的记录不计入此榜。`null` 表示未提供/未知，`[]` 表示已统计且没有符合条件的记录；单池摘要仍为 `null`。原获得榜和非 UP 榜口径不变。
 
 排行格式为 `[{agent_id,name,count}]`，并列第一全部返回，按 `agent_id` 排序。空数组表示已统计但无符合条件的记录。按原始图鉴ID、当前池槽绑定的 operator_id、临时密探 mapped_agent_id 合并稳定身份，不按名字合并，不合并独立SP身份。name为展示回退值，客户端可使用当前图鉴名称。计次不依赖 pull_span，不因批次已包含总抽数而跳过出货事件。
 
-这些值在首次 archive 请求中计算完整历史，独立于 events 分页。服务端在原有账号校验及读取事务内，一次打开当前 userId/accountId、未删除且非4星的有序游标，只投影 poolId、agentSnapshot.rarity/agentId/name、pullSpan、upStatus；按池保存保底/均值状态，同次遍历同步累计账号均值及每个密探的获得/非UP次数，关闭游标，不下载完整快照、不逐池查库、不写Mongo。响应不携带逐条投影数据，不新增接口、查询、缓存或备份字段。保存后重新读取 archive 即得新值。
+这些值在首次 archive 请求中计算完整历史，独立于 events 分页。服务端在原有账号校验及读取事务内，一次打开当前 userId/accountId、未删除且非4星的有序游标，只投影 poolId、agentSnapshot.rarity/agentId/name、pullSpan、upStatus；按池保存保底/均值状态，同次遍历同步累计账号均值及每个密探的获得/非UP/常驻池次数，关闭游标，不下载完整快照、不逐池查库、不写Mongo。响应不携带逐条投影数据，不新增接口、查询、缓存或备份字段。保存后重新读取 archive 即得新值。
 
 
 ## 管理员目录

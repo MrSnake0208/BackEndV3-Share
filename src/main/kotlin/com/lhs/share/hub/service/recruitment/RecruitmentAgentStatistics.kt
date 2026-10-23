@@ -15,9 +15,11 @@ internal class RecruitmentAgentStatistics(pools: List<RecruitmentPool>, temporar
     private val temporary = temporaryAgents.associateBy { it.agentId }
     private val obtained = mutableMapOf<String, RecruitmentAgentCount>()
     private val nonUp = mutableMapOf<String, RecruitmentAgentCount>()
+    private val permanent = mutableMapOf<String, RecruitmentAgentCount>()
 
     val mostObtained: List<RecruitmentAgentCount> get() = leaders(obtained)
     val mostNonUp: List<RecruitmentAgentCount> get() = leaders(nonUp)
+    val mostPermanent: List<RecruitmentAgentCount> get() = leaders(permanent)
 
     fun add(event: RecruitmentStatisticEvent) {
         if (event.rarity != 5) return
@@ -27,6 +29,7 @@ internal class RecruitmentAgentStatistics(pools: List<RecruitmentPool>, temporar
         val id = slot?.operatorId ?: mapped?.mappedAgentId ?: originalId
         val name = slot?.name ?: mapped?.mappedName ?: event.agentName ?: id
         increment(obtained, id, name)
+        if (event.poolId in permanentPoolIds) increment(permanent, id, name)
         if (event.upStatus == "non_up" && event.poolId in slots && event.poolId !in permanentPoolIds) increment(nonUp, id, name)
     }
 

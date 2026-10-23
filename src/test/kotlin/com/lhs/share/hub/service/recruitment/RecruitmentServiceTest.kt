@@ -794,6 +794,8 @@ class RecruitmentServiceTest {
             assertEquals(0L, visible.summary.permanentKnownTotalPulls)
             assertEquals(emptyList<Any>(), visible.summary.mostObtainedGoldAgents)
             assertEquals(emptyList<Any>(), visible.summary.mostNonUpGoldAgents)
+            assertEquals(emptyList<Any>(), visible.summary.mostPermanentGoldAgents)
+            assertNull(visible.poolSummaries.values.single().mostPermanentGoldAgents)
             assertNull(visible.poolSummaries.values.single().averageGoldPulls)
             assertNull(visible.poolSummaries.values.single().smallPityWinRate)
             assertEquals(0L, service.archive("u", "a").summary.knownTotalPulls)
@@ -846,17 +848,46 @@ class RecruitmentServiceTest {
         assertEquals("gold", archive.summary.mostObtainedGoldAgents?.single()?.agentId)
         assertEquals(3L, archive.summary.mostObtainedGoldAgents?.single()?.count)
         assertEquals(1L, archive.summary.mostNonUpGoldAgents?.single()?.count)
+        assertEquals(emptyList<Any>(), archive.summary.mostPermanentGoldAgents)
         val poolSummary = archive.poolSummaries.getValue("p")
         assertEquals(2L, poolSummary.upAgentCounts?.get("catalog_p:up:A"))
         assertEquals(38.5, poolSummary.averageGoldPulls)
         assertEquals(50.0, poolSummary.smallPityWinRate)
-        assertEquals(8, closedStreams)
-        verify(exactly = 8) { accountService.requireAccount("u", "a") }
-        verify(exactly = 8) { readStore.archive("u", "a") }
-        verify(exactly = 8) { readStore.totals("u", "a") }
-        verify(exactly = 8) { readStore.poolTotals("u", "a") }
-        verify(exactly = 8) { readStore.poolAgentCounts("u", "a") }
-        verify(exactly = 8) { readStore.statisticEvents("u", "a") }
+        every { readStore.statisticEvents("u", "a") } answers {
+            listOf(
+                RecruitmentStatisticEvent("standard", 5, null, "unknown", "permanent-gold", "常驻绝密"),
+                RecruitmentStatisticEvent("standard-history", 5, 10, "non_up", "permanent-gold", "常驻绝密"),
+                RecruitmentStatisticEvent("p", 5, 1, "non_up", "limited-gold", "限时绝密"),
+            ).stream().onClose { closedStreams++ }
+        }
+        val permanentCatalog = managed.copy(poolId = "catalog_standard", poolType = "常驻", endDate = null)
+        every { readStore.archive("u", "a") } returns state.copy(
+            currentPoolId = "p",
+            pools = listOf(
+                state.pools.single(),
+                RecruitmentPool("standard", RecruitmentPoolSnapshot("旧常驻", "如鸢", catalogPoolId = "catalog_standard", poolType = "常驻")),
+                RecruitmentPool("standard-history", RecruitmentPoolSnapshot("旧常驻", "如鸢", poolType = "standard")),
+            ),
+        )
+        // Missing, hidden and disabled definitions must all preserve archived permanent results.
+        listOf(
+            emptyList(),
+            listOf(permanentCatalog.copy(hidden = true)),
+            listOf(permanentCatalog.copy(enabled = false)),
+        ).forEach { definitions ->
+            every { catalogStore.all() } returns definitions
+            val result = service.archive("u", "a")
+            assertEquals("permanent-gold", result.summary.mostPermanentGoldAgents?.single()?.agentId)
+            assertEquals(2L, result.summary.mostPermanentGoldAgents?.single()?.count)
+            assertTrue(result.poolSummaries.values.all { it.mostPermanentGoldAgents == null })
+        }
+        assertEquals(11, closedStreams)
+        verify(exactly = 11) { accountService.requireAccount("u", "a") }
+        verify(exactly = 11) { readStore.archive("u", "a") }
+        verify(exactly = 11) { readStore.totals("u", "a") }
+        verify(exactly = 11) { readStore.poolTotals("u", "a") }
+        verify(exactly = 11) { readStore.poolAgentCounts("u", "a") }
+        verify(exactly = 11) { readStore.statisticEvents("u", "a") }
         confirmVerified(readStore, accountService)
         verify {
             publisher wasNot io.mockk.Called
