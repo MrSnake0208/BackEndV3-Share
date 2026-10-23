@@ -61,3 +61,27 @@ preview_token 绑定用户、目标账号、游戏、当前档案版本、目录
 ```sh
 ./gradlew test --tests 'com.lhs.share.hub.service.achievement.AchievementContractTest' integrationTest --tests 'com.lhs.share.hub.service.achievement.AchievementMongoTest'
 ```
+
+## 成就资料投稿与审核（K05）
+
+投稿不绑定游戏子账号，不接受 account_id/submitter_id；删除子账号不删除投稿。普通接口仅网站 JWT、Beta 与 archive:access 可用；管理接口沿用 archive:access，并在 Controller 与 Service 检查 achievement_catalog:write。仅活动管理权限不能审核。普通详情始终只允许本人，越权与不存在均404。所有响应 no-store，不加入公开白名单。
+
+| 方法与路径 | 输入与结果 |
+| --- | --- |
+| POST /v1/achievements/suggestions | client_request_id、candidate、source_url、可选 submission_note；提交新候选 |
+| GET /v1/achievements/suggestions | status、page=1、page_size=20（1..100）；仅本人，时间/ID降序 |
+| GET /v1/achievements/suggestions/{id} | 仅本人详情 |
+| GET /v1/achievements/suggestions/options?game=如鸢 | 已发布只读目录与 reward_items；目录不存在409，绝不初始化 |
+| GET /v1/admin/achievement-catalogs/suggestions | status、game、page、page_size；队列时间/ID升序 |
+| GET /v1/admin/achievement-catalogs/suggestions/{id} | 管理员详情 |
+| GET /v1/admin/achievement-catalogs/suggestions/options?game=如鸢 | 当前目录修订/草稿/奖励表，只读且不初始化；兼容问题阻止采纳 |
+| POST /v1/admin/achievement-catalogs/suggestions/{id}/accept | expected_version、expected_catalog_revision、修正后的 candidate、可选 review_note |
+| POST /v1/admin/achievement-catalogs/suggestions/{id}/reject | expected_version、必填 review_note；REJECTED终态 |
+
+candidate 只收 game/category_id/name/condition/is_hidden/rewards/target/linked_metric，禁止 achievement_id/sort 与已移除扩展字段。名称必填、≤200字，条件≤4000字；奖励null=未知、[]=确认无奖励、列表=已知，按现有奖励字典校验key/name/game、正安全整数数量与总量；target为1..1e12整数，linked_metric沿用目录规则。分类须属于游戏且启用；提交用已发布分类，采纳用当前草稿分类。source_url必填且限2048字符http/https，后端不抓取。submission_note/review_note最多1000字，全部纯文本显示。
+
+响应均使用 ApiResult.data：详情/提交/审核为 `{suggestion, currently_published}`；分页为 `{items:[同上], total, page, page_size}`。suggestion包含 id、submitter_id、client_request_id、created_at、original、source_url、submission_note、status、version、reviewed_by/at、review_note、achievement_id、accepted_snapshot。PENDING/ACCEPTED/REJECTED分别表示待审/采纳到草稿/未采纳。currently_published为当前公开投影是否包含系统ID；未采纳或目录不可用为null，不表示曾经发布的永久审计。
+
+同用户同client_request_id由唯一索引保护；同内容返回原单，不同内容409，不按名称合并不同投稿。采纳在同一Hub Mongo事务内CAS锁投稿版本、生成新系统ID、向现有草稿追加完整条目并登记issuedIds、单次目录CAS、写ACCEPTED与修订快照；任一步失败全部回滚。重复采纳返回同一achievement_id，不重新发号。版本竞争409；管理员须保留本地修正、刷新版本后核对重试。
+
+采纳不发布目录、不修改现有个人完成记录或历史身份。后续发布、回滚与目录删除可能改变currently_published，但不改写审核快照。前端结果不确定时保留原请求内容与幂等键重试；普通表单不暴露排序/系统ID。
