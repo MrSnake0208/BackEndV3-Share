@@ -895,6 +895,135 @@ class RecruitmentServiceTest {
         }
     }
 
+    @Test fun `UP summaries weight known gold and sum independent applicable pool guarantees without writes`() {
+        val accountService = mockk<SubAccountService>()
+        val accounts = mockk<SubAccountRepository>()
+        val publisher = mockk<AccountEventService>()
+        val readStore = mockk<RecruitmentRepository>()
+        val tx = TransactionTemplate(object : PlatformTransactionManager {
+            override fun getTransaction(definition: TransactionDefinition?) = SimpleTransactionStatus()
+            override fun commit(status: TransactionStatus) = Unit
+            override fun rollback(status: TransactionStatus) = Unit
+        })
+        val up = listOf(RecruitmentUpAgent("retired-up", "旧UP", active = false))
+        fun snapshot(name: String) = RecruitmentPoolSnapshot(name, "如鸢", upAgents = up)
+        val pools = listOf(
+            RecruitmentPool("a", snapshot("A")),
+            RecruitmentPool("b", RecruitmentPoolSnapshot("旧池", "如鸢"), mappedSnapshot = snapshot("B")),
+            RecruitmentPool("empty", snapshot("空池")),
+            RecruitmentPool("retired", snapshot("退役池").copy(catalogPoolId = "catalog_retired")),
+            RecruitmentPool("standard", snapshot("常驻").copy(poolType = "standard")),
+            RecruitmentPool("plain", RecruitmentPoolSnapshot("无UP", "如鸢")),
+        )
+        var archive = state.copy(pools = pools)
+        var records = listOf(
+            RecruitmentStatisticEvent("a", 5, null, "non_up"),
+            RecruitmentStatisticEvent("a", 4, 99, "unknown"),
+            RecruitmentStatisticEvent("a", 5, null, "up"),
+            RecruitmentStatisticEvent("a", 5, null, "up"),
+            RecruitmentStatisticEvent("b", 5, null, "up"),
+            RecruitmentStatisticEvent("standard", 5, null, "unknown"),
+            RecruitmentStatisticEvent("plain", 5, null, "unknown"),
+            RecruitmentStatisticEvent("orphan", 5, null, "unknown"),
+        )
+        every { accountService.requireAccount("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test", game = "如鸢")
+        every { readStore.archive("u", "a") } answers { archive }
+        every { readStore.totals("u", "a") } returns RecruitmentTotals(0, 0, 0, 0, 0)
+        every { readStore.poolTotals("u", "a") } returns emptyMap()
+        every { readStore.poolAgentCounts("u", "a") } returns emptyMap()
+        var closedStreams = 0
+        every { readStore.statisticEvents("u", "a") } answers { records.stream().onClose { closedStreams++ } }
+        // The current directory removed every UP slot; the archived mechanism still applies.
+        every { catalogStore.all() } returns listOf(managed.copy(poolId = "catalog_retired", upAgents = emptyList()))
+        val service = RecruitmentService(readStore, accountService, accounts, mutation, publisher, mapper, tx)
+        val result = service.archive("u", "a")
+        assertEquals(3L, result.summary.upGoldCount)
+        assertEquals(4L, result.summary.knownUpGoldCount)
+        assertEquals(0L, result.summary.unknownUpGoldCount)
+        assertEquals(75.0, result.summary.totalUpRate)
+        assertEquals(1L, result.summary.guaranteedGoldCount)
+        assertNull(result.summary.smallPityWinRate)
+        assertEquals("first_gold_small_pity", result.summary.pityHistoryAssumption)
+        assertEquals("inferred", result.summary.pityStatus)
+        assertEquals(66.7, result.poolSummaries.getValue("a").totalUpRate)
+        assertEquals(50.0, result.poolSummaries.getValue("a").smallPityWinRate)
+        assertEquals(0L, result.poolSummaries.getValue("b").guaranteedGoldCount)
+        for (id in listOf("empty", "retired")) {
+            val summary = result.poolSummaries.getValue(id)
+            assertEquals("no_samples", summary.pityStatus)
+            assertEquals(0L, summary.guaranteedGoldCount)
+            assertNull(summary.totalUpRate)
+        }
+        for (id in listOf("standard", "plain")) {
+            val summary = result.poolSummaries.getValue(id)
+            assertEquals("not_applicable", summary.pityStatus)
+            assertNull(summary.totalUpRate)
+            assertNull(summary.upGoldCount)
+            assertNull(summary.guaranteedGoldCount)
+            assertNull(summary.smallPityWinRate)
+        }
+
+        records = records + RecruitmentStatisticEvent("a", 5, null, "unknown") + RecruitmentStatisticEvent("a", 5, null, "up")
+        val unknown = service.archive("u", "a")
+        assertEquals(80.0, unknown.summary.totalUpRate)
+        assertEquals(1L, unknown.summary.unknownUpGoldCount)
+        assertNull(unknown.summary.guaranteedGoldCount)
+        assertEquals("insufficient_history", unknown.summary.pityStatus)
+        assertNull(unknown.poolSummaries.getValue("a").smallPityWinRate)
+        assertEquals(0L, unknown.poolSummaries.getValue("b").guaranteedGoldCount)
+
+        records = listOf(RecruitmentStatisticEvent("a", 5, null, "non_up"), RecruitmentStatisticEvent("b", 5, null, "up"))
+        val independent = service.archive("u", "a")
+        assertEquals(50.0, independent.summary.totalUpRate)
+        assertEquals(0L, independent.summary.guaranteedGoldCount)
+        records = listOf(RecruitmentStatisticEvent("a", 5, null, "non_up"), RecruitmentStatisticEvent("a", 5, null, "non_up"))
+        val invalid = service.archive("u", "a").summary
+        assertEquals(0.0, invalid.totalUpRate)
+        assertNull(invalid.guaranteedGoldCount)
+        records = emptyList()
+        val empty = service.archive("u", "a").summary
+        assertEquals("no_samples", empty.pityStatus)
+        assertEquals(0L, empty.guaranteedGoldCount)
+        assertEquals(0L, empty.knownUpGoldCount)
+        assertNull(empty.totalUpRate)
+        archive = state.copy(pools = pools.takeLast(2))
+        every { catalogStore.all() } returns emptyList()
+        val noMechanism = service.archive("u", "a").summary
+        assertEquals("not_applicable", noMechanism.pityStatus)
+        assertNull(noMechanism.guaranteedGoldCount)
+        assertNull(noMechanism.knownUpGoldCount)
+        assertNull(noMechanism.pityHistoryAssumption)
+
+        assertEquals(6, closedStreams)
+        verify(exactly = 6) { accountService.requireAccount("u", "a") }
+        verify(exactly = 6) { readStore.archive("u", "a") }
+        verify(exactly = 6) { readStore.totals("u", "a") }
+        verify(exactly = 6) { readStore.poolTotals("u", "a") }
+        verify(exactly = 6) { readStore.poolAgentCounts("u", "a") }
+        verify(exactly = 6) { readStore.statisticEvents("u", "a") }
+        confirmVerified(readStore, accountService)
+        verify {
+            publisher wasNot io.mockk.Called
+            accounts wasNot io.mockk.Called
+        }
+    }
+
+    @Test fun `archive denies foreign owner or account before reading any statistics`() {
+        val accountService = mockk<SubAccountService>()
+        val readStore = mockk<RecruitmentRepository>()
+        val tx = TransactionTemplate(object : PlatformTransactionManager {
+            override fun getTransaction(definition: TransactionDefinition?) = SimpleTransactionStatus()
+            override fun commit(status: TransactionStatus) = Unit
+            override fun rollback(status: TransactionStatus) = Unit
+        })
+        every { accountService.requireAccount(any(), any()) } throws
+            InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "账号不存在")
+        val service = RecruitmentService(readStore, accountService, mockk(), mutation, mockk(), mapper, tx)
+        assertThrows(InventoryApiException::class.java) { service.archive("foreign", "a") }
+        assertThrows(InventoryApiException::class.java) { service.archive("u", "foreign-account") }
+        verify { readStore wasNot io.mockk.Called }
+    }
+
     @Test fun `successful old revision retry returns cached result before checking revision and cannot serve foreign owner`() {
         val accountService = mockk<SubAccountService>()
         val accounts = mockk<SubAccountRepository>()

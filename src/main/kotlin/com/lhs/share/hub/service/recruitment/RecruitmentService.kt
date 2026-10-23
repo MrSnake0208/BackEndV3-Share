@@ -24,6 +24,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.Base64
+import kotlin.math.roundToLong
 
 @Service
 class RecruitmentService(
@@ -53,6 +54,17 @@ class RecruitmentService(
                     agentStatistics.add(record)
                 }
             }
+            val archivedPools = current.pools.associateBy { it.poolId }
+            val upStatistics = pools.filter { pool ->
+                !isPermanentRecruitmentPool(pool.mappedSnapshot ?: pool.snapshot) &&
+                    listOfNotNull(
+                        pool.snapshot,
+                        pool.mappedSnapshot,
+                        archivedPools[pool.poolId]?.snapshot,
+                        archivedPools[pool.poolId]?.mappedSnapshot,
+                    )
+                        .any { it.upAgents.isNotEmpty() }
+            }.associate { it.poolId to (goldStatistics[it.poolId] ?: RecruitmentGoldStatistics()) }
             val progress = current.pools.sumOf { it.progress ?: 0 }
             val unknownProgress = current.pools.count { it.progress == null }
             RecruitmentArchiveResponse(
@@ -70,7 +82,7 @@ class RecruitmentService(
                     mostObtainedGoldAgents = agentStatistics.mostObtained,
                     mostNonUpGoldAgents = agentStatistics.mostNonUp,
                     mostPermanentGoldAgents = agentStatistics.mostPermanent,
-                ),
+                ).withUpStatistics(upStatistics.values.toList()),
                 current.gameSnapshot != account.game,
                 pools.associate { pool ->
                     val count = byPool[pool.poolId]
@@ -95,7 +107,7 @@ class RecruitmentService(
                         count?.fourStarCount ?: 0,
                         averageGoldPulls = goldStatistics[pool.poolId]?.averageGoldPulls,
                         smallPityWinRate = goldStatistics[pool.poolId]?.smallPityWinRate,
-                    )
+                    ).withUpStatistics(listOfNotNull(upStatistics[pool.poolId]))
                 },
                 mutation.poolStates(pools),
             )
@@ -328,4 +340,25 @@ class RecruitmentService(
                 )
         }
     }
+}
+
+private fun RecruitmentSummary.withUpStatistics(statistics: List<RecruitmentGoldStatistics>): RecruitmentSummary {
+    if (statistics.isEmpty()) return copy(smallPityWinRate = null, pityStatus = "not_applicable")
+    val up = statistics.sumOf { it.upGoldCount }
+    val known = statistics.sumOf { it.knownUpGoldCount }
+    val unknown = statistics.sumOf { it.unknownUpGoldCount }
+    val validPity = statistics.all { it.guaranteedGoldCount != null }
+    return copy(
+        upGoldCount = up,
+        knownUpGoldCount = known,
+        unknownUpGoldCount = unknown,
+        totalUpRate = if (known == 0L) null else (up.toDouble() / known * 1000).roundToLong() / 10.0,
+        guaranteedGoldCount = if (validPity) statistics.sumOf { checkNotNull(it.guaranteedGoldCount) } else null,
+        pityHistoryAssumption = statistics.first().pityHistoryAssumption,
+        pityStatus = when {
+            !validPity -> "insufficient_history"
+            known + unknown == 0L -> "no_samples"
+            else -> "inferred"
+        },
+    )
 }

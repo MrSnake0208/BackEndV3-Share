@@ -95,6 +95,13 @@ class RecruitmentControllerContractTest {
                 mostObtainedGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 3), RecruitmentAgentCount("b", "乙", 3)),
                 mostNonUpGoldAgents = emptyList(),
                 mostPermanentGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 2), RecruitmentAgentCount("b", "乙", 2)),
+                upGoldCount = 2,
+                knownUpGoldCount = 3,
+                unknownUpGoldCount = 0,
+                totalUpRate = 66.7,
+                guaranteedGoldCount = 1,
+                pityHistoryAssumption = "first_gold_small_pity",
+                pityStatus = "inferred",
             ),
             false,
             mapOf(
@@ -102,13 +109,45 @@ class RecruitmentControllerContractTest {
                     upAgentCounts = mapOf("catalog_p:up:A" to 2L, "catalog_p:up:B" to 0L),
                     averageGoldPulls = 18.2,
                     smallPityWinRate = 0.0,
+                    upGoldCount = 0,
+                    knownUpGoldCount = 1,
+                    unknownUpGoldCount = 0,
+                    totalUpRate = 0.0,
+                    guaranteedGoldCount = 0,
+                    pityHistoryAssumption = "first_gold_small_pity",
+                    pityStatus = "inferred",
                 ),
                 "empty" to summary,
+                "unknown" to summary.copy(
+                    upGoldCount = 1,
+                    knownUpGoldCount = 1,
+                    unknownUpGoldCount = 1,
+                    totalUpRate = 100.0,
+                    pityHistoryAssumption = "first_gold_small_pity",
+                    pityStatus = "insufficient_history",
+                ),
+                "no-samples" to summary.copy(
+                    upGoldCount = 0,
+                    knownUpGoldCount = 0,
+                    unknownUpGoldCount = 0,
+                    guaranteedGoldCount = 0,
+                    pityHistoryAssumption = "first_gold_small_pity",
+                    pityStatus = "no_samples",
+                ),
+                "permanent" to summary.copy(pityStatus = "not_applicable"),
             ),
         )
         mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.summary.average_gold_pulls").value(23.45))
+            .andExpect(jsonPath("$.data.summary.up_gold_count").value(2))
+            .andExpect(jsonPath("$.data.summary.known_up_gold_count").value(3))
+            .andExpect(jsonPath("$.data.summary.unknown_up_gold_count").value(0))
+            .andExpect(jsonPath("$.data.summary.total_up_rate").value(66.7))
+            .andExpect(jsonPath("$.data.summary.guaranteed_gold_count").value(1))
+            .andExpect(jsonPath("$.data.summary.pity_history_assumption").value("first_gold_small_pity"))
+            .andExpect(jsonPath("$.data.summary.pity_status").value("inferred"))
+            .andExpect(jsonPath("$.data.summary.upGoldCount").doesNotExist())
             .andExpect(jsonPath("$.data.summary.permanent_known_total_pulls").value(123))
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents.length()").value(2))
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].agent_id").value("a"))
@@ -124,6 +163,17 @@ class RecruitmentControllerContractTest {
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:B']").value(0))
             .andExpect(jsonPath("$.data.pool_summaries.p.average_gold_pulls").value(18.2))
             .andExpect(jsonPath("$.data.pool_summaries.p.small_pity_win_rate").value(0.0))
+            .andExpect(jsonPath("$.data.pool_summaries.p.total_up_rate").value(0.0))
+            .andExpect(jsonPath("$.data.pool_summaries.p.guaranteed_gold_count").value(0))
+            .andExpect(jsonPath("$.data.pool_summaries.unknown.total_up_rate").value(100.0))
+            .andExpect(jsonPath("$.data.pool_summaries.unknown.unknown_up_gold_count").value(1))
+            .andExpect(jsonPath("$.data.pool_summaries.unknown.guaranteed_gold_count").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.pool_summaries.unknown.pity_status").value("insufficient_history"))
+            .andExpect(jsonPath("$.data.pool_summaries['no-samples'].total_up_rate").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.pool_summaries['no-samples'].guaranteed_gold_count").value(0))
+            .andExpect(jsonPath("$.data.pool_summaries['no-samples'].pity_status").value("no_samples"))
+            .andExpect(jsonPath("$.data.pool_summaries.permanent.pity_status").value("not_applicable"))
+            .andExpect(jsonPath("$.data.pool_summaries.permanent.up_gold_count").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.pool_summaries.empty.average_gold_pulls").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.pool_summaries.empty.small_pity_win_rate").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.pool_summaries.empty.most_permanent_gold_agents").value(org.hamcrest.Matchers.nullValue()))

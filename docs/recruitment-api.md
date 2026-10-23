@@ -41,6 +41,26 @@ summary=`{known_total_pulls,recorded_pulls,batch_pulls,known_progress,event_coun
 
 全局 `summary.average_gold_pulls` 按相同有效样本口径汇总当前账号所有卡池，仅在最终均值四舍五入保留两位小数，不平均已舍入的各池均值；不包含 baseline。前端固定显示两位小数（如 `26.33`、`12.00`）；卡池均值仍保留一位小数。无有效样本为 null。`summary.small_pity_win_rate` 仍为 null，不跨池推演保底。
 
+`summary` 与 `pool_summaries[pool_id]` 另提供以下尾部可空字段，不改变持久化或交换协议：
+
+| 字段 | 含义 |
+| --- | --- |
+| `up_gold_count` | 适用池中归属为 `up` 的五星条数 |
+| `known_up_gold_count` | 归属为 `up` / `non_up` 的五星条数（总 UP 率分母） |
+| `unknown_up_gold_count` | 归属未知的五星条数，单列且不进入分母 |
+| `total_up_rate` | UP 五星 / 归属已知五星 × 100，四舍五入一位小数；分母为 0 返回 null |
+| `guaranteed_gold_count` | 首金假定小保底后，合法 non_up→up 已实际出保证金的次数；待出保证金不计。未知/非法保证顺序返回 null |
+| `pity_history_assumption` | 适用时固定 `first_gold_small_pity`，展示“按现有历史、首金小保底推断” |
+| `pity_status` | `no_samples` 无五星样本 / `inferred` 按历史推断 / `insufficient_history` 历史不足以推断 / `not_applicable` 无 UP 机制或永久池 |
+
+适用池为非永久且投影快照或原归档快照有 UP 槽定义的池；永久判定沿用 `isPermanentRecruitmentPool`，inactive 槽、隐藏/停用目录和旧归档 UP 定义仍保留历史机制，不因当前目录移除槽位而抹去。完全无 UP 定义不适用。四星不计，不推进保底；UP 归属计数在保底失效后仍继续，未知绝不当作 non_up。
+
+无五星样本但适用时：三项计数为 0、保证金次数 0、两项命中率 null，状态 `no_samples`。不适用时：新增计数/比例/假设为 null，状态 `not_applicable`，单池小保底率也为 null。旧后端字段缺失表示未提供，前端不能补 0。
+
+账号总 UP 率先合计适用池原始分子/分母，再最终舍入，不平均各池百分比。大保底次数分池推断，所有适用池均有效才相加，任一池未知或违规则合计 null；账号状态同样为 `insufficient_history`。没有适用池时为 `not_applicable`。`summary.small_pity_win_rate` 继续为 null；不使用跨池的账户平均出金累计器推断保底。读取仍按认证用户和授权子账号隔离，沿用未删除事件流；无新增写入或去重逻辑。
+
+例如 non_up,up,up：总 UP 率 66.7%、大保底 1 次、小保底 50%；unknown,up：总 UP 率 100%（未知1条）、两项保底推断为 null；池A只有 non_up、池B只有 up：账号总 UP 率 50%、大保底 0 次。
+
 全局 `summary` 还提供以下可空字段（旧后端字段缺失表示未知；`pool_summaries` 内保持 null）：
 - `permanent_known_total_pulls`：无限期常驻池已知累计。以投影后池快照的 `pool_type` 为准，忽略大小写及首尾空格，接受 permanent、standard、常驻、常驻卡池、常驻招募且 `end_date=null`，与前端常驻识别一致；累计所有对应个人池的有效独立记录抽数、有效批次总量和已知 progress，不含 baseline，不重复累计批次间隔；没有对应池/已知抽数时为0。
 - `most_obtained_gold_agents`：本账号未删除五星中获得次数最多的密探，包含普池、照影SP、批次事件及未知间隔。
