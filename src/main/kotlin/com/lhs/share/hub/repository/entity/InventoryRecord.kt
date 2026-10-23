@@ -48,7 +48,7 @@ data class InventoryRecord(
     val accountId: String,
     /**
      * 记录类型: reward_delta(奖励增量) | stock_snapshot(库存快照) |
-     * consumption_delta(升级消费；仅服务端事务生成)
+     * consumption_delta(升级消费) | resource_delta(带符号的符传使用/兑换；仅服务端生成)
      */
     val recordType: String,
     /**
@@ -94,6 +94,10 @@ data class InventoryRecord(
     val transactionId: String? = null,
     /** Authenticated Open API connection; never taken from the exchange body. */
     val sourceConnectionId: String? = null,
+    /** Typed command identity for JWT-only draw-resource retries; never supplied by exchange imports. */
+    val resourceRequestIdentity: String? = null,
+    /** Orders same-millisecond draw commands during replay, including gain before/after exchange. */
+    val resourceRevision: Long? = null,
 ) : Serializable
 
 /**
@@ -131,6 +135,7 @@ data class RecordEntry(
     /**
      * 数量:reward_delta / consumption_delta 恒 > 0,stock_snapshot 为 0..Int.MAX_VALUE；
      * consumption_delta 的正数由 recordType 表达扣减方向。
+     * resource_delta 为非零有符号变动，兑换的扣币与增券属于同一条记录。
      */
     val count: Long,
 )

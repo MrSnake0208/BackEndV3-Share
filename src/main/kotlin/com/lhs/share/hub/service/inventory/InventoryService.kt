@@ -654,10 +654,11 @@ class InventoryService(
                     .thenBy {
                         when (it.recordType) {
                             REWARD_DELTA -> 0
+                            RESOURCE_DELTA -> 0
                             STOCK_SNAPSHOT -> 1
                             else -> 2
                         }
-                    },
+                    }.thenBy { it.resourceRevision ?: Long.MIN_VALUE },
             )
         remaining.forEach { replayRecord(userId, accountId, it) }
         return remaining.size
@@ -682,8 +683,31 @@ class InventoryService(
                 }
             }
             CONSUMPTION_DELTA -> applyConsumptionDelta(userId, accountId, entity)
+            RESOURCE_DELTA -> applyResourceDelta(userId, accountId, entity)
             else -> throw IllegalStateException("已落库记录类型非法: ${entity.recordType}")
         }
+    }
+
+    private fun applyResourceDelta(userId: String, accountId: String, entity: InventoryRecord) {
+        val current = currentRepository.findByUserIdAndAccountIdAndEntityType(userId, accountId, entity.entityType)
+            ?: throw InventoryApiException(HttpStatus.CONFLICT, "resource_replay_conflict", "后续符传操作依赖这次盘点，无法撤销")
+        val entries = current.entries.toMutableMap()
+        var applied = false
+        entity.entries.forEach { change ->
+            val baseline = maxOfNotNull(current.fullBaselineAt, entries[change.id]?.listedBaselineAt)
+                ?: throw InventoryApiException(HttpStatus.CONFLICT, "resource_replay_conflict", "后续符传操作缺少库存基准，无法撤销")
+            if (entity.effectiveAt.isAfter(baseline)) {
+                val old = entries[change.id] ?: StockEntry()
+                val count = old.count + change.count
+                if (count !in 0..MAX_COUNT) {
+                    throw InventoryApiException(HttpStatus.CONFLICT, "resource_replay_conflict", "后续符传操作依赖这笔收入，无法完成删除或恢复")
+                }
+                entries[change.id] = old.copy(count = count)
+                applied = true
+            }
+        }
+        if (applied) currentRepository.save(current.copy(entries = entries, updatedAt = entity.effectiveAt))
+        recordRepository.save(entity.copy(stockEffect = if (applied) APPLIED else "history_only"))
     }
 
     private fun applyConsumptionDelta(userId: String, accountId: String, entity: InventoryRecord) {
@@ -1089,6 +1113,7 @@ class InventoryService(
         private const val REWARD_DELTA = "reward_delta"
         private const val STOCK_SNAPSHOT = "stock_snapshot"
         private const val CONSUMPTION_DELTA = "consumption_delta"
+        private const val RESOURCE_DELTA = "resource_delta"
         private const val ENTITY_ITEM = "item"
         private const val ENTITY_AGENT = "agent"
         private const val SNAPSHOT_FULL = "full"
