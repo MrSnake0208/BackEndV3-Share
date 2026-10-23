@@ -69,6 +69,7 @@ class RecruitmentService(
                     },
                     mostObtainedGoldAgents = agentStatistics.mostObtained,
                     mostNonUpGoldAgents = agentStatistics.mostNonUp,
+                    mostPermanentGoldAgents = agentStatistics.mostPermanent,
                 ),
                 current.gameSnapshot != account.game,
                 pools.associate { pool ->

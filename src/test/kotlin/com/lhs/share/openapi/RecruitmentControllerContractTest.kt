@@ -94,6 +94,7 @@ class RecruitmentControllerContractTest {
                 permanentKnownTotalPulls = 123,
                 mostObtainedGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 3), RecruitmentAgentCount("b", "乙", 3)),
                 mostNonUpGoldAgents = emptyList(),
+                mostPermanentGoldAgents = listOf(RecruitmentAgentCount("a", "甲", 2), RecruitmentAgentCount("b", "乙", 2)),
             ),
             false,
             mapOf(
@@ -114,14 +115,35 @@ class RecruitmentControllerContractTest {
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].name").value("甲"))
             .andExpect(jsonPath("$.data.summary.most_obtained_gold_agents[0].count").value(3))
             .andExpect(jsonPath("$.data.summary.most_non_up_gold_agents.length()").value(0))
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents.length()").value(2))
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents[0].agent_id").value("a"))
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents[0].name").value("甲"))
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents[0].count").value(2))
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents[1].agent_id").value("b"))
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:A']").value(2))
             .andExpect(jsonPath("$.data.pool_summaries.p.up_agent_counts['catalog_p:up:B']").value(0))
             .andExpect(jsonPath("$.data.pool_summaries.p.average_gold_pulls").value(18.2))
             .andExpect(jsonPath("$.data.pool_summaries.p.small_pity_win_rate").value(0.0))
             .andExpect(jsonPath("$.data.pool_summaries.empty.average_gold_pulls").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.pool_summaries.empty.small_pity_win_rate").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.pool_summaries.empty.most_permanent_gold_agents").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.data.records").doesNotExist())
         verify(exactly = 1) { service.archive("u", "a") }
+    }
+
+    @Test fun `permanent gold leaders distinguish unavailable from an empty computed list`() {
+        every { helper.requireUserId() } returns "u"
+        val summary = RecruitmentSummary(0, 0, 0, 0, 0, 0, 0, 0, false)
+        val archive = RecruitmentArchiveResponse("a", "如鸢", 0, 0, null, emptyList(), emptyList(), summary, false)
+        every { service.archive("u", "a") } returns archive
+        mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents").value(org.hamcrest.Matchers.nullValue()))
+        every { service.archive("u", "a") } returns archive.copy(summary = summary.copy(mostPermanentGoldAgents = emptyList()))
+        mvc.perform(get("/v1/recruitment/archive").param("account_id", "a"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents").isArray)
+            .andExpect(jsonPath("$.data.summary.most_permanent_gold_agents.length()").value(0))
     }
 
     @Test fun `event sort direction is forwarded and defaults to newest first`() {

@@ -15,11 +15,13 @@ import com.lhs.share.hub.repository.RecruitmentCatalogRepository
 import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.SubAccountRepositoryImpl
+import com.lhs.share.hub.repository.entity.RecruitmentAgentSnapshot
 import com.lhs.share.hub.repository.entity.RecruitmentArchive
 import com.lhs.share.hub.repository.entity.RecruitmentBatch
 import com.lhs.share.hub.repository.entity.RecruitmentCatalogPool
 import com.lhs.share.hub.repository.entity.RecruitmentEvent
 import com.lhs.share.hub.repository.entity.RecruitmentRequestRecord
+import com.lhs.share.hub.repository.entity.RecruitmentTemporaryAgent
 import com.lhs.share.hub.repository.entity.RecruitmentUpAgent
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.service.account.AccountEventService
@@ -49,6 +51,7 @@ import org.springframework.data.repository.core.support.RepositoryComposition.Re
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -157,6 +160,80 @@ class RecruitmentExchangeMongoTest {
     private fun simpleRecords(): JsonNode = mapper.readTree(
         """{"schema":"yuanhub.recruitment.import.v1","game":"如鸢","events":[{"event_id":"550e8400-e29b-41d4-a716-446655440000","catalog_pool_id":"test_pool","agent_id":"test_pool:up:A","pull_span":17}]}""",
     )
+
+    @Test fun `permanent gold leaders preserve ties mapping deletion imports catalog history and owner isolation`() {
+        val a = "char_001_yangxiu"
+        val b = "char_002_jiaxu"
+        val c = "char_003_sunshangxiang"
+        val permanent = RecruitmentCatalogPool(
+            "test_pool",
+            "如鸢",
+            "常驻样例",
+            poolType = "permanent",
+            upAgents = listOf(RecruitmentUpAgent("test_pool:up:A", "甲", a), RecruitmentUpAgent("test_pool:up:B", "乙", b)),
+        )
+        template.save(permanent)
+        template.save(RecruitmentCatalogPool("limited", "如鸢", "限时样例", poolType = "limited"))
+        template.save(
+            RecruitmentCatalogPool("dated", "如鸢", "常驻池", poolType = "permanent", endDate = LocalDate.parse("2026-10-23")),
+        )
+        initialize()
+        command(
+            "a",
+            "event_create",
+            """{"pool_id":"p","mode":"historical","entries":[{"event_id":"A1","agent_id":"test_pool:up:A","pull_span":null},{"event_id":"A2","agent_id":"test_pool:up:A","pull_span":17},{"event_id":"B1","agent_id":"test_pool:up:B","pull_span":null},{"event_id":"B2","agent_id":"test_pool:up:B","pull_span":20}]}""",
+        )
+        command("a", "pool_create", """{"pool_id":"l","catalog_pool_id":"limited","progress":0}""")
+        val limitedEntries = (0 until 10).joinToString(",") {
+            """{"event_id":"C$it","agent_id":"$c","pull_span":null,"up_status":"non_up"}"""
+        }
+        command("a", "event_create", """{"pool_id":"l","mode":"historical","entries":[$limitedEntries]}""")
+        command("a", "pool_create", """{"pool_id":"dated","catalog_pool_id":"dated","progress":0}""")
+        val datedEntries = (0 until 3).joinToString(",") { """{"event_id":"D$it","agent_id":"$a","pull_span":null}""" }
+        command("a", "event_create", """{"pool_id":"dated","mode":"historical","entries":[$datedEntries]}""")
+        val seed = store.event("u", "a", "A1")!!
+        store.insertEvent(seed.copy(id = "other:a:foreign-owner", userId = "other", eventId = "foreign-owner"))
+        store.insertEvent(seed.copy(id = "u:c:foreign-account", accountId = "c", eventId = "foreign-account"))
+        fun leaders(account: String = "a") = core.archive("u", account).summary.mostPermanentGoldAgents?.map { it.agentId to it.count }
+        val tied = listOf(a to 2L, b to 2L)
+        assertEquals(tied, leaders())
+        val summary = core.archive("u", "a").summary
+        assertEquals(c, summary.mostObtainedGoldAgents?.single()?.agentId)
+        assertEquals(c to 10L, summary.mostNonUpGoldAgents?.single()?.let { it.agentId to it.count })
+        assertThrows(InventoryApiException::class.java) { core.archive("other", "a") }
+
+        val body = backup()
+        val input = prepared(body)
+        val imported = service.commit("u", input)
+        assertEquals(tied, leaders("b"))
+        val importedEvents = store.exchangeEvents("u", "b", 100)
+        assertEquals(17, importedEvents.size)
+        assertEquals(imported, service.commit("u", input))
+        service.commit("u", prepared(body))
+        assertEquals(importedEvents, store.exchangeEvents("u", "b", 100))
+        assertEquals(tied, leaders("b"))
+
+        // Emulate retained legacy data after import; importing new temporary identities stays forbidden.
+        store.saveEvent(store.event("u", "a", "A2")!!.copy(agentSnapshot = RecruitmentAgentSnapshot("tmp_A", "临时甲", temporary = true)))
+        template.save(store.archive("u", "a")!!.copy(temporaryAgents = listOf(RecruitmentTemporaryAgent("tmp_A", "临时甲", a, "甲"))))
+        assertEquals(tied, leaders())
+        command("a", "event_delete", """{"event_id":"A1"}""")
+        val onlyB = listOf(b to 2L)
+        assertEquals(onlyB, leaders())
+        assertEquals(tied, leaders("b"))
+        val before = store.archive("u", "a")
+        val beforeEvents = store.exchangeEvents("u", "a", 100)
+        listOf(permanent.copy(hidden = true), permanent.copy(enabled = false)).forEach { definition ->
+            template.save(definition)
+            assertEquals(onlyB, leaders())
+            assertEquals(before, store.archive("u", "a"))
+            assertEquals(beforeEvents, store.exchangeEvents("u", "a", 100))
+        }
+        template.remove(permanent)
+        assertEquals(onlyB, leaders())
+        assertEquals(before, store.archive("u", "a"))
+        assertEquals(beforeEvents, store.exchangeEvents("u", "a", 100))
+    }
 
     @Test fun `duplicate backup alias and pool create leave persisted history revision requests and notifications unchanged`() {
         initialize("b")

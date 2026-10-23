@@ -23,6 +23,7 @@ data class RecruitmentSummary(
     val permanentKnownTotalPulls: Long? = null,
     val mostObtainedGoldAgents: List<RecruitmentAgentCount>? = null,
     val mostNonUpGoldAgents: List<RecruitmentAgentCount>? = null,
+    val mostPermanentGoldAgents: List<RecruitmentAgentCount>? = null,
 )
 
 data class RecruitmentAgentCount(val agentId: String, val name: String, val count: Long)
