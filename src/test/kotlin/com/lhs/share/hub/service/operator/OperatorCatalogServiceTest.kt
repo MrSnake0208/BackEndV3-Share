@@ -53,6 +53,15 @@ class OperatorCatalogServiceTest {
     )
 
     @Test
+    fun `read only lookup does not initialize or backfill the catalog`() {
+        every { repository.findByOperatorId("missing") } returns null
+        assertNull(service.getOperatorReadOnly("missing"))
+        verify(exactly = 0) { repository.count() }
+        verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { avatarStorage.delete(any()) }
+    }
+
+    @Test
     fun `create saves a new operator with a fresh catalog version`() {
         seed()
         every { repository.findByOperatorId("char_090_new") } returns null

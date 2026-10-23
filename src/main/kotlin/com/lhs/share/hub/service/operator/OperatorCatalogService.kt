@@ -36,6 +36,9 @@ class OperatorCatalogService(
         return repository.findByOperatorId(id)
     }
     fun exists(id: String): Boolean = getOperator(id) != null
+
+    /** Preview commands must not trigger lazy catalog writes. */
+    fun getOperatorReadOnly(id: String): OperatorCatalogEntity? = repository.findByOperatorId(id)
     fun currentCatalogVersion(): String {
         ensureSeeded()
         return catalogVersion.ifEmpty { LocalDate.now().toString() }
