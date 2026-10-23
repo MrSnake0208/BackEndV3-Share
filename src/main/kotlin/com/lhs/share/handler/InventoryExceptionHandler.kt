@@ -40,6 +40,7 @@ private val inventoryLog = KotlinLogging.logger { }
         com.lhs.share.hub.controller.bond.BondCatalogAdminController::class,
         com.lhs.share.hub.controller.achievement.AchievementCatalogAdminController::class,
         InventoryController::class,
+        com.lhs.share.hub.controller.inventory.DrawResourceController::class,
         com.lhs.share.hub.controller.inventory.MailboxReserveController::class,
         StarStateController::class,
         StarCompletionController::class,

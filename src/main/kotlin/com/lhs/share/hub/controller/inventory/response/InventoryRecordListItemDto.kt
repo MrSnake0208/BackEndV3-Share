@@ -21,6 +21,7 @@ data class InventoryRecordListItemDto(
     val stockEffect: String,
     val transactionId: String?,
     val entries: List<InventoryRecordEntryDto>,
+    val resourceRevision: Long? = null,
 ) {
     companion object {
         fun of(record: InventoryRecord): InventoryRecordListItemDto = InventoryRecordListItemDto(
@@ -35,6 +36,7 @@ data class InventoryRecordListItemDto(
             stockEffect = record.stockEffect,
             transactionId = record.transactionId,
             entries = record.entries.map { InventoryRecordEntryDto(id = it.id, name = it.name, count = it.count) },
+            resourceRevision = record.resourceRevision,
         )
     }
 }

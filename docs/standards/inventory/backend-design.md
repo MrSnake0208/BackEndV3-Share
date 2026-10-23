@@ -322,6 +322,18 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 
 本人 JWT `GET /user/open-api/tokens/{tokenId}/first-sync` 先校验 token 归属，再按 userId/accountId/sourceConnectionId/stockEffect=applied 查询已有流水。只返回记录编号与服务端接收时间等证据，不返回库存全量或 token 明文；无缓存、无写入。history_only/superseded、手工记录与普通更新时间均不是成功证据。删除记录或撤销连接后，以重新查询结果为准，不信任客户端历史完成标记。
 
+## 符传快捷记账（站内命令）
+
+JWT专用 `GET /v1/inventory/draw-resources?account_id=...` 返回 `{account_id,game,inventory_revision,balances:{baijinbi,fuchuan,tianjifuchuan}}`。每项余额须有 full/listed 快照基准；无基准返回null，不把奖励合计视为已盘点库存。读取不写入且禁止缓存。
+
+`POST /v1/inventory/draw-resources` 正文严格为 `{account_id,game,operation_id,expected_inventory_revision,action,ticket_id,quantity,channel}`；action为gain/use/exchange，ticket_id仅fuchuan/tianjifuchuan，quantity为正整数张数。gain的channel为1–64字符奖励来源（不含派遣），use固定use；exchange的channel仅standard（200白金币/张）或monthly-shop（仅普通符传，数量须为10的倍数，每10张1600白金币）。禁止客户端价格、user_id、发生时间和其他扩展字段。成功返回 `ApiResult<InventoryRecordListItemDto>`；错误沿用库存错误契约。
+
+整笔命令在Hub事务内校验账号生命周期fence、游戏版本、inventory revision CAS和各资源余额，所有结果限制在0..Int.MAX_VALUE。使用服务端毫秒时间；不允许尚未过去的快照覆盖本次操作。gain写reward_delta，use/exchange写内部resource_delta（有符号entries），兑换两边为同一条记录，不计入获得量。无需新集合/索引。库存读仍直接读取current。
+
+记录ID为yuanhub:draw:<operation_id>，记录保存resourceRequestIdentity（规范类型请求JSON）和resourceRevision（该命令提交的库存版本）；同ID同正文返回原记录，不再扣款；异文409。已删除操作不允许原样重试复活，只能显式restore。身份字段不通过记录列表DTO或交换档案返回。
+
+resource_delta在删除/恢复时按每项基准应用有符号变动，同毫秒命令按resourceRevision排序且快照最终权威；缺基准、负余额或溢出返回409 resource_replay_conflict并回滚整笔删除/恢复。既有consumption_delta仍禁止单条删除。操作历史列表附带可空resource_revision用于前端同序重建。v2交换导入仍仅接受reward_delta/stock_snapshot，导出以当前快照迁移状态，使用/兑换的内部流水不导出。
+
 ## 邮箱月卡储备（独立于库存事实）
 
 本人 JWT `GET/PUT /v1/inventory/mailbox-reserve?account_id=...`，沿用 ApiResult 成功封装和库存错误响应，禁止缓存。PUT：`{expected_version, white_coin_mails:[{count,coins_per_mail}], fu_chuan_mail_count}`；响应：`{account_id,white_coin_mails,fu_chuan_mail_count,version,updated_at}`。普通符传按每封3个折算；白金币按行相乘求和，不含体力/购买赠送。
