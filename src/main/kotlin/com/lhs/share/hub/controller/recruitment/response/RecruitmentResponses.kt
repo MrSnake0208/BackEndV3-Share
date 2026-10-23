@@ -24,6 +24,13 @@ data class RecruitmentSummary(
     val mostObtainedGoldAgents: List<RecruitmentAgentCount>? = null,
     val mostNonUpGoldAgents: List<RecruitmentAgentCount>? = null,
     val mostPermanentGoldAgents: List<RecruitmentAgentCount>? = null,
+    val upGoldCount: Long? = null,
+    val knownUpGoldCount: Long? = null,
+    val unknownUpGoldCount: Long? = null,
+    val totalUpRate: Double? = null,
+    val guaranteedGoldCount: Long? = null,
+    val pityHistoryAssumption: String? = null,
+    val pityStatus: String? = null,
 )
 
 data class RecruitmentAgentCount(val agentId: String, val name: String, val count: Long)
