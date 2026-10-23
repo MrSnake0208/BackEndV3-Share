@@ -17,8 +17,8 @@ import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
 import com.lhs.share.hub.repository.OperatorMilestoneRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
-import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
@@ -28,6 +28,7 @@ import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.StarCompletionRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
+import com.lhs.share.hub.repository.StarScanRecordRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -86,6 +87,7 @@ class SubAccountService(
     private val operatorRelationships: OperatorRelationshipRepository? = null,
     private val bonds: com.lhs.share.hub.repository.BondRepository? = null,
     private val bondPreviews: com.lhs.share.hub.service.bond.BondImportPreviews? = null,
+    private val starScanRecords: StarScanRecordRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -221,6 +223,7 @@ class SubAccountService(
                 operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starCompletionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                starScanRecords?.deleteByUserIdAndAccountId(userId, accountId)
                 inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)
                 trainingWorkspaceRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 staminaScheduleRepository?.deleteAllByUserIdAndAccountId(userId, accountId)

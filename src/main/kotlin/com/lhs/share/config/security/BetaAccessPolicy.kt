@@ -14,6 +14,7 @@ object BetaAccessPolicy {
         "/v1/star-loadout",
         "/v1/star-loadout-presets",
         "/v1/star/captures",
+        "/v1/star/scans",
         "/hub/ledger/plan",
     )
 

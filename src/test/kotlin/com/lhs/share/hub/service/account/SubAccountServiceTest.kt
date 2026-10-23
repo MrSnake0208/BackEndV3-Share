@@ -12,11 +12,11 @@ import com.lhs.share.hub.repository.OperatorCorrectionRecordRepository
 import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.OperatorDailyTasksRepository
 import com.lhs.share.hub.repository.OperatorGrowthTargetRepository
-import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorMilestoneRepository
 import com.lhs.share.hub.repository.OperatorOrganizationRepository
 import com.lhs.share.hub.repository.OperatorPlannerImportRepository
 import com.lhs.share.hub.repository.OperatorRecordRepository
+import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.OperatorScanReviewRepository
 import com.lhs.share.hub.repository.OperatorStaminaScheduleRepository
 import com.lhs.share.hub.repository.OperatorTrainingWorkspaceRepository
@@ -26,6 +26,7 @@ import com.lhs.share.hub.repository.RecruitmentRepository
 import com.lhs.share.hub.repository.StarCompletionRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
+import com.lhs.share.hub.repository.StarScanRecordRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.SubAccountRepository
 import com.lhs.share.hub.repository.entity.SubAccount
@@ -74,6 +75,7 @@ class SubAccountServiceTest {
     private val milestoneRepository = mockk<OperatorMilestoneRepository>(relaxed = true)
     private val dailyTasksRepository = mockk<OperatorDailyTasksRepository>(relaxed = true)
     private val plannerImportRepository = mockk<OperatorPlannerImportRepository>(relaxed = true)
+    private val starScanRecords = mockk<StarScanRecordRepository>(relaxed = true)
     private val starStateRepository = mockk<StarStateCurrentRepository>(relaxed = true)
     private val starRecoveryRepository = mockk<StarRecoveryPointRepository>(relaxed = true)
     private val starLoadoutRepository = mockk<StarLoadoutCurrentRepository>(relaxed = true)
@@ -128,6 +130,7 @@ class SubAccountServiceTest {
         operatorDailyTasksRepository = dailyTasksRepository,
         operatorMilestoneRepository = milestoneRepository,
         operatorRelationships = relationships,
+        starScanRecords = starScanRecords,
     )
 
     @Test
@@ -276,6 +279,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { dailyTasksRepository.deleteAccount("u1", "main") }
         verify(exactly = 1) { plannerImportRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starStateRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { starScanRecords.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starRecoveryRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { starLoadoutRepository.deleteAllByUserIdAndAccountId("u1", "main") }
 
@@ -417,7 +421,8 @@ class SubAccountServiceTest {
 
     @Test
     fun `relationship facts prevent switching game`() {
-        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns SubAccount(userId = "u1", accountId = "main", name = "test", game = "如鸢")
+        every { accountRepository.findByUserIdAndAccountId("u1", "main") } returns
+            SubAccount(userId = "u1", accountId = "main", name = "test", game = "如鸢")
         every { relationships.hasSubstantiveData("u1", "main") } returns true
         val error = assertThrows(InventoryApiException::class.java) { service.update("u1", "main", null, "代号鸢") }
         assertEquals("operator_relationship_game_locked", error.code)

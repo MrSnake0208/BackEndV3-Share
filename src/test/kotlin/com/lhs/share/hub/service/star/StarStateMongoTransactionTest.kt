@@ -1,9 +1,16 @@
 package com.lhs.share.hub.service.star
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.node.IntNode
 import com.fasterxml.jackson.databind.node.NullNode
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.lhs.share.hub.controller.star.request.StarInventoryEntryRequest
 import com.lhs.share.hub.controller.star.request.StarLoadoutCurrentRequest
+import com.lhs.share.hub.controller.star.request.StarScanApplyRequest
+import com.lhs.share.hub.controller.star.request.StarScanObservation
+import com.lhs.share.hub.controller.star.request.StarScanReportRequest
+import com.lhs.share.hub.controller.star.request.StarScanSelection
 import com.lhs.share.hub.controller.star.request.StarStatePatchRequest
 import com.lhs.share.hub.controller.star.request.StarStateRebuildRequest
 import com.lhs.share.hub.controller.star.request.StarStateRestoreRequest
@@ -13,8 +20,11 @@ import com.lhs.share.hub.repository.OperatorCurrentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepository
 import com.lhs.share.hub.repository.StarLoadoutCurrentRepositoryImpl
 import com.lhs.share.hub.repository.StarRecoveryPointRepository
+import com.lhs.share.hub.repository.StarScanRecordRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepository
 import com.lhs.share.hub.repository.StarStateCurrentRepositoryImpl
+import com.lhs.share.hub.repository.SubAccountRepository
+import com.lhs.share.hub.repository.SubAccountRepositoryImpl
 import com.lhs.share.hub.repository.entity.OperatorCurrent
 import com.lhs.share.hub.repository.entity.OperatorEntry
 import com.lhs.share.hub.repository.entity.StarLoadoutSlots
@@ -23,6 +33,7 @@ import com.lhs.share.hub.repository.entity.StarRecoveryPoint
 import com.lhs.share.hub.repository.entity.StarStateSnapshot
 import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.repository.entity.snapshot
+import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
 import com.lhs.share.testinfra.TestMongo
@@ -92,6 +103,141 @@ class StarStateMongoTransactionTest {
     @AfterEach fun cleanup() {
         TestMongo.dropDatabase(client, database)
         client.close()
+    }
+
+    private fun scanService(
+        records: StarScanRecordRepository = factory.getRepository(StarScanRecordRepository::class.java),
+    ): StarScanService = StarScanService(
+        records,
+        accounts,
+        factory.getRepository(SubAccountRepository::class.java, RepositoryFragments.just(SubAccountRepositoryImpl(template))),
+        stateService,
+        loadouts,
+        mockk<AccountEventService>(relaxed = true),
+        jacksonObjectMapper().registerModule(JavaTimeModule()).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE),
+        tx,
+    )
+
+    private fun report() = StarScanReportRequest(
+        format = "myshare-star-scan", version = 1, recordId = "scan1", expectedAccountId = "a", game = "如鸢",
+        capturedAt = now, width = 720, height = 1280, dpi = 320,
+        sections = mapOf("main" to true, "support" to true, "experience" to true),
+        entries = listOf(StarScanObservation("o1", "main", "天府", "orange", 20)),
+    )
+
+    private fun prepareScan(): Pair<StarScanService, StarScanApplyRequest> {
+        template.createCollection("star_scan_records")
+        template.insert(account)
+        stateService.patch(
+            "owner",
+            "a",
+            StarStatePatchRequest(
+                0,
+                0,
+                listOf(main("kept").copy(level = 20, breakthroughStage = IntNode(2))),
+                mapOf("kept" to 50),
+                StarWorkspaceExperienceRequest(3, 4, 5),
+                StarWorkspaceBagRequest(1, 100),
+            ),
+        )
+        val equipped = loadoutService.putCurrent("owner", "a", loadout(0, 0, "kept"))
+        val service = scanService()
+        service.upload("owner", "a", report())
+        return service to StarScanApplyRequest(
+            0,
+            1,
+            equipped.revision,
+            listOf(StarScanSelection("o1", "kept", "main", "天府", "orange", 20)),
+            experience = StarWorkspaceExperienceRequest(orange = 0),
+        )
+    }
+
+    @Test fun `scan upload stages only then reviewed import preserves relations and retries exactly once`() {
+        val (service, command) = prepareScan()
+        assertEquals(1, stateService.current("owner", "a").revision)
+        assertEquals("needs_review", service.upload("owner", "a", report()).status)
+        assertThrows(InventoryApiException::class.java) { service.upload("owner", "a", report().copy(warnings = listOf("different"))) }
+        val receipt = service.apply("owner", "a", "scan1", command)
+        assertEquals("kept", receipt.state.inventory.single().instanceId)
+        assertEquals(2, receipt.state.inventory.single().breakthroughStage)
+        assertEquals(mapOf("kept" to 50), receipt.state.planTargets)
+        assertEquals("kept", receipt.loadout.loadouts["operator.1"]?.get("main1"))
+        assertEquals(0, receipt.state.experience.orange)
+        assertEquals(4, receipt.state.experience.purple)
+        assertNotNull(receipt.recoveryPoint)
+        assertEquals(receipt, service.apply("owner", "a", "scan1", command))
+        assertEquals(2, stateService.current("owner", "a").revision)
+        assertTrue(service.pending("owner", "a").isEmpty())
+        assertThrows(InventoryApiException::class.java) { service.apply("owner", "a", "scan1", command.copy(confirmRemovals = true)) }
+        val point = points.findByUserIdAndAccountIdAndRecoveryPointId("owner", "a", receipt.recoveryPoint!!.recoveryPointId)!!
+        assertEquals("kept", point.loadouts!!.single().slots.main1)
+    }
+
+    @Test fun `real MaaYuan emulator report stages and imports without merging identical owned stars`() {
+        val mapper = jacksonObjectMapper().registerModule(JavaTimeModule()).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+        val captured = javaClass.getResourceAsStream("/star/maayuan-720x1280-scan.json")!!.use {
+            mapper.readValue(it, StarScanReportRequest::class.java)
+        }
+        assertEquals(230, captured.entries.size)
+        assertEquals(4, captured.experience.purple)
+        assertEquals(150, captured.experience.white)
+        val capturedAccount = account.copy(game = captured.game)
+        every { accounts.requireAccount("owner", "a") } returns capturedAccount
+        template.createCollection("star_scan_records")
+        template.insert(capturedAccount)
+        val service = scanService()
+        val before = stateService.current("owner", "a")
+        service.upload("owner", "a", captured)
+        assertEquals(before, stateService.current("owner", "a"))
+        val command = StarScanApplyRequest(
+            before.generation,
+            before.revision,
+            0,
+            captured.entries.map {
+                // Simulate the player filling unresolved levels before explicit confirmation.
+                StarScanSelection(it.observationId, null, it.kind, checkNotNull(it.name), checkNotNull(it.quality), it.level ?: 1)
+            },
+            captured.experience,
+            captured.bag,
+        )
+        val receipt = service.apply("owner", "a", captured.recordId, command)
+        assertEquals(230, receipt.state.inventory.size)
+        assertEquals(230, receipt.state.inventory.map { it.instanceId }.toSet().size)
+        assertEquals(230, receipt.state.bag.currentCount)
+        assertEquals(receipt, service.apply("owner", "a", captured.recordId, command))
+        assertTrue(service.pending("owner", "a").isEmpty())
+    }
+
+    @Test fun `scan rejects stale loadouts missing removal confirmation foreign records and discarded batches`() {
+        val (service, command) = prepareScan()
+        assertThrows(InventoryApiException::class.java) { service.apply("owner", "a", "scan1", command.copy(expectedLoadoutRevision = 0)) }
+        assertThrows(InventoryApiException::class.java) { service.apply("owner", "a", "scan1", command.copy(entries = emptyList())) }
+        every { accounts.requireAccount("owner", "b") } returns account.copy(accountId = "b")
+        assertThrows(InventoryApiException::class.java) { service.review("owner", "b", "scan1") }
+        assertThrows(InventoryApiException::class.java) { service.upload("owner", "b", report()) }
+        assertEquals(1, stateService.current("owner", "a").revision)
+        service.discard("owner", "a", "scan1")
+        assertEquals("discarded", service.upload("owner", "a", report()).status)
+        assertThrows(InventoryApiException::class.java) { service.apply("owner", "a", "scan1", command) }
+        assertEquals(1, stateService.current("owner", "a").revision)
+    }
+
+    @Test fun `scan receipt failure rolls back state loadouts and recovery point`() {
+        val (_, command) = prepareScan()
+        val real = factory.getRepository(StarScanRecordRepository::class.java)
+        val failing = mockk<StarScanRecordRepository>()
+        every { failing.findByUserIdAndAccountIdAndRecordId(any(), any(), any()) } answers {
+            real.findByUserIdAndAccountIdAndRecordId(firstArg(), secondArg(), thirdArg())
+        }
+        every { failing.save(any()) } throws IllegalStateException("receipt write failed")
+        assertThrows(IllegalStateException::class.java) {
+            scanService(failing).apply("owner", "a", "scan1", command.copy(entries = emptyList(), confirmRemovals = true))
+        }
+        assertEquals("kept", stateService.current("owner", "a").inventory.single().instanceId)
+        assertEquals(1, stateService.current("owner", "a").revision)
+        assertEquals("kept", loadouts.findByUserIdAndAccountId("owner", "a")!!.loadouts.single().slots.main1)
+        assertEquals(0, points.count())
+        assertEquals(null, real.findByUserIdAndAccountIdAndRecordId("owner", "a", "scan1")!!.receipt)
     }
 
     @Test fun `legacy PATCH preserves breakthroughs explicit null clears and rebuild never inherits`() {
