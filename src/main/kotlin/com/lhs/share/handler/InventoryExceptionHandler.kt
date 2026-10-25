@@ -50,6 +50,8 @@ private val inventoryLog = KotlinLogging.logger { }
         StarLoadoutController::class,
         StarLoadoutPresetController::class,
         StarCaptureController::class,
+        com.lhs.share.hub.controller.star.StarScanController::class,
+        com.lhs.share.openapi.OpenApiStarScanController::class,
         OpenApiInventoryController::class,
         OpenApiStarCaptureController::class,
     ],

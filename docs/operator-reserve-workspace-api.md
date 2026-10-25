@@ -4,7 +4,7 @@
 
 ## 请求与响应
 
-需要登录及现有密探功能访问权限，账户须属于当前认证用户。
+需要登录、现有密探功能访问权限及 `operator_reserve:use`。此权限当前仅授予平台管理员（`PLATFORM_ADMIN`）与超级管理员（`SUPER_ADMIN`），普通用户和内测用户均不可访问；账户仍须属于当前认证用户。未登录返回 401，无功能权限返回 403 `feature_forbidden`，且不会读取或修改工作区。已有方案保留，真实培养规划不受影响。
 
 - `GET /v1/operator/reserve-workspace?account_id=...`：返回完整工作区。首次读取返回 revision 0、plans 空数组、active_plan_id null、updated_at null，不创建任何数据、不更新账户 fence、不发布事件。
 - `PUT /v1/operator/reserve-workspace?account_id=...`：整个工作区按 expected_revision 替换。只接受下列正文，不接受 user_id、account_id、game 或 read_only 等响应字段。
