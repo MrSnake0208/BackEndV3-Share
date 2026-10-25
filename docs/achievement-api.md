@@ -12,7 +12,7 @@
 
 ## 接口与保存约束
 
-沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；目录及管理接口同样要求网站登录和 `archive:access`（`SUPER_ADMIN` 或 `ARCHIVE_USER`），目录管理另须原写权限，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
+沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；目录及管理接口同样要求网站登录和 `archive:access`（暂仅 `SUPER_ADMIN` 或 `PLATFORM_ADMIN`，普通/内测及历史 `ARCHIVE_USER` 不放行），目录管理另须原写权限，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
 
 | 方法与路径 | 输入 | 返回 |
 | --- | --- | --- |

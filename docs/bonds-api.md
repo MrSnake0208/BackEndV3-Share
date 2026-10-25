@@ -2,7 +2,7 @@
 
 本模块原生复用网站JWT、Beta资格、游戏账号与密探目录；没有外部账号体系、个人localStorage权威存储或库存奖励写入。所有接口沿用ApiResult、snake_case及InventoryError，响应 `Cache-Control: no-store`。
 
-所有玩家及目录管理接口（含 catalog）要求网站登录和 `archive:access`：超级管理员自动拥有，其他用户须授予 `ARCHIVE_USER`。目录管理另须原有 `bond_catalog:write`；普通平台管理员不会自动获得访问权。
+所有玩家及目录管理接口（含 catalog）要求网站登录和 `archive:access`：暂仅超级管理员和平台管理员拥有，普通用户、内测用户及历史 `ARCHIVE_USER` 不放行。目录管理另须原有 `bond_catalog:write`；历史记录与角色绑定保留。
 
 ## 数据与计数
 
