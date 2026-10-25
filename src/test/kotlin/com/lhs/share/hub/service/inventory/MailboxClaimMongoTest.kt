@@ -107,8 +107,9 @@ class MailboxClaimMongoTest {
 
     private fun balance(id: String) = current.findByUserIdAndAccountIdAndEntityType("owner", "main", "item")!!.entries[id]?.count ?: 0L
 
-    private fun selected(coins: String = "1,0", tickets: String = "1", operation: String = "partial", version: Long = 1) =
-        mapper.readTree("""{"expected_version":$version,"operation_id":"$operation","selection":{"white_coin_mail_counts":[$coins],"fu_chuan_mail_count":$tickets}}""")
+    private fun selected(coins: String = "1,0", tickets: String = "1", operation: String = "partial", version: Long = 1) = mapper.readTree(
+        """{"expected_version":$version,"operation_id":"$operation","selection":{"white_coin_mail_counts":[$coins],"fu_chuan_mail_count":$tickets}}""",
+    )
 
     @Test
     fun `partial claim keeps unclaimed groups and retries cannot increase stock twice`() {
@@ -137,7 +138,9 @@ class MailboxClaimMongoTest {
             selected("3,0"), selected("1"), selected("1,0,0"), selected("-1,0"), selected("0.5,0"),
             selected("0,0", "0"), selected(tickets = "3"), selected(tickets = "null"),
             mapper.readTree("""{"expected_version":1,"operation_id":"bad","selection":null}"""),
-            mapper.readTree("""{"expected_version":1,"operation_id":"bad","selection":{"white_coin_mail_counts":[1,0],"fu_chuan_mail_count":1,"extra":1}}"""),
+            mapper.readTree(
+                """{"expected_version":1,"operation_id":"bad","selection":{"white_coin_mail_counts":[1,0],"fu_chuan_mail_count":1,"extra":1}}""",
+            ),
         ).forEach { invalid -> assertThrows(InventoryApiException::class.java) { service.claim("owner", "main", invalid) } }
         assertEquals(reserve, accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve)
         assertEquals(10000L, balance("baijinbi"))

@@ -39,17 +39,28 @@ class MailboxClaimService(
             invalid("邮件领取参数无效，请重新读取储备")
         }
         if (selection != null && (
-                !selection.isObject || selection.fieldNames().asSequence().toSet() != setOf("white_coin_mail_counts", "fu_chuan_mail_count") ||
+                !selection.isObject || selection.fieldNames().asSequence().toSet() != setOf(
+                    "white_coin_mail_counts",
+                    "fu_chuan_mail_count",
+                ) ||
                     !selection.path("white_coin_mail_counts").isArray || selection.path("white_coin_mail_counts").size() > 20 ||
                     selection.path("white_coin_mail_counts").any { !validCount(it) } || !validCount(selection.path("fu_chuan_mail_count"))
                 )
-        ) invalid("请选择正确的邮件领取封数")
+        ) {
+            invalid("请选择正确的邮件领取封数")
+        }
         val chosenCoins = selection?.path("white_coin_mail_counts")?.map { it.intValue() }
         val chosenTickets = selection?.path("fu_chuan_mail_count")?.intValue()
         // Selection is part of the receipt ID, so changing a timed-out request cannot falsely confirm another claim.
-        val suffix = if (chosenCoins == null) "" else ":" + HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256").digest((chosenCoins.joinToString(",") + ":" + chosenTickets).toByteArray()), 0, 16,
-        )
+        val suffix = if (chosenCoins == null) {
+            ""
+        } else {
+            ":" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest((chosenCoins.joinToString(",") + ":" + chosenTickets).toByteArray()),
+                0,
+                16,
+            )
+        }
         val recordId = "yuanhub:mail:${version.longValue()}:${operation.textValue()}$suffix"
         return checkNotNull(
             transactions.execute {
@@ -66,8 +77,11 @@ class MailboxClaimService(
                 val coinCounts = chosenCoins ?: reserve.whiteCoinMails.map { it.count }
                 val ticketCount = chosenTickets ?: reserve.fuChuanMailCount
                 if (coinCounts.size != reserve.whiteCoinMails.size ||
-                    coinCounts.zip(reserve.whiteCoinMails).any { (count, row) -> count > row.count } || ticketCount > reserve.fuChuanMailCount
-                ) invalid("领取封数不能超过已保存储备")
+                    coinCounts.zip(reserve.whiteCoinMails).any { (count, row) -> count > row.count } ||
+                    ticketCount > reserve.fuChuanMailCount
+                ) {
+                    invalid("领取封数不能超过已保存储备")
+                }
                 val coins = coinCounts.zip(reserve.whiteCoinMails).sumOf { (count, row) -> count.toLong() * row.coinsPerMail }
                 val tickets = ticketCount.toLong() * 3
                 if (coins > Int.MAX_VALUE || tickets > Int.MAX_VALUE) invalid("邮件奖励超过支持上限，请分批维护储备")
