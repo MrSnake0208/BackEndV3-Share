@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
     assignableTypes = [
         OperatorController::class,
         com.lhs.share.hub.controller.operator.OperatorPanelController::class,
+        com.lhs.share.hub.controller.operator.OperatorRelationshipController::class,
         OperatorPlannerController::class,
         OperatorReserveWorkspaceController::class,
         OperatorDailyTasksController::class,

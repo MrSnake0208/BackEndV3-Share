@@ -30,19 +30,23 @@ class AdminAuthorizationServiceTest {
     }
 
     @Test
-    fun `restricted features require explicit roles and do not grant administrator capability`() {
+    fun `roadmap features require platform or super admin even with historical usage roles`() {
         for (role in AdminRole.entries) {
             val userId = role.name
             activeUser(userId)
             every { roleRepository.findById(userId) } returns Optional.of(binding(userId, role))
             every { feedbackRepository.findById(userId) } returns Optional.empty()
             assertEquals(
-                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.ARCHIVE_USER),
+                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.PLATFORM_ADMIN),
                 service.hasPermission(userId, AdminPermission.ARCHIVE_ACCESS),
             )
             assertEquals(
-                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.OPERATOR_PANEL_USER),
+                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.PLATFORM_ADMIN),
                 service.hasPermission(userId, AdminPermission.OPERATOR_PANEL_USE),
+            )
+            assertEquals(
+                role in setOf(AdminRole.SUPER_ADMIN, AdminRole.PLATFORM_ADMIN),
+                service.hasPermission(userId, AdminPermission.OPERATOR_RELATIONSHIP_USE),
             )
             if (role in setOf(AdminRole.ARCHIVE_USER, AdminRole.OPERATOR_PANEL_USER)) {
                 assertFalse(service.hasAnyAdminCapability(userId))
@@ -57,6 +61,13 @@ class AdminAuthorizationServiceTest {
         every { roleRepository.findById("ordinary") } returns Optional.empty()
         assertFalse(service.hasPermission("ordinary", AdminPermission.ARCHIVE_ACCESS))
         assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_PANEL_USE))
+        assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_RELATIONSHIP_USE))
+        for (role in listOf(AdminRole.PLATFORM_ADMIN, AdminRole.SUPER_ADMIN)) {
+            every { userService.get(role.name) } returns MaaUserInfo(role.name, "disabled", activated = false)
+            assertFalse(service.hasPermission(role.name, AdminPermission.ARCHIVE_ACCESS))
+            assertFalse(service.hasPermission(role.name, AdminPermission.OPERATOR_PANEL_USE))
+            assertFalse(service.hasPermission(role.name, AdminPermission.OPERATOR_RELATIONSHIP_USE))
+        }
     }
 
     @Test

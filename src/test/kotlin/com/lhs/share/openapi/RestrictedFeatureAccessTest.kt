@@ -11,6 +11,7 @@ import com.lhs.share.hub.controller.achievement.response.AchievementCatalogRespo
 import com.lhs.share.hub.controller.bond.BondCatalogAdminController
 import com.lhs.share.hub.controller.bond.BondController
 import com.lhs.share.hub.controller.operator.OperatorPanelController
+import com.lhs.share.hub.controller.operator.OperatorRelationshipController
 import com.lhs.share.hub.controller.operator.response.OperatorPanelResponse
 import com.lhs.share.hub.repository.entity.BondPublication
 import com.lhs.share.hub.service.achievement.AchievementCatalogService
@@ -20,6 +21,7 @@ import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.bond.BondCatalogService
 import com.lhs.share.hub.service.bond.BondService
 import com.lhs.share.hub.service.operator.OperatorPanelService
+import com.lhs.share.hub.service.operator.OperatorRelationshipService
 import io.mockk.Called
 import io.mockk.every
 import io.mockk.mockk
@@ -41,6 +43,7 @@ class RestrictedFeatureAccessTest {
     private val bonds = mockk<BondService>()
     private val bondCatalog = mockk<BondCatalogService>()
     private val panels = mockk<OperatorPanelService>()
+    private val relationships = mockk<OperatorRelationshipService>()
     private val mapper = jacksonObjectMapper()
     private val mvc = MockMvcBuilders.standaloneSetup(
         AchievementController(achievements, achievementCatalog, helper, mapper),
@@ -48,13 +51,14 @@ class RestrictedFeatureAccessTest {
         AchievementCatalogAdminController(mockk(), authorization, helper, mapper),
         BondCatalogAdminController(bondCatalog, authorization, helper, mapper),
         OperatorPanelController(panels, helper),
+        OperatorRelationshipController(relationships, helper),
     ).addInterceptors(RestrictedFeatureInterceptor(authorization, helper))
         .setControllerAdvice(InventoryExceptionHandler(), OperatorExceptionHandler())
         .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
 
     @Test
     fun `anonymous and ungranted users cannot read write import or calculate`() {
-        for (user in listOf(null, "ordinary")) {
+        for (user in listOf(null, "ordinary", "beta-member", "historical-usage-role")) {
             every { helper.obtainUserId() } returns user
             every { authorization.hasPermission(any(), any()) } returns false
             val expected = if (user == null) 401 else 403
@@ -76,8 +80,17 @@ class RestrictedFeatureAccessTest {
                 mvc.perform(post("/v1/operator/panel/$suffix").contentType(MediaType.APPLICATION_JSON).content("{}"))
                     .andExpect(status().`is`(expected))
             }
+            mvc.perform(get("/v1/operator/relationships/catalog").param("game", "如鸢"))
+                .andExpect(status().`is`(expected))
+            mvc.perform(get("/v1/operator/relationships").param("account_id", "a"))
+                .andExpect(status().`is`(expected))
+            mvc.perform(
+                patch("/v1/operator/relationships").param("account_id", "a")
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"),
+            )
+                .andExpect(status().`is`(expected))
         }
-        verify { listOf(achievements, achievementCatalog, bonds, bondCatalog, panels) wasNot Called }
+        verify { listOf(achievements, achievementCatalog, bonds, bondCatalog, panels, relationships) wasNot Called }
     }
 
     @Test
@@ -100,5 +113,10 @@ class RestrictedFeatureAccessTest {
         mvc.perform(post("/v1/operator/panel/preview").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isOk)
         mvc.perform(get("/v1/achievements/catalog").param("game", "如鸢")).andExpect(status().isForbidden)
+        every { authorization.hasPermission("member", AdminPermission.OPERATOR_RELATIONSHIP_USE) } returns true
+        every { relationships.catalog("如鸢") } returns emptyMap()
+        mvc.perform(get("/v1/operator/relationships/catalog").param("game", "如鸢")).andExpect(status().isOk)
+        every { authorization.hasPermission("member", AdminPermission.OPERATOR_RELATIONSHIP_USE) } returns false
+        mvc.perform(get("/v1/operator/relationships/catalog").param("game", "如鸢")).andExpect(status().isForbidden)
     }
 }

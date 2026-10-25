@@ -14,6 +14,7 @@ enum class AdminPermission(val value: String) {
     BETA_MANAGE("beta:manage"),
     ARCHIVE_ACCESS("archive:access"),
     OPERATOR_PANEL_USE("operator_panel:use"),
+    OPERATOR_RELATIONSHIP_USE("operator_relationship:use"),
     OPERATOR_CATALOG_WRITE("operator_catalog:write"),
     RECRUITMENT_CATALOG_WRITE("recruitment_catalog:write"),
     ACHIEVEMENT_CATALOG_WRITE("achievement_catalog:write"),
@@ -56,8 +57,10 @@ class AdminAuthorizationService(
         val roles = rolesFor(userId)
         if (AdminRole.SUPER_ADMIN in roles) return true
         return when (permission) {
-            AdminPermission.ARCHIVE_ACCESS -> AdminRole.ARCHIVE_USER in roles
-            AdminPermission.OPERATOR_PANEL_USE -> AdminRole.OPERATOR_PANEL_USER in roles
+            // Roadmap features stay administrator-only until their individual releases.
+            AdminPermission.ARCHIVE_ACCESS,
+            AdminPermission.OPERATOR_PANEL_USE,
+            AdminPermission.OPERATOR_RELATIONSHIP_USE,
             AdminPermission.LEDGER_CATALOG_WRITE,
             AdminPermission.BETA_MANAGE,
             AdminPermission.OPERATOR_CATALOG_WRITE,
