@@ -12,7 +12,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.PlatformTransactionManager
@@ -114,8 +113,10 @@ class OperatorRelationshipServiceTest {
 
     @Test
     fun `shared trust canonicalizes once and rejects conflicting restore values`() {
-        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test",
-            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""))
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot(
+            "test",
+            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""),
+        )
         service.patch("u", "a", body("""{"sp":{"trust":500,"rumors":3}}"""))
         val entries = mapper.readTree(stored!!.entriesJson)
         assertEquals(500, entries.path("op").path("trust").asInt())
@@ -155,8 +156,10 @@ class OperatorRelationshipServiceTest {
 
     @Test
     fun `legacy trust is read without writes and only explicit trust edit resolves aliases`() {
-        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test",
-            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""))
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot(
+            "test",
+            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""),
+        )
         stored = OperatorRelationships("id", "u", "a", "如鸢", """{"op":{"trust":100},"sp":{"trust":200,"rumors":3}}""", 1, Instant.now())
         val before = stored
         service.get("u", "a")
@@ -184,5 +187,4 @@ class OperatorRelationshipServiceTest {
         assertThrows(OperatorApiException::class.java) { service.patch("u", "a", body("""{"op":{"trust":0}}""")) }
         verify(exactly = 0) { repository.replace(any(), any(), any(), any(), any()) }
     }
-
 }

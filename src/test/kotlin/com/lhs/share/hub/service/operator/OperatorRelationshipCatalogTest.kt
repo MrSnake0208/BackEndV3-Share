@@ -19,10 +19,12 @@ class OperatorRelationshipCatalogTest {
     private val catalog = mockk<OperatorCatalogService>()
     private val rules = OperatorRelationshipCatalog(mapper, catalog)
     private fun entry(id: String, name: String, rarity: Int = 5, spOf: String? = null, games: List<String> = listOf("如鸢", "代号鸢")) =
-        OperatorCatalogEntryResponse.of(OperatorCatalogEntity(
-            operatorId = id, name = name, rarity = rarity, spOf = spOf, games = games,
-            prof = emptyList(), subProf = emptyList(), discs = emptyList(), starStones = emptyList(), catalogVersion = "fixture",
-        ))
+        OperatorCatalogEntryResponse.of(
+            OperatorCatalogEntity(
+                operatorId = id, name = name, rarity = rarity, spOf = spOf, games = games,
+                prof = emptyList(), subProf = emptyList(), discs = emptyList(), starStones = emptyList(), catalogVersion = "fixture",
+            ),
+        )
     private fun use(vararg entries: OperatorCatalogEntryResponse) {
         every { catalog.catalog() } returns OperatorCatalogResponse(catalogVersion = "same-version", operators = entries.toList())
     }
@@ -62,8 +64,13 @@ class OperatorRelationshipCatalogTest {
 
     @Test
     fun `ambiguous names missing roots and foreign game entries cannot fabricate rules`() {
-        use(entry("a", "陈登"), entry("b", "陈登"), entry("unknown", "未知密探"),
-            entry("dangling", "陈登·黍王", spOf = "gone"), entry("foreign", "魏延", games = listOf("代号鸢")))
+        use(
+            entry("a", "陈登"),
+            entry("b", "陈登"),
+            entry("unknown", "未知密探"),
+            entry("dangling", "陈登·黍王", spOf = "gone"),
+            entry("foreign", "魏延", games = listOf("代号鸢")),
+        )
         val result = rules.snapshot("如鸢").operators
         assertTrue(result.path("a").path("trust").isNull)
         assertTrue(result.path("b").path("trust").isNull)

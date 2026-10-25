@@ -1,14 +1,14 @@
 package com.lhs.share.hub.service.operator
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.lhs.share.hub.repository.OperatorRelationshipRepository
 import com.lhs.share.hub.repository.SubAccountRepository
-import com.lhs.share.hub.repository.entity.SubAccount
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
+import com.lhs.share.hub.repository.entity.OperatorRelationships
+import com.lhs.share.hub.repository.entity.SubAccount
+import com.lhs.share.testinfra.TestMongo
 import io.mockk.every
 import io.mockk.mockk
-import com.lhs.share.hub.repository.OperatorRelationshipRepository
-import com.lhs.share.hub.repository.entity.OperatorRelationships
-import com.lhs.share.testinfra.TestMongo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -91,6 +91,7 @@ class OperatorRelationshipMongoTest {
         }
         assertEquals(before, repository.find("u", "a", "如鸢"))
     }
+
     @Test fun `legacy group resolution is atomic and scoped to its account`() {
         val mapper = jacksonObjectMapper()
         val accounts = mockk<SubAccountRepository>()
@@ -98,11 +99,15 @@ class OperatorRelationshipMongoTest {
         val rules = mockk<OperatorRelationshipCatalog>()
         every { accounts.findByUserIdAndAccountId("u", "a") } returns SubAccount(userId = "u", accountId = "a", name = "test", game = "如鸢")
         every { accounts.fenceRecruitmentWrite("u", "a", "如鸢") } returns true
-        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot("test",
-            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""))
+        every { rules.snapshot("如鸢") } returns OperatorRelationshipCatalog.Snapshot(
+            "test",
+            mapper.readTree("""{"op":{"trust_owner_id":"op","trust":{"max":1000}},"sp":{"trust_owner_id":"op"}}"""),
+        )
         every { operators.getOperator(any()) } answers {
-            OperatorCatalogEntity(operatorId = firstArg(), name = "test", rarity = 5, games = listOf("如鸢"),
-                prof = emptyList(), subProf = emptyList(), discs = emptyList(), starStones = emptyList(), catalogVersion = "1")
+            OperatorCatalogEntity(
+                operatorId = firstArg(), name = "test", rarity = 5, games = listOf("如鸢"),
+                prof = emptyList(), subProf = emptyList(), discs = emptyList(), starStones = emptyList(), catalogVersion = "1",
+            )
         }
         val service = OperatorRelationshipService(accounts, operators, rules, repository, mapper, transaction)
         val legacy = """{"op":{"trust":100},"sp":{"trust":200,"rumors":3}}"""
@@ -122,5 +127,4 @@ class OperatorRelationshipMongoTest {
         assertThrows(OperatorApiException::class.java) { service.patch("u", "a", body) }
         assertEquals(saved, repository.find("u", "a", "如鸢"))
     }
-
 }

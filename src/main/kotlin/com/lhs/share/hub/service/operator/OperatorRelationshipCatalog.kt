@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Service
-import java.time.LocalDate
 import java.security.MessageDigest
+import java.time.LocalDate
 
 @Service
 class OperatorRelationshipCatalog(private val mapper: ObjectMapper, private val catalog: OperatorCatalogService) {
@@ -24,15 +24,27 @@ class OperatorRelationshipCatalog(private val mapper: ObjectMapper, private val 
             fields(subject, setOf("warrior_id", "name", "max"))
             require(subject.path("warrior_id").isIntegralNumber && subject.path("warrior_id").canConvertToLong())
             require(subject.path("warrior_id").asLong() > 0 && ids.add(subject.path("warrior_id").asLong()))
-            require(subject.path("name").isTextual && subject.path("name").asText().isNotBlank() && names.add(subject.path("name").asText()))
-            require(subject.path("max").isIntegralNumber && subject.path("max").canConvertToLong() && subject.path("max").asLong() in setOf(2000L, 10000L))
+            require(
+                subject.path("name").isTextual && subject.path("name").asText().isNotBlank() && names.add(subject.path("name").asText()),
+            )
+            require(
+                subject.path("max").isIntegralNumber && subject.path("max").canConvertToLong() &&
+                    subject.path("max").asLong() in setOf(2000L, 10000L),
+            )
         }
         // Validate the full table before clipping profiles so invalid high thresholds cannot disappear.
         val full = profile(10000)
-        validate(mapper.valueToTree(mapOf("version" to "validation", "games" to mapOf(
-            "如鸢" to mapOf("base" to mapOf("trust_owner_id" to "base", "trust" to full, "rumors" to null)),
-            "代号鸢" to emptyMap<String, Any>(),
-        ))))
+        validate(
+            mapper.valueToTree(
+                mapOf(
+                    "version" to "validation",
+                    "games" to mapOf(
+                        "如鸢" to mapOf("base" to mapOf("trust_owner_id" to "base", "trust" to full, "rumors" to null)),
+                        "代号鸢" to emptyMap<String, Any>(),
+                    ),
+                ),
+            ),
+        )
         profiles = setOf(2000L, 10000L).associateWith { cap ->
             full.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().also { rule ->
                 rule.put("max", cap)
@@ -54,24 +66,31 @@ class OperatorRelationshipCatalog(private val mapper: ObjectMapper, private val 
             val owner = entry.spOf?.let { byId[it]?.takeIf { root -> root.spOf == null } } ?: entry.takeIf { it.spOf == null }
             if (owner == null) continue
             val subject = subjectsByName[owner.name]?.takeIf { rootsByName[owner.name]?.size == 1 }
-            resolved.set<JsonNode>(entry.id, mapper.valueToTree(mapOf(
-                "trust_owner_id" to owner.id,
-                "trust" to subject?.let { profiles[it.path("max").asLong()] },
-                "rumors" to null,
-            )))
+            resolved.set<JsonNode>(
+                entry.id,
+                mapper.valueToTree(
+                    mapOf(
+                        "trust_owner_id" to owner.id,
+                        "trust" to subject?.let { profiles[it.path("max").asLong()] },
+                        "rumors" to null,
+                    ),
+                ),
+            )
         }
         val digest = MessageDigest.getInstance("SHA-256").digest((document.toString() + resolved.toString()).toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
         return Snapshot(document.path("version").asText() + ":" + digest, resolved)
     }
 
-    private fun profile(max: Long): JsonNode = mapper.valueToTree(mapOf(
-        "max" to max,
-        "complete" to true,
-        "source" to document.path("source"),
-        "verified_on" to document.path("verified_on"),
-        "milestones" to document.path("milestones"),
-    ))
+    private fun profile(max: Long): JsonNode = mapper.valueToTree(
+        mapOf(
+            "max" to max,
+            "complete" to true,
+            "source" to document.path("source"),
+            "verified_on" to document.path("verified_on"),
+            "milestones" to document.path("milestones"),
+        ),
+    )
 
     companion object {
         const val MAX_VALUE = 9007199254740991L
