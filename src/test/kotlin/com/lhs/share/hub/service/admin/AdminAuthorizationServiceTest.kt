@@ -48,6 +48,9 @@ class AdminAuthorizationServiceTest {
                 role in setOf(AdminRole.SUPER_ADMIN, AdminRole.PLATFORM_ADMIN),
                 service.hasPermission(userId, AdminPermission.OPERATOR_RELATIONSHIP_USE),
             )
+            for (permission in listOf(AdminPermission.OPERATOR_RESERVE_USE, AdminPermission.STAR_SCAN_REVIEW)) {
+                assertEquals(role in setOf(AdminRole.SUPER_ADMIN, AdminRole.PLATFORM_ADMIN), service.hasPermission(userId, permission))
+            }
             if (role in setOf(AdminRole.ARCHIVE_USER, AdminRole.OPERATOR_PANEL_USER)) {
                 assertFalse(service.hasAnyAdminCapability(userId))
                 assertFalse(service.hasPermission(userId, AdminPermission.ADMIN_ROLE_MANAGE))
@@ -62,11 +65,15 @@ class AdminAuthorizationServiceTest {
         assertFalse(service.hasPermission("ordinary", AdminPermission.ARCHIVE_ACCESS))
         assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_PANEL_USE))
         assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_RELATIONSHIP_USE))
+        assertFalse(service.hasPermission("ordinary", AdminPermission.OPERATOR_RESERVE_USE))
+        assertFalse(service.hasPermission("ordinary", AdminPermission.STAR_SCAN_REVIEW))
         for (role in listOf(AdminRole.PLATFORM_ADMIN, AdminRole.SUPER_ADMIN)) {
             every { userService.get(role.name) } returns MaaUserInfo(role.name, "disabled", activated = false)
             assertFalse(service.hasPermission(role.name, AdminPermission.ARCHIVE_ACCESS))
             assertFalse(service.hasPermission(role.name, AdminPermission.OPERATOR_PANEL_USE))
             assertFalse(service.hasPermission(role.name, AdminPermission.OPERATOR_RELATIONSHIP_USE))
+            assertFalse(service.hasPermission(role.name, AdminPermission.OPERATOR_RESERVE_USE))
+            assertFalse(service.hasPermission(role.name, AdminPermission.STAR_SCAN_REVIEW))
         }
     }
 
