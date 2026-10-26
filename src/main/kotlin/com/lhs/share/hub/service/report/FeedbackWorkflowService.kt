@@ -85,8 +85,9 @@ class FeedbackWorkflowService(
             throw ApiResultException(HttpStatus.CONFLICT.value(), "只有处理中工单可转交或接手")
         }
         val area = FeedbackWorkflow.area(previous)
+        categories.requireInSpace(area, FeedbackSpaces.id(previous))
         if (area !in access.operatorAreas(targetUserId)) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "新负责人没有该板块运营权限")
-        if (!access.canControlTicket(actor, previous) && !(actor == targetUserId && area in access.operatorAreas(actor))) {
+        if (!access.canControlTicket(actor, previous) && !(actor == targetUserId && access.canClaimTicket(actor, previous))) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "无权转交或接手")
         }
         val note = reason.trim().takeIf { it.isNotEmpty() }
@@ -116,7 +117,7 @@ class FeedbackWorkflowService(
         ) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "工单当前不可转程序")
         }
-        val area = workArea.trim().uppercase()
+        val area = categories.requireInSpace(workArea, FeedbackSpaces.id(previous))
         if (area !in categories.keys() || area !in access.operatorAreas(checkNotNull(previous.operatorAssigneeUserId))) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "负责人没有目标板块运营权限")
         }
@@ -148,7 +149,7 @@ class FeedbackWorkflowService(
         ) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "请先撤回程序交接")
         }
-        val area = workArea.trim().uppercase()
+        val area = categories.requireInSpace(workArea, FeedbackSpaces.id(previous))
         if (area !in categories.keys()) throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "无效的反馈板块")
         if (previous.operatorAssigneeUserId != null && area !in access.operatorAreas(previous.operatorAssigneeUserId)) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "当前负责人没有目标板块权限，请先转交")
@@ -176,7 +177,7 @@ class FeedbackWorkflowService(
         ) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "工单未转程序")
         }
-        val isDeveloper = FeedbackWorkflow.area(previous) in access.developerAreas(actor)
+        val isDeveloper = access.canViewTicket(actor, previous) && FeedbackWorkflow.area(previous) in access.developerAreas(actor)
         val isOperator = access.canControlTicket(actor, previous)
         if ((mode != "RETURN" || !isDeveloper) && (mode != "WITHDRAW" || !isOperator)) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "无权交回或撤回")

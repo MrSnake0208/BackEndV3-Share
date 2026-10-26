@@ -6,6 +6,8 @@ import com.lhs.share.controller.response.ApiResult.Companion.success
 import com.lhs.share.hub.controller.report.response.PublicFeedbackDetail
 import com.lhs.share.hub.controller.report.response.PublicFeedbackListItem
 import com.lhs.share.hub.controller.report.response.PublicFeedbackPage
+import com.lhs.share.hub.repository.entity.FeedbackSpace
+import com.lhs.share.hub.service.report.FeedbackCategoryService
 import com.lhs.share.hub.service.report.FeedbackPublicService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -27,7 +29,14 @@ import org.springframework.web.bind.annotation.RestController
 class PublicFeedbackController(
     private val service: FeedbackPublicService,
     private val helper: AuthenticationHelper,
+    private val categories: FeedbackCategoryService,
 ) {
+    @GetMapping("/spaces")
+    fun spaces(): ApiResult<List<FeedbackSpace>> = success(categories.spaces().filter { it.active })
+
+    @GetMapping("/spaces/{id}")
+    fun space(@PathVariable id: String): ApiResult<FeedbackSpace> = success(categories.requireSpace(id))
+
     @Operation(summary = "公开反馈列表")
     @GetMapping
     fun list(
@@ -38,6 +47,7 @@ class PublicFeedbackController(
         @RequestParam(required = false) keyword: String?,
         @RequestParam(required = false) completedVersionId: String?,
         @RequestParam(defaultValue = "latest") sort: String,
+        @RequestParam(defaultValue = "yuanhub") spaceId: String = "yuanhub",
     ): ApiResult<PublicFeedbackPage> = success(
         service.list(
             currentUserId = helper.obtainUserId(),
@@ -48,6 +58,7 @@ class PublicFeedbackController(
             keyword = keyword,
             completedVersionId = completedVersionId,
             sort = sort,
+            spaceId = spaceId,
         ),
     )
 
@@ -57,13 +68,15 @@ class PublicFeedbackController(
         @RequestParam title: String,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) limit: Int?,
+        @RequestParam(defaultValue = "yuanhub") spaceId: String = "yuanhub",
     ): ApiResult<List<PublicFeedbackListItem>> = success(
-        service.similar(helper.obtainUserId(), title, type, limit),
+        service.similar(helper.obtainUserId(), title, type, limit, spaceId),
     )
 
     @Operation(summary = "公开反馈详情")
     @GetMapping("/{id}")
-    fun detail(@PathVariable id: String): ApiResult<PublicFeedbackDetail> = success(
-        service.getById(helper.obtainUserId(), id),
-    )
+    fun detail(@PathVariable id: String, @RequestParam(required = false) spaceId: String? = null): ApiResult<PublicFeedbackDetail> =
+        success(
+            service.getById(helper.obtainUserId(), id, spaceId),
+        )
 }

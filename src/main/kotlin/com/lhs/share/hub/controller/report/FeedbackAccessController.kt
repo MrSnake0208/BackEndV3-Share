@@ -10,6 +10,7 @@ import com.lhs.share.hub.controller.report.response.FeedbackAccessGrantResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAccessUserCandidateResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAreaOptionResponse
 import com.lhs.share.hub.controller.report.response.FeedbackAssigneeResponse
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.service.report.FeedbackAccessService
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -26,23 +27,33 @@ class FeedbackAccessController(
     private val service: FeedbackAccessService,
     private val helper: AuthenticationHelper,
 ) {
-    data class FeedbackCategoryRequest(val label: String)
+    data class FeedbackCategoryRequest(val label: String, val spaceId: String = "yuanhub")
+    data class SpaceRequest(val id: String, val label: String, val active: Boolean = true)
     data class FeedbackCategoryVisibilityRequest(val hidden: Boolean)
-    data class FeedbackCategoryOrderRequest(val keys: List<String>, val expectedKeys: List<String>)
+    data class FeedbackCategoryOrderRequest(val keys: List<String>, val expectedKeys: List<String>, val spaceId: String? = null)
 
     @GetMapping("/v1/reports/access")
-    fun current(): ApiResult<CurrentFeedbackAccessResponse> = success(service.current(helper.requireUserId()))
+    fun current(@RequestParam(required = false) spaceId: String? = null): ApiResult<CurrentFeedbackAccessResponse> =
+        success(service.current(helper.requireUserId(), spaceId))
+
+    @PostMapping("/v1/admin/feedback-spaces")
+    fun createSpace(@RequestBody request: SpaceRequest): ApiResult<FeedbackSpace> =
+        success(service.saveSpace(helper.requireUserId(), request.id, request.label, true, create = true))
+
+    @PutMapping("/v1/admin/feedback-spaces/{id}")
+    fun updateSpace(@PathVariable id: String, @RequestBody request: SpaceRequest): ApiResult<FeedbackSpace> =
+        success(service.saveSpace(helper.requireUserId(), id, request.label, request.active, create = false))
 
     @GetMapping("/v1/admin/feedback-access")
     fun list(): ApiResult<List<FeedbackAccessGrantResponse>> = success(service.listGrants(helper.requireUserId()))
 
     @PostMapping("/v1/admin/feedback-categories")
     fun createCategory(@RequestBody request: FeedbackCategoryRequest): ApiResult<FeedbackAreaOptionResponse> =
-        success(service.createCategory(helper.requireUserId(), request.label))
+        success(service.createCategory(helper.requireUserId(), request.label, request.spaceId))
 
     @PutMapping("/v1/admin/feedback-categories/order")
     fun reorderCategories(@RequestBody request: FeedbackCategoryOrderRequest): ApiResult<List<FeedbackAreaOptionResponse>> =
-        success(service.reorderCategories(helper.requireUserId(), request.keys, request.expectedKeys))
+        success(service.reorderCategories(helper.requireUserId(), request.keys, request.expectedKeys, request.spaceId))
 
     @PutMapping("/v1/admin/feedback-categories/{key}")
     fun renameCategory(@PathVariable key: String, @RequestBody request: FeedbackCategoryRequest): ApiResult<FeedbackAreaOptionResponse> =

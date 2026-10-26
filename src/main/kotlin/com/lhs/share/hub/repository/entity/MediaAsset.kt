@@ -59,6 +59,7 @@ data class MediaAsset(
      * 媒体类别。历史记录没有该字段时根据 MIME 兼容推导。
      */
     val kind: MediaKind? = null,
+    val privateStorage: Boolean = false,
 ) : Serializable
 
 enum class MediaKind {

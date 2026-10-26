@@ -30,6 +30,7 @@ data class FeedbackMessageResponse(
     data class ImageInfo(
         val id: String,
         val url: String,
+        val privateStorage: Boolean = false,
     )
 
     data class FileInfo(
@@ -61,6 +62,7 @@ data class FeedbackMessageResponse(
  */
 data class FeedbackReportResponse(
     val id: String,
+    val spaceId: String = "yuanhub",
     val type: String,
     val category: String?,
     val area: String,
@@ -153,6 +155,7 @@ data class FeedbackReportResponse(
  */
 data class FeedbackReportListItem(
     val id: String,
+    val spaceId: String = "yuanhub",
     val type: String,
     val category: String?,
     val area: String,

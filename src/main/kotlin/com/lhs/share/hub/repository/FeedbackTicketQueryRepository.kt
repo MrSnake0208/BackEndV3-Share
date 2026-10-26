@@ -2,6 +2,7 @@ package com.lhs.share.hub.repository
 
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.service.report.FeedbackArea
+import com.lhs.share.hub.service.report.FeedbackSpaces
 import com.lhs.share.hub.service.report.FeedbackType
 import com.lhs.share.hub.service.report.FeedbackVisibility
 import org.bson.Document
@@ -36,8 +37,10 @@ class FeedbackTicketQueryRepository(
         actorUserId: String? = null,
         developerAreas: Set<String> = emptySet(),
         knownAreas: Set<String> = FeedbackArea.all,
+        spaceIds: Set<String>? = null,
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>()
+        spaceIds?.let { filters += FeedbackSpaces.criteria(it) }
         reporterUserId?.let { filters += Criteria.where("reporterUserId").`is`(it) }
         manageableCategories?.let { filters += workAreaSetCriteria(it, knownAreas) }
         if (developerAreas.isEmpty()) workAreas?.let { filters += workAreaSetCriteria(it, knownAreas) }
@@ -142,8 +145,10 @@ class FeedbackTicketQueryRepository(
         completedVersionId: String?,
         sort: String,
         pageable: Pageable,
+        spaceId: String = FeedbackSpaces.DEFAULT,
     ): Page<FeedbackTicket> {
         val filters = mutableListOf<Criteria>(
+            FeedbackSpaces.criteria(setOf(spaceId)),
             Criteria.where("visibility").`is`(FeedbackVisibility.PUBLIC),
             nonReportCriteria(),
             Criteria.where("mergedIntoId").`is`(null),
@@ -172,7 +177,7 @@ class FeedbackTicketQueryRepository(
     /**
      * 相似反馈召回: 只在 PUBLIC 且未合并的反馈中按关键词 regex 粗召回,精确打分由 Service 完成。
      */
-    fun searchPublicSimilar(tokens: List<String>, candidateLimit: Int): List<FeedbackTicket> {
+    fun searchPublicSimilar(tokens: List<String>, candidateLimit: Int, spaceId: String = FeedbackSpaces.DEFAULT): List<FeedbackTicket> {
         if (tokens.isEmpty()) return emptyList()
         val tokenCriteria = tokens.map { token ->
             val pattern = Pattern.compile(Pattern.quote(token), Pattern.CASE_INSENSITIVE)
@@ -182,6 +187,7 @@ class FeedbackTicketQueryRepository(
             )
         }
         val criteria = Criteria().andOperator(
+            FeedbackSpaces.criteria(setOf(spaceId)),
             Criteria.where("visibility").`is`(FeedbackVisibility.PUBLIC),
             nonReportCriteria(),
             Criteria.where("mergedIntoId").`is`(null),
@@ -400,6 +406,8 @@ class FeedbackTicketQueryRepository(
             .set("status", updated.status)
             .set("workflowStage", updated.workflowStage)
             .set("workArea", updated.workArea)
+            .set("category", updated.category)
+            .set("area", updated.area)
             .set("operatorAssigneeUserId", updated.operatorAssigneeUserId)
             .set("operatorAssignedAt", updated.operatorAssignedAt)
             .set("developerReturnedAt", updated.developerReturnedAt)

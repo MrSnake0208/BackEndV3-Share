@@ -32,4 +32,5 @@ data class FeedbackReportCreateRequest(
     @field:Valid
     val diagnostics: FeedbackDiagnosticsRequest? = null,
     val publicConsent: Boolean = false,
+    val spaceId: String = "yuanhub",
 )

@@ -36,7 +36,7 @@ data class MediaUploadResponse(
                 id = checkNotNull(asset.id) { "实体未持久化" },
                 kind = kind.name,
                 name = asset.originalName,
-                url = if (kind == MediaKind.IMAGE) "${baseUrl.trimEnd('/')}${asset.storagePath}" else null,
+                url = if (kind == MediaKind.IMAGE && !asset.privateStorage) "${baseUrl.trimEnd('/')}${asset.storagePath}" else null,
                 mime = asset.mime,
                 size = asset.size,
                 createdAt = asset.createdAt,

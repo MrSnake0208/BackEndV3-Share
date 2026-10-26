@@ -83,6 +83,7 @@ class FeedbackReportController(
         @RequestParam(required = false) q: String?,
         @RequestParam(defaultValue = "createdAt") sortBy: String,
         @RequestParam(defaultValue = "desc") sortOrder: String,
+        @RequestParam(required = false) spaceId: String? = null,
     ): ApiResult<FeedbackReportListResponse> {
         val userId = helper.requireUserId()
         return success(
@@ -99,6 +100,7 @@ class FeedbackReportController(
                 keyword = q,
                 sortBy = sortBy,
                 sortOrder = sortOrder,
+                spaceId = spaceId,
             ),
         )
     }
@@ -153,7 +155,7 @@ class FeedbackReportController(
         return try {
             val userId = helper.requireUserId()
             val asset = feedbackReportService.getAttachment(userId, id, mediaId)
-            val resource = mediaStorageService.loadPrivateFile(asset)
+            val resource = mediaStorageService.loadAuthorizedAsset(asset)
             val filename = safeDownloadName(asset.originalName)
             val contentType = try {
                 MediaType.parseMediaType(asset.mime)

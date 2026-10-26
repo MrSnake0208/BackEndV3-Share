@@ -48,7 +48,7 @@ class FeedbackAttachmentControllerContractTest {
             kind = MediaKind.FILE,
         )
         every { reportService.getAttachment("u1", "rpt_1", "med_log") } returns asset
-        every { storageService.loadPrivateFile(asset) } returns ByteArrayResource(bytes)
+        every { storageService.loadAuthorizedAsset(asset) } returns ByteArrayResource(bytes)
 
         mockMvc.perform(get("/v1/reports/rpt_1/attachments/med_log"))
             .andExpect(status().isOk)

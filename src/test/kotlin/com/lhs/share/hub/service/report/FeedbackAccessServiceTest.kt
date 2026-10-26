@@ -12,6 +12,7 @@ import com.lhs.share.hub.repository.entity.AdminAuditLog
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.hub.repository.entity.FeedbackCategory
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.admin.AdminAuditService
@@ -55,12 +56,32 @@ class FeedbackAccessServiceTest {
         )
 
     init {
+        every { categories.spaces() } returns listOf(FeedbackSpace("yuanhub", "YuanHub（主站）"))
+        every { categories.requireSpace("yuanhub", any()) } returns FeedbackSpace("yuanhub", "YuanHub（主站）")
+        every { categories.requireInSpace(any(), "yuanhub") } answers { FeedbackArea.requireValid(firstArg()) }
         every { tickets.findByOperatorAssigneeUserIdAndStatusAndMergedIntoIdIsNull(any(), any()) } returns emptyList()
         every { authorizationService.operatorAreasFor(any()) } returns emptySet()
         every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
         every { categories.keys() } returns FeedbackArea.all
         every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
+    }
+
+    @Test
+    fun `没有配置权限不能创建或修改专区且不会写库或审计`() {
+        every { authorizationService.requirePermission("partner", AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE) } throws
+            ApiResultException(403, "无权配置")
+        for (create in listOf(true, false)) {
+            assertEquals(
+                403,
+                assertThrows(ApiResultException::class.java) {
+                    service.saveSpace("partner", "partner-a", "改名", false, create)
+                }.statusCode,
+            )
+        }
+        verify(exactly = 0) { categories.createSpace(any(), any()) }
+        verify(exactly = 0) { categories.updateSpace(any(), any(), any()) }
+        verify(exactly = 0) { auditService.record(any()) }
     }
 
     @Test

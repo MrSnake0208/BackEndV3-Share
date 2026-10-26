@@ -1,5 +1,25 @@
 # 反馈工单流转接口
 
+## 多平台反馈专区（2026-10-26）
+
+专区代表产品归属，`category` / `area` 仍是板块，`workArea` 仍是内部处理板块；提交来源和处理阶段不作为专区。现有版本化 `feedback_category_catalog` 增加 `spaces[{id,label,active}]`，每个板块增加 `spaceId`，板块 key 继续全局唯一。仅默认提供 `yuanhub`；旧目录缺失字段时按主站读取，旧 `MAAYUAN` 板块仍属于主站，不推断或迁移合作方归属。
+
+- 新工单保存 `spaceId`；请求 JSON 使用 `space_id`，省略时默认 `yuanhub`。缺失/null 的历史工单字段同样解释为主站，无批量回填，不改 ID、消息、附件、公开授权或处理记录。提交和调整处理板块时校验专区一致，不支持跨专区合并或移动。
+- `GET /v1/reports/access` 增加 `spaces`（开放专区及本人可管理的停用专区）、`manageable_spaces`；板块选项增加 `space_id`。可选 `spaceId` 仅收窄目录。实际管理范围来自原运营岗/程序岗与板块授权；旧授权不会自动变成新专区岗位，超级管理员保留全范围。
+- `GET /v1/reports`、`GET /v1/admin/feedback/queue` 接受 `spaceId`。管理查询必须在数据库分页/计数前交集专区和岗位板块；无授权专区返回业务 403。省略或 `all` 聚合本人授权范围，不授予额外权限。个人 `mine=true` 只查本人，省略或 `all` 可查本人所有专区历史。搜索、队列计数遵守同一条件。
+- 公开列表和相似召回接受 `spaceId`，省略默认主站；公开详情可带 `spaceId`，与工单不符返回业务 404。原公开授权、举报排除及公开字段白名单继续有效。详情、附件、回复、状态、流转、候选人和逐工单已读仍根据真实工单授权，改请求参数或编号不会扩权。前端批量已读只发送当前专区的未读工单及消息边界。
+- `GET /v1/reports/public/spaces` 返回开放专区；`GET /v1/reports/public/spaces/{id}` 返回单个专区元数据（包含停用状态，便于历史入口）。元数据不包含成员和私有工单。`POST /v1/admin/feedback-spaces` 接受 `{id,label}`；`PUT /v1/admin/feedback-spaces/{id}` 接受 `{label,active}`，均须原 `admin:feedback_access:manage` 权限。稳定 ID 不可更改，`all` 保留，主站不可停用；创建时仅新增一个真实“其他问题”板块。沿用目录乐观锁、hub 事务及 `FEEDBACK_SPACE_UPDATED` 审计。
+
+板块创建接受 `space_id`（默认主站）；排序额外传 `space_id` 时，新旧 key 数组须包含该专区完整目录，其他专区顺序保持；省略维持旧全目录排序契约。成员仍通过既有反馈授权接口保存完整岗位及板块集合，不能把当前专区以外的已有授权清空。停用仅阻止新建反馈，历史处理和本人记录仍可用。
+
+`GET /v1/admin/feedback/version-options?spaceId=...` 先校验管理范围。产品版本目录目前仅属于主站，合作专区返回空选项，不能关联主站版本；既有主站版本功能保留。原 OpenAPI token 尚无专区声明，自动化列表、详情、附件及分析继续限制于 `yuanhub` 和原 token 板块交集，不自动扩展到新专区。
+
+### 反馈图片存储边界
+
+反馈客户端使用 `POST /v1/media/upload?feedback=true`，图片也写入现有私有文件目录，上传响应 `url=null`。消息图片返回 `private_storage=true` 和空 URL，由 `GET /v1/reports/{id}/attachments/{mediaId}` 鉴权读取；私有图片和文件都须是工单实际引用的未删除资产。合作专区拒绝引用普通上传入口生成的公开图片。普通非反馈图片上传保持原行为。
+
+**历史限制：旧图片原先位于公开 `/media/`，本次没有移动、删除文件或撤销既有 URL。已有静态地址仍具有原来的可访问性，不能视为已经完成隐私迁移。** 新专区不接收这些公开图片；如需收紧旧主站图片访问，需另行确认资产共享关系和 URL 兼容方案后实施迁移。没有对现有开发/生产数据库运行迁移。
+
 ## 附件数量
 
 `POST /v1/reports` 和 `POST /v1/reports/{id}/messages` 的 `media_ids` 允许 0–10 个，图片与普通文件共用额度；用户追加与管理员回复使用同一上限。超过 10 个返回业务 `status_code=400`。媒体存在、上传者归属、未删除和 ID 不重复的约束继续生效。单个文件上传大小与图片压缩规则不变。

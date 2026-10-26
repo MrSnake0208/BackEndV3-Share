@@ -5,6 +5,7 @@ import com.lhs.share.hub.repository.FeedbackSupportRepository
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.entity.FeedbackCategory
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.repository.entity.FeedbackSupport
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import io.mockk.every
@@ -28,6 +29,9 @@ class FeedbackPublicServiceTest {
     private val service = FeedbackPublicService(ticketRepository, queryRepository, supportRepository, categories)
 
     init {
+        every { categories.spaces() } returns listOf(FeedbackSpace("yuanhub", "YuanHub（主站）"))
+        every { categories.requireSpace("yuanhub", any()) } returns FeedbackSpace("yuanhub", "YuanHub（主站）")
+        every { categories.requireInSpace(any(), "yuanhub") } answers { FeedbackArea.requireValid(firstArg()) }
         every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
         every { categories.label(any()) } answers { FeedbackArea.labels[firstArg()] }
     }

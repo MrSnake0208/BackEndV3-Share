@@ -11,9 +11,11 @@ import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
 import com.lhs.share.hub.repository.MediaAssetRepository
+import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackMessage
 import com.lhs.share.hub.repository.entity.FeedbackMessageFile
 import com.lhs.share.hub.repository.entity.FeedbackMessageImage
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.repository.entity.MediaAsset
@@ -59,6 +61,15 @@ class FeedbackReportServiceTest {
     )
 
     init {
+        every { categories.spaces() } returns listOf(FeedbackSpace("yuanhub", "YuanHub（主站）"))
+        every { categories.requireSpace("yuanhub", any()) } returns FeedbackSpace("yuanhub", "YuanHub（主站）")
+        every { categories.requireInSpace(any(), "yuanhub") } answers {
+            val key = firstArg<String>()
+            if (key.trim().uppercase() !in categories.keys()) throw ApiResultException(400, "无效的反馈板块")
+            key.trim().uppercase()
+        }
+        every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
+        every { accessService.querySpaces(any(), any()) } returns setOf("yuanhub")
         every { workflowEvents.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.keys() } returns FeedbackArea.all
         every { categories.requireValid(any()) } answers { FeedbackArea.requireValid(firstArg()) }
@@ -311,7 +322,7 @@ class FeedbackReportServiceTest {
     @Test
     fun `需我回复接受共享类型筛选和排序且保留岗位范围`() {
         every { accessService.operatorAreas("admin") } returns setOf(FeedbackArea.STAR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             PageImpl(emptyList<FeedbackTicket>())
         every { userInfoService.getDict(emptySet()) } returns emptyMap()
 
@@ -325,7 +336,7 @@ class FeedbackReportServiceTest {
             queryRepository.search(
                 null, null, null, "EXPERIENCE", "STAR", "保存",
                 match { it.pageNumber == 1 && it.sort.getOrderFor("createdAt")?.isAscending == true },
-                setOf(FeedbackArea.STAR), "NEEDS_REPLY", "admin", emptySet(), FeedbackArea.all,
+                setOf(FeedbackArea.STAR), "NEEDS_REPLY", "admin", emptySet(), FeedbackArea.all, setOf("yuanhub"),
             )
         }
     }
@@ -341,7 +352,9 @@ class FeedbackReportServiceTest {
                 service.list("admin", 1, 20, null, null, null, null, false, null, null, sortBy, sortOrder, queue)
             }
         }
-        verify(exactly = 0) { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) {
+            queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
@@ -369,7 +382,7 @@ class FeedbackReportServiceTest {
         )
         val ticket = openTicket().copy(messages = listOf(firstReporter, adminReply, latestReporter))
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
@@ -401,7 +414,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
@@ -423,7 +436,7 @@ class FeedbackReportServiceTest {
             ),
         )
         every { accessService.manageableAreas("admin") } returns setOf(FeedbackArea.OPERATOR)
-        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        every { queryRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             PageImpl(listOf(ticket))
         every { userInfoService.getDict(setOf("user")) } returns mapOf("user" to MaaUserInfo("user", "用户"))
 
@@ -461,6 +474,31 @@ class FeedbackReportServiceTest {
             response.messages.single().images.map { it.url },
         )
         verify { mediaRepository.findAllById(mediaIds) }
+    }
+
+    @Test
+    fun `专区拒绝公开图片引用且私有图片回读不暴露静态地址`() {
+        prepareCreate()
+        every { categories.requireSpace("partner-a", true) } returns FeedbackSpace("partner-a", "平台 A")
+        every { categories.requireInSpace("OPERATOR", "partner-a") } returns "OPERATOR"
+        val image = media("private_image", "/media/public.png")
+        every { mediaRepository.findAllById(listOf("private_image")) } returns listOf(image)
+        val request =
+            FeedbackReportCreateRequest(
+                type = "BUG",
+                category = "OPERATOR",
+                content = "截图",
+                mediaIds = listOf("private_image"),
+                spaceId = "partner-a",
+            )
+        assertEquals(400, assertThrows(ApiResultException::class.java) { service.create("user", request) }.statusCode)
+        verify(exactly = 0) { ticketRepository.save(any()) }
+        every { mediaRepository.findAllById(listOf("private_image")) } returns
+            listOf(image.copy(privateStorage = true, storagePath = "private.png"))
+        val response = service.create("user", request)
+        assertEquals("partner-a", response.spaceId)
+        assertEquals("", response.messages.single().images.single().url)
+        assertTrue(response.messages.single().images.single().privateStorage)
     }
 
     @Test

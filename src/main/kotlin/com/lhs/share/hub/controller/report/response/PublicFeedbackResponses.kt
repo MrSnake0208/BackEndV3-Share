@@ -22,6 +22,7 @@ data class PublicFeedbackListItem(
     val completedVersionLabel: String? = null,
     val category: String? = null,
     val categoryLabel: String? = null,
+    val spaceId: String = "yuanhub",
 )
 
 /** 公开反馈列表分页响应。 */
@@ -49,6 +50,7 @@ data class PublicFeedbackDetail(
     val mergedInto: MergedInto?,
     val category: String? = null,
     val categoryLabel: String? = null,
+    val spaceId: String = "yuanhub",
 ) {
     data class MergedInto(
         val id: String,

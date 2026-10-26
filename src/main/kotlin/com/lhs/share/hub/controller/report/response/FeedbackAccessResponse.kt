@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.report.response
 
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import java.time.Instant
 
 data class FeedbackAreaOptionResponse(
@@ -7,6 +8,7 @@ data class FeedbackAreaOptionResponse(
     val label: String,
     val builtinKey: String? = null,
     val hidden: Boolean = false,
+    val spaceId: String = "yuanhub",
 )
 
 data class FeedbackAssigneeResponse(
@@ -27,6 +29,8 @@ data class CurrentFeedbackAccessResponse(
     val manageCategories: Set<String> = manageAreas,
     val availableCategories: List<FeedbackAreaOptionResponse> = availableAreas,
     val categoryCatalog: List<FeedbackAreaOptionResponse> = availableAreas,
+    val manageableSpaces: List<FeedbackSpace> = emptyList(),
+    val spaces: List<FeedbackSpace> = emptyList(),
 )
 
 data class FeedbackAccessGrantResponse(
