@@ -103,6 +103,27 @@ class FeedbackPublicAdministrationServiceTest {
     }
 
     @Test
+    fun `even administrators cannot merge tickets across spaces`() {
+        allowManage()
+        every { ticketRepository.findById("a") } returns Optional.of(ticket("a").copy(spaceId = "partner-a"))
+        every { ticketRepository.findById("b") } returns Optional.of(ticket("b").copy(spaceId = "partner-b"))
+        assertEquals(
+            400,
+            assertThrows(ApiResultException::class.java) {
+                service.merge("admin", "a", FeedbackMergeRequest("b"))
+            }.statusCode,
+        )
+        verify(exactly = 0) { queryRepository.setMergedInto(any(), any()) }
+    }
+
+    @Test
+    fun `partner version options never expose main-site draft versions`() {
+        every { accessService.querySpaces("partner", "partner-a") } returns setOf("partner-a")
+        assertEquals(emptyList<Any>(), service.versionOptions("partner", "partner-a"))
+        verify(exactly = 0) { changelogEntryRepository.findAll() }
+    }
+
+    @Test
     fun `举报即使授权也不能公开或改类且不会写库`() {
         allowManage()
         for (report in listOf(

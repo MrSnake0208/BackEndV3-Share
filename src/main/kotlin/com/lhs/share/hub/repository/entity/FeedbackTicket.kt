@@ -160,4 +160,6 @@ data class FeedbackTicket(
 
     /** 更新时间 */
     val updatedAt: Instant = Instant.now(),
+    /** 缺省历史记录归属 YuanHub，不根据板块名称推断合作方。 */
+    val spaceId: String? = null,
 ) : Serializable

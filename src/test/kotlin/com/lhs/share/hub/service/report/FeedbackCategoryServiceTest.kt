@@ -150,4 +150,38 @@ class FeedbackCategoryServiceTest {
         every { repository.save(any()) } throws OptimisticLockingFailureException("stale")
         assertEquals(409, assertThrows(ApiResultException::class.java) { service.create("新板块") }.statusCode)
     }
+
+    @Test
+    fun `专区显式创建稳定归属且不迁移旧麻圆板块`() {
+        var stored = FeedbackCategoryCatalog(categories = FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) })
+        every { repository.findById("feedback") } answers { Optional.of(stored) }
+        every { repository.save(any()) } answers { firstArg<FeedbackCategoryCatalog>().also { stored = it } }
+        assertEquals(listOf("yuanhub"), service.spaces().map { it.id })
+        val space = service.createSpace("partner-a", "合作平台")
+        assertEquals("yuanhub", service.list().single { it.key == "MAAYUAN" }.spaceId)
+        val other = service.inSpace(space.id).single()
+        assertEquals("partner-a", other.spaceId)
+        assertTrue(other.key.startsWith("CUSTOM_"))
+        service.updateSpace(space.id, "新名称", active = false)
+        assertEquals(space.id, service.requireSpace(space.id).id)
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.requireSpace(space.id, forSubmission = true) }.statusCode)
+        assertEquals(400, assertThrows(ApiResultException::class.java) { service.requireInSpace("OPERATOR", space.id) }.statusCode)
+        assertEquals(400, assertThrows(ApiResultException::class.java) { service.updateSpace("yuanhub", "YuanHub", false) }.statusCode)
+        assertEquals(409, assertThrows(ApiResultException::class.java) { service.createSpace("partner-a", "另一个名称") }.statusCode)
+    }
+
+    @Test
+    fun `专区内部允许同名板块且排序不改其他专区`() {
+        var stored = FeedbackCategoryCatalog(categories = listOf(FeedbackCategory("CALENDAR", "活动日历"), FeedbackCategory("OTHER", "其他问题")))
+        every { repository.findById("feedback") } answers { Optional.of(stored) }
+        every { repository.save(any()) } answers { firstArg<FeedbackCategoryCatalog>().also { stored = it } }
+        service.createSpace("partner-a", "平台 A")
+        val added = service.create("活动日历", "partner-a")
+        val defaults = service.inSpace("yuanhub")
+        val before = service.inSpace("partner-a").map { it.key }
+        service.reorder(before.reversed(), before, "partner-a")
+        assertEquals(defaults, service.inSpace("yuanhub"))
+        assertEquals(before.reversed(), service.inSpace("partner-a").map { it.key })
+        assertEquals("partner-a", added.spaceId)
+    }
 }

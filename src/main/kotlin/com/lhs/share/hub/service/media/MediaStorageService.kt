@@ -23,7 +23,7 @@ import java.util.Locale
  * Hub 库媒体文件存储服务
  *
  * 处理文件上传校验、磁盘存储及元数据持久化。
- * 图片写入公开目录并映射到 /media/,普通文件写入不对外映射的私有目录。
+ * 普通图片映射到 /media/;反馈图片和普通文件写入私有目录,须经过工单授权读取。
  */
 @Service
 class MediaStorageService(
@@ -47,7 +47,7 @@ class MediaStorageService(
      * @return 持久化后的 [MediaAsset]
      * @throws ResponseStatusException 校验失败时抛出
      */
-    fun upload(ownerUserId: String, file: MultipartFile): MediaAsset {
+    fun upload(ownerUserId: String, file: MultipartFile, privateStorage: Boolean = false): MediaAsset {
         // 校验文件非空
         if (file.isEmpty) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "上传文件为空")
@@ -68,10 +68,10 @@ class MediaStorageService(
         // 生成唯一 id
         val medId = generateMedId()
         val storedFileName = "$medId.${uploadType.extension}"
-        val storagePath = if (uploadType.kind == MediaKind.IMAGE) "/media/$storedFileName" else storedFileName
+        val storagePath = if (uploadType.kind == MediaKind.IMAGE && !privateStorage) "/media/$storedFileName" else storedFileName
 
         // 确保存储目录存在
-        val mediaDir = storageRoot(uploadType.kind)
+        val mediaDir = storageRoot(if (privateStorage) MediaKind.FILE else uploadType.kind)
         try {
             Files.createDirectories(mediaDir)
         } catch (e: IOException) {
@@ -113,6 +113,7 @@ class MediaStorageService(
                 size = storedSize,
                 storagePath = storagePath,
                 kind = uploadType.kind,
+                privateStorage = privateStorage,
             )
             return mediaAssetRepository.save(asset)
         } catch (e: ResponseStatusException) {
@@ -159,10 +160,14 @@ class MediaStorageService(
         val kind = asset.effectiveKind()
         val storageKey = when (kind) {
             MediaKind.IMAGE ->
-                asset.storagePath
-                    .takeIf { it.startsWith("/media/") }
-                    ?.removePrefix("/media/")
-                    ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+                if (asset.privateStorage) {
+                    asset.storagePath
+                } else {
+                    asset.storagePath
+                        .takeIf { it.startsWith("/media/") }
+                        ?.removePrefix("/media/")
+                        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
+                }
             MediaKind.FILE -> asset.storagePath
         }
         val relativePath = try {
@@ -173,7 +178,7 @@ class MediaStorageService(
         if (relativePath.isAbsolute || relativePath.nameCount != 1 || relativePath.fileName.toString() != storageKey) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")
         }
-        val root = storageRoot(kind)
+        val root = storageRoot(if (asset.privateStorage) MediaKind.FILE else kind)
         val path = root.resolve(relativePath).normalize()
         if (!path.startsWith(root) || !Files.isRegularFile(path)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "附件不存在")

@@ -17,6 +17,7 @@ import com.lhs.share.hub.repository.entity.AdminAuditSnapshot
 import com.lhs.share.hub.repository.entity.AdminRole
 import com.lhs.share.hub.repository.entity.FeedbackAccessGrant
 import com.lhs.share.hub.repository.entity.FeedbackCategory
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.admin.AdminAuditService
@@ -43,10 +44,13 @@ class FeedbackAccessService(
     private val notificationService: NotificationService,
     private val categories: FeedbackCategoryService,
 ) {
-    fun current(userId: String): CurrentFeedbackAccessResponse {
+    fun current(userId: String, spaceId: String? = null): CurrentFeedbackAccessResponse {
         val superAdmin = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)
         val grant = repository.findById(userId).orElse(null)
-        val catalog = categories.list().map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden) }
+        val manageableSpaces = manageableSpaces(userId)
+        if (spaceId != null && spaceId != FeedbackSpaces.ALL) categories.requireSpace(spaceId)
+        val catalog = categories.list().filter { spaceId == null || spaceId == FeedbackSpaces.ALL || it.spaceId == spaceId }
+            .map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden, it.spaceId) }
         val availableAreas = catalog.filterNot { it.hidden }
         return CurrentFeedbackAccessResponse(
             superAdmin = superAdmin,
@@ -58,8 +62,27 @@ class FeedbackAccessService(
             developerAreas = authorizationService.developerAreasFor(userId),
             availableWorkAreas = availableAreas,
             categoryCatalog = catalog,
+            manageableSpaces = manageableSpaces,
+            spaces = categories.spaces().filter { it.active || it.id in manageableSpaces.map { space -> space.id } },
         )
     }
+
+    fun manageableSpaces(userId: String): List<FeedbackSpace> {
+        if (authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN)) return categories.spaces()
+        val keys = operatorAreas(userId) + developerAreas(userId)
+        val ids = categories.list().filter { it.key in keys }.map { it.spaceId }.toSet()
+        return categories.spaces().filter { it.id in ids }
+    }
+
+    fun querySpaces(userId: String, spaceId: String?): Set<String> {
+        val allowed = manageableSpaces(userId).mapTo(linkedSetOf()) { it.id }
+        if (spaceId == null || spaceId == FeedbackSpaces.ALL) return allowed
+        if (spaceId !in allowed) throw ApiResultException(403, "没有该反馈专区的管理权限")
+        return setOf(spaceId)
+    }
+
+    private fun matchesSpace(ticket: FeedbackTicket): Boolean =
+        (categories.list().find { it.key == FeedbackWorkflow.area(ticket) }?.spaceId ?: FeedbackSpaces.DEFAULT) == FeedbackSpaces.id(ticket)
 
     fun canView(userId: String, area: String): Boolean = authorizationService.canReadFeedback(userId, area)
 
@@ -79,6 +102,7 @@ class FeedbackAccessService(
     fun developerAreas(userId: String): Set<String> = authorizationService.developerAreasFor(userId)
 
     fun canViewTicket(userId: String, ticket: FeedbackTicket): Boolean {
+        if (!matchesSpace(ticket)) return false
         val area = FeedbackWorkflow.area(ticket)
         return area in operatorAreas(userId) ||
             (
@@ -87,10 +111,14 @@ class FeedbackAccessService(
                 )
     }
 
-    fun canControlTicket(userId: String, ticket: FeedbackTicket): Boolean = authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN) ||
-        (ticket.operatorAssigneeUserId == userId && FeedbackWorkflow.area(ticket) in operatorAreas(userId))
+    fun canControlTicket(userId: String, ticket: FeedbackTicket): Boolean = matchesSpace(ticket) &&
+        (
+            authorizationService.hasRole(userId, AdminRole.SUPER_ADMIN) ||
+                (ticket.operatorAssigneeUserId == userId && FeedbackWorkflow.area(ticket) in operatorAreas(userId))
+            )
 
-    fun canClaimTicket(userId: String, ticket: FeedbackTicket): Boolean = FeedbackWorkflow.area(ticket) in operatorAreas(userId)
+    fun canClaimTicket(userId: String, ticket: FeedbackTicket): Boolean =
+        matchesSpace(ticket) && FeedbackWorkflow.area(ticket) in operatorAreas(userId)
 
     fun developerUserIds(area: String): Set<String> = repository.findByDeveloperAreasContaining(area)
         .filter { "DEVELOPER" in it.feedbackRoles && userService.get(it.userId)?.activated == true }
@@ -122,11 +150,11 @@ class FeedbackAccessService(
     }
 
     @Transactional(transactionManager = "hubTransactionManager")
-    fun createCategory(adminUserId: String, label: String): FeedbackAreaOptionResponse {
+    fun createCategory(adminUserId: String, label: String, spaceId: String = FeedbackSpaces.DEFAULT): FeedbackAreaOptionResponse {
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
-        val created = categories.create(label)
+        val created = categories.create(label, spaceId)
         auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_CREATED, created, null)
-        return FeedbackAreaOptionResponse(created.key, created.label, created.builtinKey)
+        return FeedbackAreaOptionResponse(created.key, created.label, created.builtinKey, created.hidden, created.spaceId)
     }
 
     @Transactional(transactionManager = "hubTransactionManager")
@@ -134,7 +162,7 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val (before, renamed) = categories.rename(key, label)
         if (renamed != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_RENAMED, renamed, before)
-        return FeedbackAreaOptionResponse(renamed.key, renamed.label, renamed.builtinKey, renamed.hidden)
+        return FeedbackAreaOptionResponse(renamed.key, renamed.label, renamed.builtinKey, renamed.hidden, renamed.spaceId)
     }
 
     @Transactional(transactionManager = "hubTransactionManager")
@@ -142,13 +170,18 @@ class FeedbackAccessService(
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
         val (before, updated) = categories.setHidden(key, hidden)
         if (updated != before) auditCategory(adminUserId, AdminAuditAction.FEEDBACK_CATEGORY_VISIBILITY_UPDATED, updated, before)
-        return FeedbackAreaOptionResponse(updated.key, updated.label, updated.builtinKey, updated.hidden)
+        return FeedbackAreaOptionResponse(updated.key, updated.label, updated.builtinKey, updated.hidden, updated.spaceId)
     }
 
     @Transactional(transactionManager = "hubTransactionManager")
-    fun reorderCategories(adminUserId: String, keys: List<String>, expectedKeys: List<String>): List<FeedbackAreaOptionResponse> {
+    fun reorderCategories(
+        adminUserId: String,
+        keys: List<String>,
+        expectedKeys: List<String>,
+        spaceId: String? = null,
+    ): List<FeedbackAreaOptionResponse> {
         authorizationService.requirePermission(adminUserId, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
-        val (before, after) = categories.reorder(keys, expectedKeys)
+        val (before, after) = categories.reorder(keys, expectedKeys, spaceId)
         if (before != after) {
             auditService.record(
                 AdminAuditLog(
@@ -160,7 +193,24 @@ class FeedbackAccessService(
                 ),
             )
         }
-        return after.map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden) }
+        return after.map { FeedbackAreaOptionResponse(it.key, it.label, it.builtinKey, it.hidden, it.spaceId) }
+    }
+
+    @Transactional(transactionManager = "hubTransactionManager")
+    fun saveSpace(actor: String, id: String, label: String, active: Boolean, create: Boolean): FeedbackSpace {
+        authorizationService.requirePermission(actor, AdminPermission.ADMIN_FEEDBACK_ACCESS_MANAGE)
+        val before = if (create) null else categories.requireSpace(id)
+        val saved = if (create) categories.createSpace(id, label) else categories.updateSpace(id, label, active)
+        auditService.record(
+            AdminAuditLog(
+                actorUserId = actor,
+                action = AdminAuditAction.FEEDBACK_SPACE_UPDATED,
+                targetResource = "feedback_spaces/$id",
+                before = before?.let { AdminAuditSnapshot(feedbackSpaceLabel = it.label, feedbackSpaceActive = it.active) },
+                after = AdminAuditSnapshot(feedbackSpaceLabel = saved.label, feedbackSpaceActive = saved.active),
+            ),
+        )
+        return saved
     }
 
     private fun auditCategory(actor: String, action: AdminAuditAction, category: FeedbackCategory, before: FeedbackCategory?) {

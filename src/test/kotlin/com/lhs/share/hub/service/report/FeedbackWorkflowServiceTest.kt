@@ -5,7 +5,9 @@ import com.lhs.share.controller.response.user.MaaUserInfo
 import com.lhs.share.hub.repository.FeedbackTicketQueryRepository
 import com.lhs.share.hub.repository.FeedbackTicketRepository
 import com.lhs.share.hub.repository.FeedbackWorkflowEventRepository
+import com.lhs.share.hub.repository.entity.FeedbackCategory
 import com.lhs.share.hub.repository.entity.FeedbackMessage
+import com.lhs.share.hub.repository.entity.FeedbackSpace
 import com.lhs.share.hub.repository.entity.FeedbackTicket
 import com.lhs.share.hub.repository.entity.FeedbackWorkflowEvent
 import com.lhs.share.hub.service.HubUserInfoService
@@ -33,6 +35,16 @@ class FeedbackWorkflowServiceTest {
     private val service = FeedbackWorkflowService(tickets, query, events, access, notifications, categories, userInfo)
 
     init {
+        every { categories.spaces() } returns listOf(FeedbackSpace("yuanhub", "YuanHub（主站）"))
+        every { categories.requireSpace("yuanhub", any()) } returns FeedbackSpace("yuanhub", "YuanHub（主站）")
+        every { categories.requireInSpace(any(), "yuanhub") } answers {
+            val key = firstArg<String>()
+            if (key.trim().uppercase() !in categories.keys()) throw ApiResultException(400, "无效的反馈板块")
+            key.trim().uppercase()
+        }
+        every { categories.list() } returns FeedbackArea.labels.map { (key, label) -> FeedbackCategory(key, label) }
+        every { access.canClaimTicket(any(), any()) } answers { FeedbackWorkflow.area(secondArg()) in access.operatorAreas(firstArg()) }
+        every { access.canViewTicket(any(), any()) } answers { FeedbackWorkflow.area(secondArg()) in access.developerAreas(firstArg()) }
         every { events.save(any()) } answers { firstArg<FeedbackWorkflowEvent>() }
         every { categories.keys() } returns FeedbackArea.all
         every { categories.label(any()) } returns null

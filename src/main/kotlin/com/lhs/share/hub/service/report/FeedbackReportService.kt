@@ -175,14 +175,16 @@ class FeedbackReportService(
      * 创建反馈工单
      */
     fun create(userId: String, request: FeedbackReportCreateRequest): FeedbackReportResponse {
+        val space = categories.requireSpace(request.spaceId, forSubmission = true)
         val fields = normalizeCreateFields(request)
+        categories.requireInSpace(fields.category, space.id)
         val title = request.title?.trim()?.takeIf { it.isNotEmpty() }
         if (request.publicConsent && title == null) {
             throw ApiResultException(400, "允许发布到反馈广场时请填写标题")
         }
 
         // 校验 media_ids 归属
-        val mediaAssets = validateMediaIds(userId, request.mediaIds)
+        val mediaAssets = validateMediaIds(userId, request.mediaIds, request.spaceId)
 
         // 生成工单 id
         val ticketId = generateId("rpt_")
@@ -211,6 +213,7 @@ class FeedbackReportService(
         val now = Instant.now()
         val ticket = FeedbackTicket(
             id = ticketId,
+            spaceId = space.id,
             type = fields.type,
             category = fields.category,
             area = fields.category,
@@ -254,6 +257,7 @@ class FeedbackReportService(
         sortBy: String,
         sortOrder: String,
         queue: String? = null,
+        spaceId: String? = null,
     ): FeedbackReportListResponse = listInternal(
         currentUserId = currentUserId,
         page = page,
@@ -269,6 +273,7 @@ class FeedbackReportService(
         sortOrder = sortOrder,
         queue = queue,
         allowedAreas = null,
+        spaceId = spaceId,
     )
 
     fun listForAutomation(
@@ -285,6 +290,7 @@ class FeedbackReportService(
         sortOrder: String,
         queue: String? = null,
         allowedAreas: Set<String>? = null,
+        spaceId: String = FeedbackSpaces.DEFAULT,
     ): FeedbackReportListResponse = listInternal(
         currentUserId = currentUserId,
         page = page,
@@ -300,6 +306,7 @@ class FeedbackReportService(
         sortOrder = sortOrder,
         queue = queue,
         allowedAreas = allowedAreas,
+        spaceId = spaceId,
     )
 
     private fun listInternal(
@@ -317,6 +324,7 @@ class FeedbackReportService(
         sortOrder: String,
         queue: String? = null,
         allowedAreas: Set<String>? = null,
+        spaceId: String? = null,
     ): FeedbackReportListResponse {
         if (page < 1) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
@@ -348,15 +356,21 @@ class FeedbackReportService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "sortOrder 只允许 asc 或 desc")
         }
 
+        val spaceIds = if (mine) {
+            if (spaceId == FeedbackSpaces.ALL || spaceId == null) null else setOf(categories.requireSpace(spaceId).id)
+        } else {
+            feedbackAccessService.querySpaces(currentUserId, spaceId)
+        }
+        val scopedKeys = categories.list().filter { spaceIds == null || it.spaceId in spaceIds }.mapTo(linkedSetOf()) { it.key }
         val normalizedAllowedAreas = allowedAreas?.mapTo(linkedSetOf()) { it.trim().uppercase() }
         val grantedAreas = feedbackAccessService.operatorAreas(currentUserId).let { current ->
-            normalizedAllowedAreas?.let(current::intersect) ?: current
+            (normalizedAllowedAreas?.let(current::intersect) ?: current).intersect(scopedKeys)
         }
         val developerAreas = if (mine) {
             emptySet()
         } else {
             feedbackAccessService.developerAreas(currentUserId).let { current ->
-                normalizedAllowedAreas?.let(current::intersect) ?: current
+                (normalizedAllowedAreas?.let(current::intersect) ?: current).intersect(scopedKeys)
             }
         }
         if (!mine && grantedAreas.isEmpty() && developerAreas.isEmpty()) {
@@ -385,6 +399,7 @@ class FeedbackReportService(
             actorUserId = currentUserId,
             developerAreas = developerAreas,
             knownAreas = categories.keys(),
+            spaceIds = spaceIds,
         )
         val userDict = hubUserInfoService.getDict(
             resultPage.content.flatMap {
@@ -396,6 +411,7 @@ class FeedbackReportService(
             val reporterBoundary = lastReporterMessageBoundary(ticket)
             FeedbackReportListItem(
                 id = checkNotNull(ticket.id),
+                spaceId = FeedbackSpaces.id(ticket),
                 type = fields.type,
                 category = fields.category,
                 area = fields.category,
@@ -480,13 +496,13 @@ class FeedbackReportService(
     /** 返回经过工单范围授权且仍可用的普通文件元数据。 */
     fun getAttachment(currentUserId: String, ticketId: String, mediaId: String): MediaAsset {
         val ticket = requireViewableTicket(currentUserId, ticketId)
-        if (ticket.messages.none { message -> message.files.any { it.id == mediaId } }) {
+        if (ticket.messages.none { message -> message.files.any { it.id == mediaId } || message.images.any { it.id == mediaId } }) {
             throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
         }
         val asset = mediaAssetRepository.findById(mediaId).orElseThrow {
             ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
         }
-        if (asset.deletedAt != null || asset.effectiveKind() != MediaKind.FILE) {
+        if (asset.deletedAt != null) {
             throw ApiResultException(HttpStatus.NOT_FOUND.value(), "附件不存在")
         }
         return asset
@@ -552,7 +568,7 @@ class FeedbackReportService(
         }
 
         // 校验 media_ids 归属
-        val mediaAssets = validateMediaIds(currentUserId, request.mediaIds)
+        val mediaAssets = validateMediaIds(currentUserId, request.mediaIds, FeedbackSpaces.id(ticket))
 
         // 构建消息
         val senderKind = actorMode.name
@@ -863,7 +879,7 @@ class FeedbackReportService(
         val ticket = feedbackTicketRepository.findById(ticketId).orElseThrow {
             ApiResultException(HttpStatus.NOT_FOUND.value(), "工单不存在: $ticketId")
         }
-        if (!feedbackAccessService.canViewTicket(currentUserId, ticket)) {
+        if (FeedbackSpaces.id(ticket) != FeedbackSpaces.DEFAULT || !feedbackAccessService.canViewTicket(currentUserId, ticket)) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有该反馈模块的后台查看权限")
         }
         val normalizedAllowedAreas = allowedAreas?.mapTo(linkedSetOf()) { it.trim().uppercase() }
@@ -874,7 +890,7 @@ class FeedbackReportService(
     }
 
     private fun List<MediaAsset>.toMessageImages(): List<FeedbackMessageImage> = filter { it.effectiveKind() == MediaKind.IMAGE }
-        .map { FeedbackMessageImage(id = checkNotNull(it.id), url = it.storagePath) }
+        .map { FeedbackMessageImage(id = checkNotNull(it.id), url = if (it.privateStorage) "" else it.storagePath) }
 
     private fun List<MediaAsset>.toMessageFiles(): List<FeedbackMessageFile> = filter { it.effectiveKind() == MediaKind.FILE }
         .map {
@@ -889,7 +905,7 @@ class FeedbackReportService(
     /**
      * 校验媒体 id 列表: 最多 10 个附件, 必须是当前用户自己的未删除媒体
      */
-    private fun validateMediaIds(userId: String, mediaIds: List<String>): List<MediaAsset> {
+    private fun validateMediaIds(userId: String, mediaIds: List<String>, spaceId: String): List<MediaAsset> {
         if (mediaIds.isEmpty()) return emptyList()
         if (mediaIds.size > MAX_MEDIA_PER_MESSAGE) {
             throw ApiResultException(
@@ -904,6 +920,9 @@ class FeedbackReportService(
         for (asset in assets) {
             if (asset.ownerUserId != userId) {
                 throw ApiResultException(HttpStatus.FORBIDDEN.value(), "媒体 ${asset.id} 不属于当前用户")
+            }
+            if (spaceId != FeedbackSpaces.DEFAULT && asset.effectiveKind() == MediaKind.IMAGE && !asset.privateStorage) {
+                throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "合作专区图片必须通过反馈附件入口上传")
             }
             if (asset.deletedAt != null) {
                 throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "媒体 ${asset.id} 已被删除")
@@ -1012,7 +1031,11 @@ class FeedbackReportService(
                 ),
                 content = msg.content,
                 images = msg.images.map { img ->
-                    FeedbackMessageResponse.ImageInfo(id = img.id, url = toPublicMediaUrl(img.url))
+                    FeedbackMessageResponse.ImageInfo(
+                        id = img.id,
+                        url = if (img.url.isBlank()) "" else toPublicMediaUrl(img.url),
+                        privateStorage = img.url.isBlank(),
+                    )
                 },
                 createdAt = msg.createdAt,
                 files = msg.files.map { file ->
@@ -1029,6 +1052,7 @@ class FeedbackReportService(
 
         return FeedbackReportResponse(
             id = ticket.id!!,
+            spaceId = FeedbackSpaces.id(ticket),
             type = fields.type,
             category = fields.category,
             area = fields.category,

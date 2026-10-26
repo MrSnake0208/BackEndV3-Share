@@ -123,6 +123,7 @@ class FeedbackPublicAdministrationService(
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "不能把反馈合并到自身")
         }
         val target = requireTicket(targetId)
+        if (FeedbackSpaces.id(source) != FeedbackSpaces.id(target)) throw ApiResultException(400, "不能跨专区合并反馈")
         requireManage(adminUserId, target)
         if (!FeedbackWorkflow.isActive(target) || FeedbackWorkflow.area(source) != FeedbackWorkflow.area(target)) {
             throw ApiResultException(HttpStatus.CONFLICT.value(), "目标必须是同负责板块的未合并活动工单")
@@ -173,6 +174,11 @@ class FeedbackPublicAdministrationService(
         val ticket = requireTicket(ticketId)
         requireManage(adminUserId, ticket)
         requireIndependent(ticket)
+        if (FeedbackSpaces.id(ticket) != FeedbackSpaces.DEFAULT &&
+            (request.targetVersionId != null || request.completedVersionId != null)
+        ) {
+            throw ApiResultException(400, "合作专区不能关联 YuanHub 主站版本")
+        }
         val target = resolveVersion(request.targetVersionId, requirePublished = false)
         val completed = resolveVersion(request.completedVersionId, requirePublished = true)
         return queryRepository.setVersions(
@@ -190,7 +196,9 @@ class FeedbackPublicAdministrationService(
      * 反馈管理员不需要额外拥有 changelog:write / changelog:review 权限；
      * 这里只暴露版本标签，不返回草稿正文。无任何反馈管理范围时拒绝访问。
      */
-    fun versionOptions(adminUserId: String): List<FeedbackVersionOptionResponse> {
+    fun versionOptions(adminUserId: String, spaceId: String = FeedbackSpaces.DEFAULT): List<FeedbackVersionOptionResponse> {
+        accessService.querySpaces(adminUserId, spaceId)
+        if (spaceId != FeedbackSpaces.DEFAULT) return emptyList()
         if (accessService.operatorAreas(adminUserId).isEmpty()) {
             throw ApiResultException(HttpStatus.FORBIDDEN.value(), "没有反馈管理权限")
         }

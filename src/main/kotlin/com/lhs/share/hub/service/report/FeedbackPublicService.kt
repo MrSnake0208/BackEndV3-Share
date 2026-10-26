@@ -50,7 +50,9 @@ class FeedbackPublicService(
         keyword: String?,
         completedVersionId: String?,
         sort: String,
+        spaceId: String = FeedbackSpaces.DEFAULT,
     ): PublicFeedbackPage {
+        categories.requireSpace(spaceId)
         if (page < 1) {
             throw ApiResultException(HttpStatus.BAD_REQUEST.value(), "page 必须大于等于 1")
         }
@@ -71,6 +73,7 @@ class FeedbackPublicService(
             completedVersionId = completedVersionId?.trim()?.takeIf { it.isNotEmpty() },
             sort = normalizedSort,
             pageable = PageRequest.of(page - 1, pageSize),
+            spaceId = spaceId,
         )
         val supported = supportedIds(currentUserId, result.content.mapNotNull { it.id })
         return PublicFeedbackPage(
@@ -81,22 +84,30 @@ class FeedbackPublicService(
         )
     }
 
-    fun getById(currentUserId: String?, ticketId: String): PublicFeedbackDetail {
+    fun getById(currentUserId: String?, ticketId: String, spaceId: String? = null): PublicFeedbackDetail {
         val ticket = requirePublicTicket(ticketId)
+        if (spaceId != null && FeedbackSpaces.id(ticket) != spaceId) throw ApiResultException(404, "反馈不存在")
         return toDetail(ticket, currentUserId)
     }
 
     /**
      * 相似反馈提示。只搜索 PUBLIC 且未合并的反馈,最多返回 limit 条;仅作提示,不阻断提交。
      */
-    fun similar(currentUserId: String?, title: String, type: String?, limit: Int?): List<PublicFeedbackListItem> {
+    fun similar(
+        currentUserId: String?,
+        title: String,
+        type: String?,
+        limit: Int?,
+        spaceId: String = FeedbackSpaces.DEFAULT,
+    ): List<PublicFeedbackListItem> {
+        categories.requireSpace(spaceId)
         val effectiveLength = title.count { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
         if (effectiveLength < MIN_SIMILAR_TITLE_LENGTH) return emptyList()
         val tokens = tokenize(title)
         if (tokens.isEmpty()) return emptyList()
         val normalizedType = normalizeTypeFilter(type)
         val take = (limit ?: DEFAULT_SIMILAR_LIMIT).coerceIn(1, MAX_SIMILAR_LIMIT)
-        val ranked = queryRepository.searchPublicSimilar(tokens, SIMILAR_CANDIDATE_LIMIT)
+        val ranked = queryRepository.searchPublicSimilar(tokens, SIMILAR_CANDIDATE_LIMIT, spaceId)
             .map { it to score(it, tokens, normalizedType) }
             .filter { it.second > 0.0 }
             .sortedWith(
@@ -169,6 +180,7 @@ class FeedbackPublicService(
             val nextId = current.mergedIntoId ?: return current
             if (hops++ >= MAX_MERGE_HOPS || !visited.add(nextId)) return null
             current = ticketRepository.findById(nextId).orElse(null) ?: return null
+            if (FeedbackSpaces.id(current) != FeedbackSpaces.id(ticket)) return null
         }
     }
 
@@ -186,6 +198,7 @@ class FeedbackPublicService(
     private fun toListItem(ticket: FeedbackTicket, supported: Boolean, categoryLabel: String?): PublicFeedbackListItem =
         PublicFeedbackListItem(
             id = checkNotNull(ticket.id),
+            spaceId = FeedbackSpaces.id(ticket),
             publicTitle = ticket.publicTitle,
             publicSummary = ticket.publicSummary,
             type = publicType(ticket),
@@ -216,6 +229,7 @@ class FeedbackPublicService(
         }
         return PublicFeedbackDetail(
             id = checkNotNull(ticket.id),
+            spaceId = FeedbackSpaces.id(ticket),
             publicTitle = ticket.publicTitle,
             publicSummary = ticket.publicSummary,
             type = publicType(ticket),

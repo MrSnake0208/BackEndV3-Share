@@ -55,6 +55,19 @@ class MediaStorageServiceTest {
     }
 
     @Test
+    fun `feedback images use private storage and authorized reads only`() {
+        every { repository.save(any()) } answers { firstArg() }
+        val service = storage()
+        val bytes = pngBytes()
+        val asset = service.upload("user-1", file("private.png", "image/png", bytes), privateStorage = true)
+        assertTrue(asset.privateStorage)
+        assertFalse(asset.storagePath.startsWith("/media/"))
+        assertFalse(Files.exists(publicDir().resolve(asset.storagePath)))
+        assertArrayEquals(bytes, service.loadAuthorizedAsset(asset).inputStream.use { it.readBytes() })
+        assertEquals(null, com.lhs.share.hub.controller.media.response.MediaUploadResponse.of(asset, "https://example.test").url)
+    }
+
+    @Test
     fun `supported files are normalized and stored only in private directory`() {
         every { repository.save(any()) } answers { firstArg() }
         val cases = listOf(
@@ -70,7 +83,16 @@ class MediaStorageServiceTest {
             val asset = storage().upload("user-1", file(name, mime, bytes))
 
             assertEquals(MediaKind.FILE, asset.kind)
-            assertEquals(if (name.endsWith(".zip")) "application/zip" else if (name.endsWith(".log")) "text/plain" else mime, asset.mime)
+            assertEquals(
+                if (name.endsWith(".zip")) {
+                    "application/zip"
+                } else if (name.endsWith(".log")) {
+                    "text/plain"
+                } else {
+                    mime
+                },
+                asset.mime,
+            )
             assertFalse(asset.storagePath.startsWith('/'))
             assertArrayEquals(bytes, Files.readAllBytes(privateDir().resolve(asset.storagePath)))
             assertFalse(Files.exists(publicDir().resolve(asset.storagePath)))

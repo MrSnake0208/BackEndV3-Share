@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
@@ -39,9 +40,12 @@ class MediaController(
     @Operation(summary = "上传媒体文件")
     @RequireJwt
     @PostMapping("/upload", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-    fun upload(@RequestPart("file") file: MultipartFile): ApiResult<MediaUploadResponse> {
+    fun upload(
+        @RequestPart("file") file: MultipartFile,
+        @RequestParam(defaultValue = "false") feedback: Boolean = false,
+    ): ApiResult<MediaUploadResponse> {
         val userId = helper.requireUserId()
-        val asset = mediaStorageService.upload(userId, file)
+        val asset = mediaStorageService.upload(userId, file, privateStorage = feedback)
         val baseUrl = properties.info.publicBaseUrl
         return success(MediaUploadResponse.of(asset, baseUrl))
     }

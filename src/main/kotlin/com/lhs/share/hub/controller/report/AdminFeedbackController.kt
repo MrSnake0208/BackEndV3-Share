@@ -63,9 +63,10 @@ class AdminFeedbackController(
         @RequestParam(required = false) q: String?,
         @RequestParam(defaultValue = "updatedAt") sortBy: String = "updatedAt",
         @RequestParam(defaultValue = "desc") sortOrder: String = "desc",
+        @RequestParam(required = false) spaceId: String? = null,
     ): ApiResult<FeedbackReportListResponse> = success(
         feedbackReportService.list(
-            helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, sortBy, sortOrder, queue,
+            helper.requireUserId(), page, pageSize, null, type, workArea, null, false, null, q, sortBy, sortOrder, queue, spaceId,
         ),
     )
 
@@ -159,8 +160,8 @@ class AdminFeedbackController(
 
     @Operation(summary = "获取反馈可关联的版本")
     @GetMapping("/version-options")
-    fun versionOptions(): ApiResult<List<FeedbackVersionOptionResponse>> =
-        success(administrationService.versionOptions(helper.requireUserId()))
+    fun versionOptions(@RequestParam(defaultValue = "yuanhub") spaceId: String): ApiResult<List<FeedbackVersionOptionResponse>> =
+        success(administrationService.versionOptions(helper.requireUserId(), spaceId))
 
     @Operation(summary = "关联目标/完成版本")
     @PatchMapping("/{id}/versions")
