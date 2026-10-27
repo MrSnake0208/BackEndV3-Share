@@ -486,6 +486,84 @@ class OperatorPlannerServiceTest {
         )
     }
 
+    @Test
+    fun `persistent rules and day exceptions round trip and legacy writes are rejected`() {
+        service.putWorkspace("u1", "a1", workspace())
+        val body = validator.emptySchedule().put("expected_revision", 0)
+        (body.path("preferences") as ObjectNode).set<JsonNode>(
+            "custom_spend_rules",
+            mapper.readTree(
+                """[{"id":"custom-spend-lantai","versions":[{"from_date":"2026-10-27","enabled":true,"count":10,
+                "item":{"label":"兰台扫荡","cost_per":10,"yield":{"__xp__":1000}}}]}]""",
+            ),
+        )
+        body.set<JsonNode>(
+            "manual_plans",
+            mapper.readTree(
+                """{"2026-10-28":{"gains":[],"spends":[],"custom_spend_overrides":["custom-spend-lantai"]}}""",
+            ),
+        )
+        assertEquals(
+            HttpStatus.CONFLICT,
+            assertThrows(OperatorApiException::class.java) {
+                service.putSchedule("u1", "a1", "favorites", body)
+            }.status,
+        )
+        body.putArray("client_features").add("custom-daily-spends-v1")
+        val saved = service.putSchedule("u1", "a1", "favorites", body)
+        assertEquals(10, saved.path("preferences").path("custom_spend_rules")[0].path("versions")[0].path("count").asInt())
+        assertEquals("custom-spend-lantai", saved.path("manual_plans").path("2026-10-28").path("custom_spend_overrides")[0].asText())
+        assertTrue(!saved.has("client_features"))
+        val legacy = body.deepCopy().put("expected_revision", 1).also { it.remove("client_features") }
+        assertEquals(
+            HttpStatus.CONFLICT,
+            assertThrows(OperatorApiException::class.java) {
+                service.putSchedule("u1", "a1", "favorites", legacy)
+            }.status,
+        )
+        val erased = validator.emptySchedule().put("expected_revision", 1)
+        assertEquals(
+            HttpStatus.CONFLICT,
+            assertThrows(OperatorApiException::class.java) {
+                service.putSchedule("u1", "a1", "favorites", erased)
+            }.status,
+        )
+        service.putWorkspace("u1", "a2", workspace())
+        assertTrue(service.schedule("u1", "a2", "favorites").path("preferences").path("custom_spend_rules").isMissingNode)
+        assertEquals(1, service.schedule("u1", "a1", "favorites").path("revision").asInt())
+    }
+
+    @Test
+    fun `rule validation rejects duplicate IDs invalid versions counts and builtin collisions`() {
+        for (rules in listOf(
+            """[{"id":"stage624","versions":[{"from_date":"2026-10-27","enabled":false}]}]""",
+            """[{"id":"custom-spend-a","versions":[{"from_date":"2026-10-28","enabled":false},{"from_date":"2026-10-27","enabled":false}]}]""",
+            """[{"id":"custom-spend-a","versions":[{"from_date":"2026-02-30","enabled":false}]}]""",
+            """[{"id":"custom-spend-a","versions":[{"from_date":"2026-10-27","enabled":true,"count":1.5,"item":{"label":"a","cost_per":10,"yield":{}}}]}]""",
+            """[{"id":"custom-spend-a","versions":[{"from_date":"2026-10-27","enabled":false}]},{"id":"custom-spend-a","versions":[{"from_date":"2026-10-28","enabled":false}]}]""",
+        )) {
+            val body = validator.emptySchedule().put("expected_revision", 0)
+            (body.path("preferences") as ObjectNode).set<JsonNode>("custom_spend_rules", mapper.readTree(rules))
+            assertEquals(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                assertThrows(OperatorApiException::class.java) {
+                    validator.schedule(body)
+                }.status,
+            )
+        }
+    }
+
+    @Test
+    fun `disabled rule can retain its last snapshot for restoration without a template`() {
+        val request = validator.emptySchedule().put("expected_revision", 0)
+        val rules = mapper.readTree(
+            """[{"id":"custom-spend-lantai","versions":[{"from_date":"2026-10-27","enabled":false,"count":8,
+                "item":{"label":"兰台扫荡","cost_per":10,"yield":{"__xp__":1000}}}]}]""",
+        )
+        (request.path("preferences") as ObjectNode).set<JsonNode>("custom_spend_rules", rules)
+        assertEquals(rules, validator.schedule(request).path("preferences").path("custom_spend_rules"))
+    }
+
     private fun staminaSources() = mapper.readTree(
         """{"monthly_card":{"tier":"zhaoyang","daily_enabled":true,"shop_enabled":true,
             "daily_amount":60,"shop_amount":20,"start_date":"","end_date":""},
