@@ -34,6 +34,7 @@ interface SubAccountRepositoryCustom {
     fun fenceRecruitmentWrite(userId: String, accountId: String, expectedGame: String): Boolean
     fun updateDetails(userId: String, accountId: String, name: String, game: String, now: Instant)
     fun updateOperatorPanelAutoFill(userId: String, accountId: String, enabled: Boolean)
+    fun updateDailyZhuyuPreference(userId: String, accountId: String, game: String, expected: String?, value: String): SubAccount?
     fun updateShareToken(userId: String, accountId: String, expectedToken: String?, newToken: String?, now: Instant): SubAccount?
     fun updateShareAuthorization(
         userId: String,
@@ -47,6 +48,16 @@ interface SubAccountRepositoryCustom {
 }
 
 class SubAccountRepositoryImpl(@param:Qualifier("hubMongoTemplate") private val template: MongoTemplate) : SubAccountRepositoryCustom {
+    override fun updateDailyZhuyuPreference(userId: String, accountId: String, game: String, expected: String?, value: String): SubAccount? =
+        template.findAndModify(
+            owner(userId, accountId).addCriteria(Criteria.where("dailyZhuyuPreference").`is`(expected)).addCriteria(
+                if (game == "代号鸢") Criteria().orOperator(Criteria.where("game").`is`(game), Criteria.where("game").`is`(null))
+                else Criteria.where("game").`is`(game),
+            ),
+            Update().set("dailyZhuyuPreference", value),
+            FindAndModifyOptions.options().returnNew(true),
+            SubAccount::class.java,
+        )
     override fun replaceMailboxReserve(userId: String, accountId: String, expected: Long, reserve: MailboxReserve): SubAccount? {
         val version = if (expected == 0L) {
             Criteria().orOperator(Criteria.where("mailboxReserve").`is`(null), Criteria.where("mailboxReserve.version").`is`(0L))

@@ -38,6 +38,21 @@ class AccountIndexMongoTest {
     }
 
     @Test
+    fun `zhuyu preference compare and set is scoped to owner account and game`() {
+        mongo.insert(SubAccount(userId = "owner", accountId = "a", name = "A"))
+        mongo.insert(SubAccount(userId = "owner", accountId = "b", name = "B"))
+        mongo.insert(SubAccount(userId = "other", accountId = "a", name = "A"))
+        val repository = SubAccountRepositoryImpl(mongo)
+        assertEquals("baijinbi", repository.updateDailyZhuyuPreference("owner", "a", "代号鸢", null, "baijinbi")?.dailyZhuyuPreference)
+        assertEquals(null, repository.updateDailyZhuyuPreference("owner", "a", "代号鸢", null, "zhuyu"))
+        assertEquals(null, repository.updateDailyZhuyuPreference("owner", "a", "如鸢", "baijinbi", "zhuyu"))
+        assertEquals(null, repository.updateDailyZhuyuPreference("intruder", "a", "代号鸢", null, "zhuyu"))
+        assertEquals(null, mongo.findOne(Query(Criteria.where("userId").`is`("owner").and("accountId").`is`("b")), SubAccount::class.java)!!.dailyZhuyuPreference)
+        assertEquals(null, mongo.findOne(Query(Criteria.where("userId").`is`("other").and("accountId").`is`("a")), SubAccount::class.java)!!.dailyZhuyuPreference)
+        assertEquals("zhuyu", repository.updateDailyZhuyuPreference("owner", "a", "代号鸢", "baijinbi", "zhuyu")?.dailyZhuyuPreference)
+    }
+
+    @Test
     fun `panel preference defaults on for legacy documents and updates only the owning account`() {
         mongo.getCollection("sub_accounts").insertMany(
             listOf(

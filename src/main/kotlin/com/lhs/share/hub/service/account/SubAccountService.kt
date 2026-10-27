@@ -122,6 +122,21 @@ class SubAccountService(
     fun list(userId: String): List<SubAccountResponse> =
         accountRepository.findAllByUserIdOrderByCreatedAtAsc(userId).map(SubAccountResponse::of)
 
+    fun dailyZhuyuPreference(userId: String, accountId: String): Map<String, String?> {
+        val account = requireAccount(userId, accountId)
+        return mapOf("account_id" to account.accountId, "game" to account.game, "preference" to account.dailyZhuyuPreference)
+    }
+
+    fun saveDailyZhuyuPreference(userId: String, accountId: String, game: String, expected: String?, value: String): Map<String, String?> {
+        if (game !in SUPPORTED_GAMES || value !in setOf("zhuyu", "baijinbi") || expected !in setOf(null, "zhuyu", "baijinbi")) {
+            throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "茱萸记账设置无效")
+        }
+        requireAccount(userId, accountId)
+        val account = accountRepository.updateDailyZhuyuPreference(userId, accountId, game, expected, value)
+            ?: throw InventoryApiException(HttpStatus.CONFLICT, "preference_conflict", "设置已变更，请重新读取")
+        return mapOf("account_id" to account.accountId, "game" to account.game, "preference" to account.dailyZhuyuPreference)
+    }
+
     fun update(
         userId: String,
         accountId: String,
