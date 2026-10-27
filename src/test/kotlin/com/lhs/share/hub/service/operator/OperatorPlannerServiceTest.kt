@@ -255,6 +255,33 @@ class OperatorPlannerServiceTest {
     }
 
     @Test
+    fun customDailySpendRoundTrips() {
+        val request = fixture()
+        val spend = mapper.readTree(
+            """{"id":"custom-spend-example","label":"据点产出","name":"据点产出","kind":"custom","custom":true,"fixed":true,"value":1,"cost_per":0,"yield":{"__xp__":1000}}""",
+        )
+        val plans = request.path("manual_plans") as ObjectNode
+        val plan = plans.path("2026-09-12") as ObjectNode
+        plan.withArray("spends").add(spend)
+        val timeline = (request.path("schedule").path("result") as ObjectNode).withArray("timeline")
+        val day = timeline[0] as ObjectNode
+        (day.path("planned") as ObjectNode).withArray("spends").add(spend)
+        plans.removeAll()
+        timeline.removeAll()
+        repeat(90) { index ->
+            val date = LocalDate.parse("2026-09-12").plusDays(index.toLong()).toString()
+            plans.set<ObjectNode>(date, plan.deepCopy())
+            timeline.add(day.deepCopy().put("date", date).put("index", index))
+        }
+
+        val saved = service.putSchedule("u1", "a1", "favorites", request)
+        val restored = service.schedule("u1", "a1", "favorites")
+        assertEquals(spend, saved.path("manual_plans").path("2026-09-12").path("spends").last())
+        assertEquals(90, restored.path("schedule").path("result").path("timeline").size())
+        assertEquals(spend, restored.path("schedule").path("result").path("timeline")[89].path("planned").path("spends").last())
+    }
+
+    @Test
     fun `history preservation uses the same five o'clock business day as the frontend`() {
         val shanghai = ZoneId.of("Asia/Shanghai")
         assertEquals(
