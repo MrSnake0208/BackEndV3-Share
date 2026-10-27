@@ -87,6 +87,7 @@ git fetch --prune origin main --tags
 read -r BEHIND AHEAD < <(git rev-list --left-right --count origin/main...HEAD)
 [ "$BEHIND" -eq 0 ] || [ "$AHEAD" -eq 0 ] || die "main 与 origin/main 已分叉，请先手动处理"
 [ "$BEHIND" -eq 0 ] || git merge --ff-only origin/main
+[ "$AHEAD" -eq 0 ] || die "本地 main 尚未合并到远端；请通过 PR 合并并等待 main CI"
 check_repo
 check_tag
 RELEASE_COMMIT="$(git rev-parse HEAD)"
@@ -100,14 +101,13 @@ wait_workflow() {
     [ -z "$run_id" ] || break
     sleep 2
   done
-  [ -n "$run_id" ] || { printf '没有找到 %s：%s\n' "$workflow" "$RELEASE_COMMIT" >&2; return 1; }
-  info "$workflow：$run_id ($RELEASE_COMMIT)"
+  [ -n "$run_id" ] || { printf '没有找到 %s：%s\n' "${workflow}" "$RELEASE_COMMIT" >&2; return 1; }
+  info "${workflow}：$run_id ($RELEASE_COMMIT)"
   gh run watch "$run_id" --repo "$GH_REPO" --exit-status
 }
 
-info "推送 main：$RELEASE_COMMIT"
-git push origin main
-wait_workflow ci.yml main || die "CI 未通过或查询失败，没有创建 $TAG；修复后可用相同未发布版本重试"
+info "等待 main 同 SHA CI：$RELEASE_COMMIT"
+wait_workflow ci.yml main || die "CI 未通过或查询失败，没有创建 ${TAG}；修复后可用相同未发布版本重试"
 
 check_repo
 [ "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" ] || die "等待 CI 期间提交已变化，拒绝发布"
