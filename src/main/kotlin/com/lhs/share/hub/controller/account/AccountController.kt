@@ -1,5 +1,6 @@
 package com.lhs.share.hub.controller.account
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.lhs.share.config.security.AuthenticationHelper
 import com.lhs.share.controller.response.ApiResult
 import com.lhs.share.controller.response.ApiResult.Companion.success
@@ -9,13 +10,12 @@ import com.lhs.share.hub.controller.account.response.SubAccountResponse
 import com.lhs.share.hub.service.account.AccountEventService
 import com.lhs.share.hub.service.account.SubAccountService
 import com.lhs.share.hub.service.inventory.InventoryApiException
-import com.fasterxml.jackson.databind.JsonNode
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -59,11 +59,18 @@ class AccountController(
         if (!body.isObject || body.size() != 3 || !body.has("expected") ||
             !(body.path("expected").isNull || body.path("expected").isTextual) ||
             !body.path("game").isTextual || !body.path("preference").isTextual
-        ) throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "茱萸记账设置无效")
-        return success(accountService.saveDailyZhuyuPreference(
-            helper.requireUserId(), accountId, body.path("game").asText(),
-            if (body.path("expected").isNull) null else body.path("expected").asText(), body.path("preference").asText(),
-        ))
+        ) {
+            throw InventoryApiException(HttpStatus.UNPROCESSABLE_ENTITY, "schema_validation_failed", "茱萸记账设置无效")
+        }
+        return success(
+            accountService.saveDailyZhuyuPreference(
+                helper.requireUserId(),
+                accountId,
+                body.path("game").asText(),
+                if (body.path("expected").isNull) null else body.path("expected").asText(),
+                body.path("preference").asText(),
+            ),
+        )
     }
 
     @Operation(

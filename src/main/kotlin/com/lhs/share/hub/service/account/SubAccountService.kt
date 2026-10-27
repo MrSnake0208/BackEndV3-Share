@@ -186,6 +186,11 @@ class SubAccountService(
                         achievementPreviews?.deleteAccount(userId, accountId)
                         bonds?.deleteAccount(userId, accountId)
                         bondPreviews?.deleteAccount(userId, accountId)
+                        if (account.dailyZhuyuPreference != null || account.dailyZhuyuPreferencesByGame.isNotEmpty()) {
+                            val preferences = account.dailyZhuyuPreferencesByGame.toMutableMap()
+                            account.dailyZhuyuPreference?.let { preferences[account.game] = it }
+                            accountRepository.switchDailyZhuyuPreference(userId, accountId, preferences, preferences[nextGame])
+                        }
                     }
                     val now = Instant.now()
                     accountRepository.updateDetails(userId, accountId, name ?: account.name, nextGame, now)

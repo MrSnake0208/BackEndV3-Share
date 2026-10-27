@@ -92,7 +92,15 @@ class DrawResourceService(
                             recordType = if (request.action == "gain") "reward_delta" else "resource_delta", entityType = "item",
                             acquisitionChannel = when (request.action) {
                                 "use" -> "符传使用"
-                                "exchange" -> if (request.ticketId == "zhuyu") "茱萸兑换白金币" else if (request.channel == "monthly-shop") "月卡商店兑换" else "白金币兑换"
+                                "exchange" -> if (request.ticketId ==
+                                    "zhuyu"
+                                ) {
+                                    "茱萸兑换白金币"
+                                } else if (request.channel == "monthly-shop") {
+                                    "月卡商店兑换"
+                                } else {
+                                    "白金币兑换"
+                                }
                                 else -> request.channel
                             },
                             effectiveAt = now, receivedAt = now,
