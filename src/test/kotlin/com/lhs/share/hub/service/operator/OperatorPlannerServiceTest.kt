@@ -554,6 +554,33 @@ class OperatorPlannerServiceTest {
     }
 
     @Test
+    fun `legacy clients cannot erase rules stored only in fixed schedule context`() {
+        service.putWorkspace("u1", "a1", workspace())
+        val body = fixture()
+        val rules = mapper.readTree("""[{"id":"custom-spend-a","versions":[{"from_date":"2026-10-27","enabled":false}]}]""")
+        (body.path("schedule").path("context").path("preferences") as ObjectNode).set<JsonNode>("custom_spend_rules", rules)
+        assertEquals(
+            "custom_daily_spends_client_outdated",
+            assertThrows(OperatorApiException::class.java) {
+                service.putSchedule("u1", "a1", "favorites", body)
+            }.code,
+        )
+        body.putArray("client_features").add("custom-daily-spends-v1")
+        service.putSchedule("u1", "a1", "favorites", body)
+        val legacy = fixture().put("expected_revision", 1)
+        assertEquals(
+            "custom_daily_spends_client_outdated",
+            assertThrows(OperatorApiException::class.java) {
+                service.putSchedule("u1", "a1", "favorites", legacy)
+            }.code,
+        )
+        assertEquals(
+            rules,
+            service.schedule("u1", "a1", "favorites").path("schedule").path("context").path("preferences").path("custom_spend_rules"),
+        )
+    }
+
+    @Test
     fun `disabled rule can retain its last snapshot for restoration without a template`() {
         val request = validator.emptySchedule().put("expected_revision", 0)
         val rules = mapper.readTree(

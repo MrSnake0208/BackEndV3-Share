@@ -336,7 +336,11 @@ class OperatorPlannerValidator(
     }
 
     fun hasCustomDailySpends(node: JsonNode): Boolean {
-        if (!node.path("preferences").path("custom_spend_rules").isEmpty) return true
+        if (!node.path("preferences").path("custom_spend_rules").isEmpty ||
+            !node.path("schedule").path("context").path("preferences").path("custom_spend_rules").isEmpty
+        ) {
+            return true
+        }
         fun containsOverride(value: JsonNode): Boolean = when {
             value.isObject -> value.fields().asSequence().any { (key, child) ->
                 (key == "custom_spend_overrides" && !child.isEmpty) || containsOverride(child)

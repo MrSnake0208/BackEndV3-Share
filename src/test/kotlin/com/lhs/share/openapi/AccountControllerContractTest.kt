@@ -58,16 +58,21 @@ class AccountControllerContractTest {
     @Test
     fun `daily zhuyu preference requires authenticated owner and explicit expected value`() {
         every { helper.requireUserId() } returns "jwt-user"
-        every { accountService.dailyZhuyuPreference("jwt-user", "main") } returns mapOf("account_id" to "main", "game" to "代号鸢", "preference" to null)
+        every { accountService.dailyZhuyuPreference("jwt-user", "main") } returns
+            mapOf("account_id" to "main", "game" to "代号鸢", "preference" to null)
         every { accountService.saveDailyZhuyuPreference("jwt-user", "main", "代号鸢", null, "baijinbi") } returns
             mapOf("account_id" to "main", "game" to "代号鸢", "preference" to "baijinbi")
         mockMvc.perform(get("/v1/accounts/main/daily-zhuyu-preference"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.account_id").value("main"))
-        mockMvc.perform(put("/v1/accounts/main/daily-zhuyu-preference").contentType(MediaType.APPLICATION_JSON)
-            .content("""{"game":"代号鸢","expected":null,"preference":"baijinbi"}"""))
+        mockMvc.perform(
+            put("/v1/accounts/main/daily-zhuyu-preference").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"game":"代号鸢","expected":null,"preference":"baijinbi"}"""),
+        )
             .andExpect(status().isOk).andExpect(jsonPath("$.data.preference").value("baijinbi"))
-        mockMvc.perform(put("/v1/accounts/main/daily-zhuyu-preference").contentType(MediaType.APPLICATION_JSON)
-            .content("""{"game":"代号鸢","preference":"baijinbi"}"""))
+        mockMvc.perform(
+            put("/v1/accounts/main/daily-zhuyu-preference").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"game":"代号鸢","preference":"baijinbi"}"""),
+        )
             .andExpect(status().isUnprocessableEntity)
         verify(exactly = 1) { accountService.saveDailyZhuyuPreference("jwt-user", "main", "代号鸢", null, "baijinbi") }
     }

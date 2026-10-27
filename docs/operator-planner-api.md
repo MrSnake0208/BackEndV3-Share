@@ -169,4 +169,4 @@ PLANNER_TEST_MONGO_URI='mongodb://127.0.0.1:27017/?replicaSet=rs0&serverSelectio
 
 每日 plan 新增可选 `custom_spend_overrides: ["custom-spend-lantai"]`；相应行仍存于 spends。标记存在而行不存在表示跳过当天，恢复移除标记。归一化、云端往返、范围应用和精确方案均保留标记。重设清除未来手工例外，保留长期规则；过去已存快照不可改写。旧90天批量安排不会自动迁移成长期规则。
 
-新日程 PUT（包括 import-local 内嵌日程）携带请求级 `client_features:["custom-daily-spends-v1"]`，该标记不持久化。已有或新快照含规则/单日覆盖时，未声明能力的写入返回 HTTP409 `custom_daily_spends_client_outdated`，即便旧客户端回传未知规则也拒绝，避免旧算法静默忽略约束。先发布本后端，再发布前端；旧后端拒绝时不得删字段降级保存。模板与日程的 revision 和失败恢复完全独立，不承诺跨文档原子保存。
+新日程 PUT（包括 import-local 内嵌日程）携带请求级 `client_features:["custom-daily-spends-v1"]`，该标记不持久化。已有或新快照含规则/单日覆盖时，未声明能力的写入返回 HTTP409 `custom_daily_spends_client_outdated`，包括仅保存在 `schedule.context.preferences.custom_spend_rules` 中的规则；即便旧客户端回传未知规则也拒绝，避免旧算法静默忽略约束。先发布本后端，再发布前端；旧后端拒绝时不得删字段降级保存。模板与日程的 revision 和失败恢复完全独立，不承诺跨文档原子保存。
