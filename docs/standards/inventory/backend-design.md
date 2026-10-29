@@ -324,6 +324,8 @@ POST /v1/inventory/records/{recordId}/restore?account_id=...
 
 ## 符传快捷记账（站内命令）
 
+密探重置及撤销也使用内部 `resource_delta`，由独立密探事务控制，关联流水不可单独删除或恢复，不计入奖励获得量；不统计鞭子，不扩展交换协议。接口、返还与撤销边界见 [密探重置](../../operator-reset.md)。
+
 JWT专用 `GET /v1/inventory/draw-resources?account_id=...` 返回 `{account_id,game,inventory_revision,balances:{baijinbi,fuchuan,tianjifuchuan}}`。每项余额须有 full/listed 快照基准；无基准返回null，不把奖励合计视为已盘点库存。读取不写入且禁止缓存。
 
 `POST /v1/inventory/draw-resources` 正文严格为 `{account_id,game,operation_id,expected_inventory_revision,action,ticket_id,quantity,channel}`；action为gain/use/exchange，ticket_id仅fuchuan/tianjifuchuan，quantity为正整数张数。gain的channel为1–64字符奖励来源（不含派遣），use固定use；exchange的channel仅standard（200白金币/张）或monthly-shop（仅普通符传，数量须为10的倍数，每10张1600白金币）。禁止客户端价格、user_id、发生时间和其他扩展字段。成功返回 `ApiResult<InventoryRecordListItemDto>`；错误沿用库存错误契约。

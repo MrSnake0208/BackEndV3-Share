@@ -90,6 +90,7 @@ class SubAccountService(
     private val bondPreviews: com.lhs.share.hub.service.bond.BondImportPreviews? = null,
     private val starScanRecords: StarScanRecordRepository? = null,
     private val reserveWorkspaces: OperatorReserveWorkspaceRepository? = null,
+    private val operatorResets: com.lhs.share.hub.repository.OperatorResetTransactionRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -244,6 +245,7 @@ class SubAccountService(
                 operatorAnnotationRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorGrowthTargetRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 operatorUpgradeTransactionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
+                operatorResets?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starCompletionRepository?.deleteAllByUserIdAndAccountId(userId, accountId)
                 starScanRecords?.deleteByUserIdAndAccountId(userId, accountId)
                 inventoryRevisionRepository?.deleteByUserIdAndAccountId(userId, accountId)

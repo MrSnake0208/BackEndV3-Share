@@ -66,6 +66,7 @@ class SubAccountServiceTest {
     private val annotationRepository = mockk<OperatorAnnotationRepository>()
     private val targetRepository = mockk<OperatorGrowthTargetRepository>()
     private val upgradeRepository = mockk<OperatorUpgradeTransactionRepository>()
+    private val resetRepository = mockk<com.lhs.share.hub.repository.OperatorResetTransactionRepository>(relaxed = true)
     private val completionRepository = mockk<StarCompletionRepository>(relaxed = true)
     private val revisionRepository = mockk<InventoryRevisionRepository>()
     private val trainingWorkspaceRepository = mockk<OperatorTrainingWorkspaceRepository>(relaxed = true)
@@ -131,6 +132,7 @@ class SubAccountServiceTest {
         operatorMilestoneRepository = milestoneRepository,
         operatorRelationships = relationships,
         starScanRecords = starScanRecords,
+        operatorResets = resetRepository,
     )
 
     @Test
@@ -295,6 +297,7 @@ class SubAccountServiceTest {
         verify(exactly = 1) { annotationRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { targetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { upgradeRepository.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { resetRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { completionRepository.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { revisionRepository.deleteByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { tokenService.revokeByAccount("u1", "main") }

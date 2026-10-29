@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 @RestControllerAdvice(
     assignableTypes = [
         OperatorController::class,
+        com.lhs.share.hub.controller.operator.OperatorResetController::class,
         com.lhs.share.hub.controller.operator.OperatorPanelController::class,
         com.lhs.share.hub.controller.operator.OperatorRelationshipController::class,
         OperatorPlannerController::class,

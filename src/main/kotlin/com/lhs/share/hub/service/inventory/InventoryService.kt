@@ -758,6 +758,9 @@ class InventoryService(
         requireAccount(userId, accountId)
         val record = recordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
             ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "record_not_found", "Record not found", recordId)
+        if (record.transactionId?.startsWith("reset_") == true) {
+            throw InventoryApiException(HttpStatus.CONFLICT, "reset_record_delete_forbidden", "请到密探的重置记录中整笔撤销，不能单独删除库存流水", recordId)
+        }
         if (record.recordType == CONSUMPTION_DELTA) {
             throw InventoryApiException(
                 HttpStatus.CONFLICT,
@@ -795,6 +798,9 @@ class InventoryService(
         transactionTemplate.executeWithoutResult {
             val deleted = deletedRecordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId)
                 ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "deleted_record_not_found", "Deleted record not found", recordId)
+            if (deleted.record.transactionId?.startsWith("reset_") == true) {
+                throw InventoryApiException(HttpStatus.CONFLICT, "reset_record_delete_forbidden", "密探重置流水必须随整笔操作处理", recordId)
+            }
             if (recordRepository.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId) != null) {
                 throw InventoryApiException(HttpStatus.CONFLICT, "record_already_exists", "Record already exists", recordId)
             }
