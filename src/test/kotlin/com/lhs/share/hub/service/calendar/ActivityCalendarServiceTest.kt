@@ -291,6 +291,45 @@ class ActivityCalendarServiceTest {
     }
 
     @Test
+    fun `title only updates preserve every historical classification and unrelated business fields`() {
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 1) }
+        val historical = listOf(
+            event.copy(category = ActivityCalendarCategory.LOGIN),
+            event.copy(category = ActivityCalendarCategory.MAINTENANCE),
+            event.copy(category = ActivityCalendarCategory.SHOP, subtype = ActivityCalendarSubtype.ACTIVITY_SHOP),
+            event.copy(category = ActivityCalendarCategory.OTHER, subtype = ActivityCalendarSubtype.STAR_POOL),
+            event.copy(subtype = ActivityCalendarSubtype.FIRST_MEETING_ROULETTE),
+            event.copy(subtype = ActivityCalendarSubtype.MEDIUM_EVENT),
+            event.copy(subtype = ActivityCalendarSubtype.TAISHAN_FU),
+            event.copy(subtype = ActivityCalendarSubtype.FURNITURE_TRIAL),
+            event.copy(subtype = ActivityCalendarSubtype.MYSTERIOUS_CAVE),
+            event.copy(subtype = ActivityCalendarSubtype.FURNITURE, subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE),
+        )
+        for (old in historical) {
+            every { repository.find(old.id) } returns old
+            val updated = service.update(
+                "editor",
+                old.id,
+                request.copy(
+                    title = "只改标题",
+                    category = old.category,
+                    subtype = old.subtype,
+                    subtypeDetail = old.subtypeDetail,
+                    expectedVersion = 0,
+                ),
+            )
+            assertEquals(old.id, updated.item.id)
+            assertEquals(old.category, updated.item.category)
+            assertEquals(old.subtype, updated.item.subtype)
+            assertEquals(old.subtypeDetail, updated.item.subtypeDetail)
+            assertEquals(old.game, updated.item.game)
+            assertEquals(old.startDate, updated.item.startDate)
+            assertEquals(old.endDate, updated.item.endDate)
+            assertEquals(old.enabled, updated.enabled)
+        }
+    }
+
+    @Test
     fun `catalog raw pool type is passed through with stable source identity visibility and read only`() {
         every { repository.list(null, null, null, emptySet(), null) } returns emptyList()
         every { recruitment.all() } returns listOf(

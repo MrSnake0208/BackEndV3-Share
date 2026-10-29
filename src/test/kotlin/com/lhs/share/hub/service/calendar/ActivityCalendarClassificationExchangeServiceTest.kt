@@ -47,10 +47,10 @@ class ActivityCalendarClassificationExchangeServiceTest {
     }
 
     @Test
-    fun `nine manual targets and thirteen displayed choices match picture without guessing legacy`() {
+    fun `eight manual targets and twelve displayed choices preserve unconfirmed legacy`() {
         val exported = exchange.export()
-        assertEquals(listOf("活动", "卡池", "家具", "其他"), exported.classificationOptions.keys.toList())
-        assertEquals(13, exported.classificationOptions.values.sumOf { it.size })
+        assertEquals(listOf("活动", "常驻", "卡池", "其他"), exported.classificationOptions.keys.toList())
+        assertEquals(12, exported.classificationOptions.values.sumOf { it.size })
         val json: ObjectNode = mapper.valueToTree(exported)
         for ((group, types) in exported.classificationOptions.filterKeys { it != "卡池" }) {
             for (type in types) {
@@ -62,7 +62,7 @@ class ActivityCalendarClassificationExchangeServiceTest {
         assertNull(exchange.classification(event.copy(subtype = ActivityCalendarSubtype.TAISHAN_FU)))
         assertNull(exchange.classification(event.copy(subtype = ActivityCalendarSubtype.FURNITURE)))
         assertEquals(
-            "神秘洞窟",
+            "历练/洞窟",
             exchange.classification(
                 event.copy(subtype = ActivityCalendarSubtype.FURNITURE, subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE),
             )!!.level2,
@@ -77,11 +77,71 @@ class ActivityCalendarClassificationExchangeServiceTest {
         json.putObject("classification_options").put("伪造", "伪造")
         (json["items"][0] as ObjectNode).putObject("classification").put("level1", "卡池").put("level2", "限定")
         assertEquals(1, exchange.preview(json.toString()).invalid)
-        (json["items"][0] as ObjectNode).putObject("classification").put("level1", "其他").put("level2", "商店")
+        (json["items"][0] as ObjectNode).putObject("classification").put("level1", "其他").put("level2", "其他")
         assertEquals(1, exchange.preview(json.toString()).ready)
         json.putArray("items")
         assertEquals(0, exchange.preview(json.toString()).total)
         verify(exactly = 0) { repository.save(any()) }
+        verify(exactly = 0) { repository.updateClassification(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmed legacy displays new labels while unmodified full exports do not rewrite codes`() {
+        val legacy = listOf(
+            event.copy(id = "trial", subtype = ActivityCalendarSubtype.FURNITURE_TRIAL),
+            event.copy(id = "cave", subtype = ActivityCalendarSubtype.MYSTERIOUS_CAVE),
+            event.copy(
+                id = "detail",
+                subtype = ActivityCalendarSubtype.FURNITURE,
+                subtypeDetail = ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE,
+            ),
+            event.copy(id = "star", category = ActivityCalendarCategory.OTHER, subtype = ActivityCalendarSubtype.STAR_POOL),
+        )
+        every { repository.list(any(), any(), any(), any(), any()) } returns legacy
+        every { repository.findAll(any()) } returns legacy
+        val exported = exchange.export()
+        assertTrue(exported.items.filter { it.id != "star" }.all { it.classification?.level2 == "历练/洞窟" })
+        assertNull(exported.items.single { it.id == "star" }.classification)
+        val report = exchange.preview(mapper.writeValueAsString(exported))
+        assertEquals(3, report.unchanged)
+        assertEquals(1, report.skipped)
+        assertEquals(0, report.ready)
+        assertEquals(0, report.invalid)
+        verify(exactly = 0) { repository.updateClassification(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `old v1 confirmed target labels normalize and unconfirmed targets only preserve matching records`() {
+        val json: ObjectNode = mapper.valueToTree(exchange.export())
+        val row = json["items"][0] as ObjectNode
+        for ((level1, level2, expected) in listOf(
+            Triple("活动", "大型/周年", "活动/周年"),
+            Triple("活动", "地宫", "地宫/鸢会"),
+            Triple("活动", "签到/楼主查岗", "签到/查岗"),
+            Triple("家具", "历练", "历练/洞窟"),
+            Triple("家具", "神秘洞窟", "历练/洞窟"),
+        )) {
+            row.putObject("classification").put("level1", level1).put("level2", level2)
+            val report = exchange.preview(json.toString())
+            assertEquals(1, report.ready)
+            assertEquals(expected, report.rows.single().after!!.level2)
+        }
+        for ((category, subtype, level1, level2) in listOf(
+            listOf("ACTIVITY", "FIRST_MEETING_ROULETTE", "活动", "初见日/转盘"),
+            listOf("OTHER", "STAR_POOL", "其他", "星池"),
+            listOf("MAINTENANCE", null, "其他", "维护"),
+            listOf("SHOP", "ACTIVITY_SHOP", "其他", "商店"),
+        )) {
+            row.putObject("classification").put("level1", level1).put("level2", level2)
+            every { repository.findAll(any()) } returns listOf(event)
+            assertEquals(1, exchange.preview(json.toString()).invalid)
+            val historical = event.copy(
+                category = ActivityCalendarCategory.valueOf(category!!),
+                subtype = subtype?.let(ActivityCalendarSubtype::valueOf),
+            )
+            every { repository.findAll(any()) } returns listOf(historical)
+            assertEquals(1, exchange.preview(json.toString()).unchanged)
+        }
         verify(exactly = 0) { repository.updateClassification(any(), any(), any(), any()) }
     }
 

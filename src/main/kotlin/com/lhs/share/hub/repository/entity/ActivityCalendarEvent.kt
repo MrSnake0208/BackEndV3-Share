@@ -18,6 +18,11 @@ enum class ActivityCalendarCategory {
 
 enum class ActivityCalendarSubtype(val categories: Set<ActivityCalendarCategory>) {
     LARGE_EVENT(setOf(ActivityCalendarCategory.ACTIVITY)),
+    SEASONAL_STAR_CHART(setOf(ActivityCalendarCategory.ACTIVITY)),
+    WHITE_PIGEON(setOf(ActivityCalendarCategory.ACTIVITY)),
+    AGENT_TRAINING(setOf(ActivityCalendarCategory.ACTIVITY)),
+    TRIAL_CAVE(setOf(ActivityCalendarCategory.ACTIVITY)),
+    OTHER(setOf(ActivityCalendarCategory.OTHER)),
     MEDIUM_EVENT(setOf(ActivityCalendarCategory.ACTIVITY)),
     UNDERGROUND(setOf(ActivityCalendarCategory.ACTIVITY)),
     TAISHAN_FU(setOf(ActivityCalendarCategory.ACTIVITY)),

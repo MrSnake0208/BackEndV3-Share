@@ -10,13 +10,30 @@
 
 最小验证（仓库根）：`./gradlew test --tests '*ActivityCalendarServiceTest' --tests '*ActivityCalendarControllerContractTest' --tests '*ActivityCalendarSubscriptionServiceTest' --console=plain`。
 
-## 两级分类与兼容代码（2026-10-18）
+## 两级分类与兼容代码（2026-10-29）
 
-展示一级为活动、卡池、家具、其他；存储 category 和查询参数仍为 ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER，不迁移旧记录。新增 ACTIVITY subtype：FIRST_MEETING_ROULETTE（初见日/转盘）、FURNITURE_TRIAL（家具·历练）、MYSTERIOUS_CAVE（家具·神秘洞窟）。原 LARGE_EVENT 显示大型/周年，SIGN_IN 显示签到/楼主查岗。卡池限定/复刻/照影/自选仍从招募目录 pool_type 派生，只读。
+展示一级为活动、常驻、卡池、其他，存储 category 和查询参数仍为 ACTIVITY/RECRUITMENT/LOGIN/SHOP/MAINTENANCE/OTHER，不迁移旧记录。
 
-旧 subtype、旧 LOGIN/MAINTENANCE/SHOP 及 FURNITURE + subtype_detail=MYSTERIOUS_CAVE 保持解码兼容；单条 PUT 的可选字段仍为完整替换，省略/null 清除。新表单只有两级，旧三级编码在读取/编辑其他字段时保留，主动重新分类才清空旧细目。MEDIUM_EVENT、TAISHAN_FU、无细目 FURNITURE 不自动猜测，待维护者确认。常驻/未知卡池继续只读保留。没有数据库迁移、索引或定时任务。
+| 展示分类 | category / subtype |
+| --- | --- |
+| 活动 / 活动/周年 | ACTIVITY / LARGE_EVENT |
+| 活动 / 地宫/鸢会 | ACTIVITY / UNDERGROUND |
+| 活动 / 签到/查岗 | ACTIVITY / SIGN_IN |
+| 常驻 / 当季星图 | ACTIVITY / SEASONAL_STAR_CHART |
+| 常驻 / 白鸽 | ACTIVITY / WHITE_PIGEON |
+| 常驻 / 密探特训 | ACTIVITY / AGENT_TRAINING |
+| 常驻 / 历练/洞窟 | ACTIVITY / TRIAL_CAVE |
+| 其他 / 其他 | OTHER / OTHER |
 
-未知代码、数值枚举、中文代码和跨类别组合仍返回422。建议/采纳/新增型 JSON 共用原严格解码和业务校验。`subtype_detail` 仅兼容旧 FURNITURE 下的 MYSTERIOUS_CAVE。`pool_type` 不接受手工写入。类别改变不创建新ID、不合并记录、不改日期或订阅。
+卡池限定/复刻/照影/自选仍由招募目录 pool_type 派生，只读。「常驻」活动分组与招募的常驻卡池无关；保留项目既有「照影」与 zhaoying。
+
+旧 LOGIN（null/SIGN_IN）映射签到/查岗；ACTIVITY/FURNITURE_TRIAL、MYSTERIOUS_CAVE、FURNITURE + subtype_detail=MYSTERIOUS_CAVE 映射常驻·历练/洞窟，只读不改库。MEDIUM_EVENT、TAISHAN_FU、无明确细目 FURNITURE、FIRST_MEETING_ROULETTE、STAR_POOL、维护、商店及未知旧类型保留原编码并待归类，不依据标题推断。
+
+单条 PUT 的可选字段仍为完整替换，省略/null 清除。表单编辑其他字段保留历史分类，主动重新分类才使用新目标并清空旧细目。建议/采纳/新增型 JSON 共用严格解码和业务校验。未知代码、数值枚举和跨类别组合返回422；subtype_detail 仅兼容旧 FURNITURE 下的 MYSTERIOUS_CAVE，pool_type 不接受手工写入。类别改变不新建ID、不合并记录、不改日期或订阅，没有数据库迁移、索引或定时任务。
+
+分类交换文件仍为 schema_version=1：classification_options 返回活动3项、常驻4项、卡池4项、其他1项。每个新中文手工目标有唯一编码；历练/洞窟写入 ACTIVITY/TRIAL_CAVE。明确映射的旧记录导出新版标签，未确认记录导出 classification:null 并保留 original 原始资料。旧版大型/周年、地宫、签到/楼主查岗、家具·历练/神秘洞窟标签可读取并转换为新版。旧初见日/转盘、维护、商店、星池只允许在原记录上作为 UNCHANGED 保留，不能用来给其他记录赋新分类；行级错误提示重新选择新版目标。
+
+classification:null 为 SKIPPED；相同展示分类为 UNCHANGED，不规范化旧编码，整份未改文件往返零写入。只想统一旧历练/洞窟内部编码时，使用现有编辑器主动重选后保存。新指定的不同展示分类按唯一目标更新，版本、预览令牌、事务和分类专用更新边界均不变。
 
 ## 管理员 JSON v1 批量导入
 
@@ -358,7 +375,7 @@ Mongo 用例只使用 TestMongo 创建的专属临时容器；不得连接现有
 手工行是 `{id, expected_version, original, classification}`。`original` 保留完整管理资料供核对；只修改 `classification`，例如：
 
 ```json
-{"level1":"家具","level2":"历练"}
+{"level1":"常驻","level2":"历练/洞窟"}
 ```
 
 使用导出文件中的真实ID和版本；历史缺version按0导出。`classification: null` 表示不更新，省略整个活动行也不删除。`original`、`classification_options`、`reference_items` 均是参考，不参与写入，也不能扩展服务端允许的分类。卡池不允许移入手工items或在此修改，请到招募目录维护。空目录示例为 `public/examples/activity-calendar-classification-v1.json`（前端仓）。

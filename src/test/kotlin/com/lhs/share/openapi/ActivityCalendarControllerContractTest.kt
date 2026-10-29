@@ -280,6 +280,24 @@ class ActivityCalendarControllerContractTest {
     }
 
     @Test
+    fun `new classification codes pass strict HTTP decoder with valid categories only`() {
+        editor()
+        every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }
+        for (subtype in listOf("SEASONAL_STAR_CHART", "WHITE_PIGEON", "AGENT_TRAINING", "TRIAL_CAVE", "OTHER")) {
+            val category = if (subtype == "OTHER") "OTHER" else "ACTIVITY"
+            val node = mapper.readTree(body).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+                .put("category", category).put("subtype", subtype)
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.data.item.category").value(category))
+                .andExpect(jsonPath("$.data.item.subtype").value(subtype))
+            node.put("category", if (category == "OTHER") "ACTIVITY" else "OTHER")
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(node.toString()))
+                .andExpect(status().isUnprocessableEntity)
+        }
+    }
+
+    @Test
     fun `HTTP create accepts omitted or null end date and serializes ongoing facts`() {
         editor()
         every { repository.save(any()) } answers { firstArg<ActivityCalendarEvent>().copy(version = 0) }

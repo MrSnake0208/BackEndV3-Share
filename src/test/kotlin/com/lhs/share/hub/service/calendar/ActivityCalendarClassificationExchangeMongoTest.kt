@@ -58,7 +58,7 @@ class ActivityCalendarClassificationExchangeMongoTest {
     private val collection get() = template.getCollection("activity_calendar_events")
     private fun snapshot() = collection.find().sort(Document("_id", 1)).into(mutableListOf())
     private fun document(): ObjectNode = mapper.valueToTree(exchange.export())
-    private fun target(document: ObjectNode, row: Int = 0, level1: String = "家具", level2: String = "历练") {
+    private fun target(document: ObjectNode, row: Int = 0, level1: String = "常驻", level2: String = "历练/洞窟") {
         (document["items"][row] as ObjectNode).putObject("classification").put("level1", level1).put("level2", level2)
     }
 
@@ -92,7 +92,7 @@ class ActivityCalendarClassificationExchangeMongoTest {
         assertEquals(1, changed.ready)
         assertEquals(1, exchange.commit("editor", json.toString(), changed.previewToken).updated)
         val updated = repository.find(id)!!
-        assertEquals(ActivityCalendarSubtype.FURNITURE_TRIAL, updated.subtype)
+        assertEquals(ActivityCalendarSubtype.TRIAL_CAVE, updated.subtype)
         assertEquals(
             original.copy(
                 category = updated.category,
@@ -108,6 +108,75 @@ class ActivityCalendarClassificationExchangeMongoTest {
         assertEquals(201L, collection.countDocuments())
         assertEquals(subscription, subscriptions.find().first())
         assertEquals(201, exchange.preview(json.toString()).unchanged)
+    }
+
+    @Test
+    fun `legacy trial and cave round trip without writes and explicit new targets use canonical code`() {
+        val old = listOf(
+            calendar.create(
+                "creator",
+                request.copy(category = ActivityCalendarCategory.ACTIVITY, subtype = ActivityCalendarSubtype.FURNITURE_TRIAL),
+            ),
+            calendar.create(
+                "creator",
+                request.copy(category = ActivityCalendarCategory.ACTIVITY, subtype = ActivityCalendarSubtype.MYSTERIOUS_CAVE),
+            ),
+            calendar.create(
+                "creator",
+                request.copy(
+                    category = ActivityCalendarCategory.ACTIVITY,
+                    subtype = ActivityCalendarSubtype.FURNITURE,
+                    subtypeDetail = com.lhs.share.hub.repository.entity.ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE,
+                ),
+            ),
+        )
+        val before = snapshot()
+        val json = document()
+        assertTrue(json["items"].all { it["classification"]["level2"].asText() == "历练/洞窟" })
+        val unchanged = exchange.preview(json.toString())
+        assertEquals(3, unchanged.unchanged)
+        assertEquals(0, exchange.commit("editor", json.toString(), unchanged.previewToken).updated)
+        assertEquals(before, snapshot())
+        val oldDocument = document()
+        oldDocument["items"].forEach { row ->
+            val subtype = row["original"]["item"]["subtype"].asText()
+            (row as ObjectNode).putObject("classification").put("level1", "家具")
+                .put("level2", if (subtype == "FURNITURE_TRIAL") "历练" else "神秘洞窟")
+        }
+        val oldPreview = exchange.preview(oldDocument.toString())
+        assertEquals(3, oldPreview.unchanged)
+        assertEquals(0, exchange.commit("editor", oldDocument.toString(), oldPreview.previewToken).updated)
+        assertEquals(before, snapshot())
+
+        val fresh = calendar.create("creator", request.copy(title = "明确重新归类"))
+        val update = document()
+        update["items"].forEach { row ->
+            if (row["id"].asText() == fresh.item.id) {
+                (row as ObjectNode).putObject("classification").put("level1", "常驻").put("level2", "历练/洞窟")
+            }
+        }
+        val preview = exchange.preview(update.toString())
+        assertEquals(1, preview.ready)
+        assertEquals(1, exchange.commit("editor", update.toString(), preview.previewToken).updated)
+        assertEquals(ActivityCalendarSubtype.TRIAL_CAVE, repository.find(fresh.item.id)!!.subtype)
+        val oldIds = old.map { it.item.id }.toSet()
+        assertEquals(before, snapshot().filter { it.getString("_id") in oldIds })
+        val reexport = exchange.export()
+        assertTrue(reexport.items.all { it.classification?.level2 == "历练/洞窟" })
+        assertEquals(4, exchange.preview(mapper.writeValueAsString(reexport)).unchanged)
+
+        val historical = old.last()
+        calendar.update(
+            "editor",
+            historical.item.id,
+            request.copy(
+                category = ActivityCalendarCategory.ACTIVITY,
+                subtype = ActivityCalendarSubtype.TRIAL_CAVE,
+                expectedVersion = 0,
+            ),
+        )
+        assertEquals(ActivityCalendarSubtype.TRIAL_CAVE, repository.find(historical.item.id)!!.subtype)
+        assertNull(repository.find(historical.item.id)!!.subtypeDetail)
     }
 
     @Test
@@ -170,7 +239,7 @@ class ActivityCalendarClassificationExchangeMongoTest {
         assertEquals(1L, repository.find(created.item.id)!!.version)
         assertEquals(0, exchange.preview(json.toString()).ready)
         val fresh = document()
-        target(fresh, level1 = "其他", level2 = "星池")
+        target(fresh, level1 = "其他", level2 = "其他")
         val stale = exchange.preview(fresh.toString())
         val now = repository.find(created.item.id)!!
         repository.save(now.copy(description = "并发新说明"))

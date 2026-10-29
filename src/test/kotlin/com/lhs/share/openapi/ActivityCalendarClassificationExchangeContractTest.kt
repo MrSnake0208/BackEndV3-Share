@@ -73,10 +73,12 @@ class ActivityCalendarClassificationExchangeContractTest {
     @Test
     fun `export and unchanged preview preserve historical fields without writes`() {
         val result = mvc.perform(get("$path/export")).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.classification_options.常驻[3]").value("历练/洞窟"))
+            .andExpect(jsonPath("$.data.classification_options.其他[0]").value("其他"))
             .andExpect(jsonPath("$.data.document_type").value("activity-calendar-classification"))
             .andExpect(jsonPath("$.data.items[0].expected_version").value(0))
             .andExpect(jsonPath("$.data.items[0].original.enabled").value(false))
-            .andExpect(jsonPath("$.data.items[0].classification.level2").value("签到/楼主查岗")).andReturn()
+            .andExpect(jsonPath("$.data.items[0].classification.level2").value("签到/查岗")).andReturn()
         val document = mapper.readTree(result.response.contentAsString)["data"]
         mvc.perform(
             post("$path/classification-import/preview").contentType(MediaType.APPLICATION_JSON).content(

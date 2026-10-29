@@ -41,41 +41,65 @@ class ActivityCalendarClassificationExchangeService(
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .also { it.factory.setStreamReadConstraints(StreamReadConstraints.builder().maxStringLength(MAX_BYTES + 4096).build()) }
     private val options = linkedMapOf(
-        "活动" to listOf("大型/周年", "地宫", "签到/楼主查岗", "初见日/转盘"),
+        "活动" to listOf("活动/周年", "地宫/鸢会", "签到/查岗"),
+        "常驻" to listOf("当季星图", "白鸽", "密探特训", "历练/洞窟"),
         "卡池" to listOf("限定", "复刻", "照影", "自选"),
-        "家具" to listOf("历练", "神秘洞窟"),
-        "其他" to listOf("维护", "商店", "星池"),
+        "其他" to listOf("其他"),
     )
     private val targets = mapOf(
-        CalendarClassification("活动", "大型/周年") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.LARGE_EVENT),
-        CalendarClassification("活动", "地宫") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.UNDERGROUND),
-        CalendarClassification("活动", "签到/楼主查岗") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.SIGN_IN),
-        CalendarClassification("活动", "初见日/转盘") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.FIRST_MEETING_ROULETTE),
-        CalendarClassification("家具", "历练") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.FURNITURE_TRIAL),
-        CalendarClassification("家具", "神秘洞窟") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.MYSTERIOUS_CAVE),
-        CalendarClassification("其他", "维护") to (ActivityCalendarCategory.OTHER to ActivityCalendarSubtype.MAINTENANCE),
-        CalendarClassification("其他", "商店") to (ActivityCalendarCategory.SHOP to null),
-        CalendarClassification("其他", "星池") to (ActivityCalendarCategory.OTHER to ActivityCalendarSubtype.STAR_POOL),
+        CalendarClassification("活动", "活动/周年") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.LARGE_EVENT),
+        CalendarClassification("活动", "地宫/鸢会") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.UNDERGROUND),
+        CalendarClassification("活动", "签到/查岗") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.SIGN_IN),
+        CalendarClassification("常驻", "当季星图") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.SEASONAL_STAR_CHART),
+        CalendarClassification("常驻", "白鸽") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.WHITE_PIGEON),
+        CalendarClassification("常驻", "密探特训") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.AGENT_TRAINING),
+        CalendarClassification("常驻", "历练/洞窟") to (ActivityCalendarCategory.ACTIVITY to ActivityCalendarSubtype.TRIAL_CAVE),
+        CalendarClassification("其他", "其他") to (ActivityCalendarCategory.OTHER to ActivityCalendarSubtype.OTHER),
+    )
+    private val aliases = mapOf(
+        CalendarClassification("活动", "大型/周年") to CalendarClassification("活动", "活动/周年"),
+        CalendarClassification("活动", "地宫") to CalendarClassification("活动", "地宫/鸢会"),
+        CalendarClassification("活动", "签到/楼主查岗") to CalendarClassification("活动", "签到/查岗"),
+        CalendarClassification("家具", "历练") to CalendarClassification("常驻", "历练/洞窟"),
+        CalendarClassification("家具", "神秘洞窟") to CalendarClassification("常驻", "历练/洞窟"),
     )
 
     fun classification(event: ActivityCalendarEvent): CalendarClassification? {
+        if (event.subtypeDetail != null) {
+            return if (event.category == ActivityCalendarCategory.ACTIVITY && event.subtype == ActivityCalendarSubtype.FURNITURE &&
+                event.subtypeDetail == ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE
+            ) {
+                CalendarClassification("常驻", "历练/洞窟")
+            } else {
+                null
+            }
+        }
+        if (event.category == ActivityCalendarCategory.ACTIVITY &&
+            event.subtype in setOf(ActivityCalendarSubtype.FURNITURE_TRIAL, ActivityCalendarSubtype.MYSTERIOUS_CAVE)
+        ) {
+            return CalendarClassification("常驻", "历练/洞窟")
+        }
         if (event.category == ActivityCalendarCategory.LOGIN && event.subtype in setOf(null, ActivityCalendarSubtype.SIGN_IN)) {
-            return CalendarClassification("活动", "签到/楼主查岗")
-        }
-        if (event.category == ActivityCalendarCategory.MAINTENANCE && event.subtype in setOf(null, ActivityCalendarSubtype.MAINTENANCE)) {
-            return CalendarClassification("其他", "维护")
-        }
-        if (event.category == ActivityCalendarCategory.SHOP &&
-            event.subtype in setOf(null, ActivityCalendarSubtype.ACTIVITY_SHOP, ActivityCalendarSubtype.RECRUITMENT_SHOP)
-        ) {
-            return CalendarClassification("其他", "商店")
-        }
-        if (event.category == ActivityCalendarCategory.ACTIVITY && event.subtype == ActivityCalendarSubtype.FURNITURE &&
-            event.subtypeDetail == ActivityCalendarSubtypeDetail.MYSTERIOUS_CAVE
-        ) {
-            return CalendarClassification("家具", "神秘洞窟")
+            return CalendarClassification("活动", "签到/查岗")
         }
         return targets.entries.find { it.value == (event.category to event.subtype) }?.key
+    }
+
+    // Old v1 labels can preserve their existing records, but cannot assign an unconfirmed meaning to another record.
+    private fun legacyClassification(event: ActivityCalendarEvent): CalendarClassification? = when {
+        event.subtypeDetail != null -> null
+        event.category == ActivityCalendarCategory.ACTIVITY && event.subtype == ActivityCalendarSubtype.FIRST_MEETING_ROULETTE ->
+            CalendarClassification("活动", "初见日/转盘")
+        event.category == ActivityCalendarCategory.MAINTENANCE && event.subtype == null -> CalendarClassification("其他", "维护")
+        event.subtype == ActivityCalendarSubtype.MAINTENANCE &&
+            event.category in setOf(ActivityCalendarCategory.OTHER, ActivityCalendarCategory.MAINTENANCE) ->
+            CalendarClassification("其他", "维护")
+        event.category == ActivityCalendarCategory.SHOP &&
+            event.subtype in setOf(null, ActivityCalendarSubtype.ACTIVITY_SHOP, ActivityCalendarSubtype.RECRUITMENT_SHOP) ->
+            CalendarClassification("其他", "商店")
+        event.category == ActivityCalendarCategory.OTHER && event.subtype == ActivityCalendarSubtype.STAR_POOL ->
+            CalendarClassification("其他", "星池")
+        else -> null
     }
 
     fun export(): CalendarClassificationExport {
@@ -157,6 +181,7 @@ class ActivityCalendarClassificationExchangeService(
             val event = events[id]
             val before = event?.let(::classification)
             var after: CalendarClassification? = null
+            var preserveLegacy = false
             try {
                 fields(node, setOf("id", "expected_version", "original", "classification"))
                 if (!node.path("id").isTextual || id.isBlank() || !seen.add(id)) throw calendarInvalid("活动ID为空或重复")
@@ -177,11 +202,17 @@ class ActivityCalendarClassificationExchangeService(
                     fields(target, setOf("level1", "level2"))
                     if (!target.path("level1").isTextual || !target.path("level2").isTextual) throw calendarInvalid("分类须填写完整中文一级和二级")
                     after = CalendarClassification(target["level1"].asText(), target["level2"].asText())
-                    if (after !in targets) throw calendarInvalid("分类组合不合法；卡池只能在招募目录维护")
+                    after = aliases[after] ?: after
+                    if (after !in targets) {
+                        preserveLegacy = after == legacyClassification(event)
+                        if (!preserveLegacy) {
+                            throw calendarInvalid("分类组合不合法或旧分类已停用，请按新版classification_options重新选择；卡池只能在招募目录维护")
+                        }
+                    }
                 }
                 val status = when {
                     after == null -> "SKIPPED"
-                    before == after -> "UNCHANGED"
+                    preserveLegacy || before == after -> "UNCHANGED"
                     version.asLong() != (event.version ?: 0L) -> "CONFLICT"
                     else -> "READY"
                 }
