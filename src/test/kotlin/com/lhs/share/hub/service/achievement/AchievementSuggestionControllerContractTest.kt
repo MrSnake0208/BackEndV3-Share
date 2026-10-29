@@ -80,16 +80,17 @@ class AchievementSuggestionControllerContractTest {
     }
 
     @Test
-    fun `archive permission is required even for achievement reviewers and anonymous users`() {
+    fun `ordinary users can list own suggestions while administration and anonymous requests stay protected`() {
         every { auth.hasPermission("other", AdminPermission.ARCHIVE_ACCESS) } returns false
-        mvc.perform(get(player)).andExpect(status().isForbidden)
+        every { repo.list("other", null, null, 1, 20) } returns (emptyList<AchievementSuggestion>() to 0L)
+        mvc.perform(get(player)).andExpect(status().isOk)
         mvc.perform(get(admin)).andExpect(status().isForbidden)
         every { helper.obtainUserId() } returns null
         mvc.perform(get(player)).andExpect(status().isUnauthorized)
         assertTrue(BetaAccessPolicy.requiresBeta("GET", player))
         assertTrue(BetaAccessPolicy.requiresBeta("POST", player))
         assertFalse(BetaAccessPolicy.requiresBeta("POST", "$admin/s1/accept"))
-        verify { repo wasNot io.mockk.Called }
+        verify(exactly = 1) { repo.list("other", null, null, 1, 20) }
     }
 
     @Test

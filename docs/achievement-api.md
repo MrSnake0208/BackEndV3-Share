@@ -8,11 +8,11 @@
 
 日常资料通过网站「管理工作台 → 内容维护 → 成就目录管理」维护，详细接口及操作见 [成就目录管理](achievement-catalog-admin.md)。游戏和系统生成的稳定 ID 不可编辑；成就名称和有效分类必填，条件与奖励允许暂缺，不要求逐条核验后才发布。公共条目固定为 achievement_id、game、category_id、name、condition、sort、is_hidden、rewards、target、linked_metric；没有原游戏ID或替代映射。target=null 不提供数值进度；明确目标为1到1e12的正整数。公开 data_status 自动区分 empty/partial，coverage 可自动生成；complete 仅由管理员明确选择，不按条目数量推断完整程度。
 
-下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口受统一 feature flag 和 `archive:access` 双重控制；羁绊自动进度通过同账号只读指标接入，人工档案和备份继续独立。
+下架条目不删个人记录，仍可完整备份，但不计入当前有效目录统计。前端玩家入口受统一 feature flag 和登录态控制，所有具备站点使用资格的登录用户可用，无需管理员或 `archive:access`；羁绊自动进度通过同账号只读指标接入，人工档案和备份继续独立。羁绊功能的访问权限不随成就开放。
 
 ## 接口与保存约束
 
-沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；目录及管理接口同样要求网站登录和 `archive:access`（暂仅 `SUPER_ADMIN` 或 `PLATFORM_ADMIN`，普通/内测及历史 `ARCHIVE_USER` 不放行），目录管理另须原写权限，所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
+沿用 `ApiResult` 包装、snake_case 字段和现有异常格式。下列个人接口要求网站 JWT、现有 Beta 资格和账号归属；成就目录要求网站登录，不再要求 `archive:access`。目录管理仍要求 `archive:access` 与 `achievement_catalog:write`，且必须是配置的资料所有者；普通用户不能管理目录。所有响应 `Cache-Control: no-store`；不开放外部 token/share scope。
 
 | 方法与路径 | 输入 | 返回 |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ preview_token 绑定用户、目标账号、游戏、当前档案版本、目录
 
 ## 成就资料投稿与审核（K05）
 
-投稿不绑定游戏子账号，不接受 account_id/submitter_id；删除子账号不删除投稿。普通接口仅网站 JWT、Beta 与 archive:access 可用；管理接口沿用 archive:access，并在 Controller 与 Service 检查 achievement_catalog:write。仅活动管理权限不能审核。普通详情始终只允许本人，越权与不存在均404。所有响应 no-store，不加入公开白名单。
+投稿不绑定游戏子账号，不接受 account_id/submitter_id；删除子账号不删除投稿。普通接口要求网站 JWT 与现有 Beta 资格，无需 archive:access；管理接口沿用 archive:access，并在 Controller 与 Service 检查 achievement_catalog:write 及配置的资料所有者身份。仅活动管理权限不能审核。普通详情始终只允许本人，越权与不存在均404。所有响应 no-store，不加入公开白名单。
 
 | 方法与路径 | 输入与结果 |
 | --- | --- |
