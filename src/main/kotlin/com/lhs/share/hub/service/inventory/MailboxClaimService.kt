@@ -25,6 +25,7 @@ class MailboxClaimService(
     private val records: InventoryRecordRepository,
     private val deleted: InventoryDeletedRecordRepository,
     private val inventory: InventoryService,
+    private val history: MailboxHistoryService,
     @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionTemplate,
 ) {
     fun claim(userId: String, accountId: String, body: JsonNode): MailboxReserveResponse {
@@ -90,7 +91,7 @@ class MailboxClaimService(
                     if (tickets > 0) add(InventoryEntryRequest("fuchuan", "符传", tickets))
                 }
                 if (entries.isEmpty()) invalid("没有可记录领取的邮件奖励")
-                val now = Instant.now().truncatedTo(ChronoUnit.MILLIS)
+                val now = maxOf(Instant.now().truncatedTo(ChronoUnit.MILLIS), reserve.updatedAt ?: Instant.MIN)
                 val cleared = reserve.copy(
                     whiteCoinMails = reserve.whiteCoinMails.mapIndexed { index, row -> row.copy(count = row.count - coinCounts[index]) },
                     fuChuanMailCount = reserve.fuChuanMailCount - ticketCount,
@@ -120,6 +121,7 @@ class MailboxClaimService(
                         ),
                     ),
                 )
+                history.record(userId, accountId, reserve, cleared, "claim", recordId)
                 MailboxReserveResponse.of(accountId, checkNotNull(saved.mailboxReserve))
             },
         )

@@ -28,10 +28,21 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.transaction.support.AbstractPlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 
 class MailboxReserveControllerContractTest {
     private val repository = mockk<SubAccountRepository>()
+    private val history = mockk<com.lhs.share.hub.service.inventory.MailboxHistoryService>(relaxed = true)
+    private val tx = TransactionTemplate(
+        object : AbstractPlatformTransactionManager() {
+            override fun doGetTransaction(): Any = Any()
+            override fun doBegin(transaction: Any, definition: org.springframework.transaction.TransactionDefinition) {}
+            override fun doCommit(status: org.springframework.transaction.support.DefaultTransactionStatus) {}
+            override fun doRollback(status: org.springframework.transaction.support.DefaultTransactionStatus) {}
+        },
+    )
     private val accounts = mockk<SubAccountService>()
     private val helper = mockk<AuthenticationHelper>()
     private val account = SubAccount(userId = "owner", accountId = "a", name = "A")
@@ -43,10 +54,18 @@ class MailboxReserveControllerContractTest {
     fun setup() {
         every { helper.requireUserId() } returns "owner"
         every { accounts.requireAccount("owner", "a") } returns account
+        every { history.current("owner", any()) } answers {
+            val id = secondArg<String>()
+            val found = accounts.requireAccount("owner", id)
+            com.lhs.share.hub.controller.inventory.response.MailboxReserveResponse.of(id, found.mailboxReserve ?: MailboxReserve())
+        }
         val mapper = jacksonObjectMapper().registerModule(JavaTimeModule()).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-        mvc = MockMvcBuilders.standaloneSetup(MailboxReserveController(MailboxReserveService(accounts, repository), helper))
-            .setControllerAdvice(InventoryExceptionHandler(), GlobalExceptionHandler())
-            .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
+        mvc =
+            MockMvcBuilders.standaloneSetup(
+                MailboxReserveController(MailboxReserveService(accounts, repository, history, tx), helper, history),
+            )
+                .setControllerAdvice(InventoryExceptionHandler(), GlobalExceptionHandler())
+                .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
     }
 
     @Test
@@ -111,5 +130,25 @@ class MailboxReserveControllerContractTest {
         every { repository.replaceMailboxReserve("owner", "a", 0, any()) } returns null
         mvc.perform(put(path).param("account_id", "a").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isConflict).andExpect(jsonPath("$.error.code").value("mailbox_reserve_conflict"))
+    }
+
+    @Test
+    fun `history is private and forwards bounded query under authenticated owner`() {
+        val from = java.time.Instant.parse("2026-10-01T00:00:00Z")
+        val to = java.time.Instant.parse("2026-11-01T00:00:00Z")
+        every { history.list("owner", "a", from, to, null, 10) } returns
+            com.lhs.share.hub.controller.inventory.response.MailboxHistoryResponse("a", emptyList(), null, 1, 2, 3)
+        mvc.perform(
+            get("$path/history").param("account_id", "a").param("from", from.toString()).param("to", to.toString()).param("limit", "10"),
+        )
+            .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.inventory_record_count").value(3))
+            .andExpect(jsonPath("$.data.entries").isEmpty)
+        verify(exactly = 1) { history.list("owner", "a", from, to, null, 10) }
+        mvc.perform(get("$path/history").param("account_id", "a").param("from", "bad").param("to", to.toString()))
+            .andExpect(status().isUnprocessableEntity)
+        every { helper.requireUserId() } throws ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        mvc.perform(get("$path/history").param("account_id", "a").param("from", from.toString()).param("to", to.toString()))
+            .andExpect(status().isUnauthorized)
     }
 }

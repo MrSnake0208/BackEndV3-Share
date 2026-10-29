@@ -10,6 +10,8 @@ data class MailboxReserveResponse(
     val fuChuanMailCount: Int,
     val version: Long,
     val updatedAt: Instant?,
+    val inventoryRevision: Long? = null,
+    val inventoryRecordCount: Long? = null,
 ) {
     companion object {
         fun of(accountId: String, reserve: MailboxReserve) = MailboxReserveResponse(

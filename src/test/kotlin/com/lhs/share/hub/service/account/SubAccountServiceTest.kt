@@ -52,6 +52,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 
 class SubAccountServiceTest {
+    private val mailboxHistory = mockk<com.lhs.share.hub.repository.MailboxReserveHistoryRepository>(relaxed = true)
     private val accountRepository = mockk<SubAccountRepository>()
     private val inventoryCurrentRepository = mockk<InventoryCurrentRepository>()
     private val inventoryRecordRepository = mockk<InventoryRecordRepository>()
@@ -133,6 +134,7 @@ class SubAccountServiceTest {
         operatorRelationships = relationships,
         starScanRecords = starScanRecords,
         operatorResets = resetRepository,
+        mailboxHistory = mailboxHistory,
     )
 
     @Test
@@ -272,6 +274,7 @@ class SubAccountServiceTest {
         every { accountRepository.deleteById("mongo-id") } just runs
 
         service.delete("u1", "main")
+        verify(exactly = 1) { mailboxHistory.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { calendarSubscriptions.deleteAccount("u1", "main") }
         verify(exactly = 1) { calendarPrivateItems.deleteAccount("u1", "main") }
 

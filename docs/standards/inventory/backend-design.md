@@ -340,9 +340,9 @@ resource_delta在删除/恢复时按每项基准应用有符号变动，同毫�
 
 本人 JWT `GET/PUT /v1/inventory/mailbox-reserve?account_id=...`，沿用 ApiResult 成功封装和库存错误响应，禁止缓存。PUT：`{expected_version, white_coin_mails:[{count,coins_per_mail}], fu_chuan_mail_count}`；响应：`{account_id,white_coin_mails,fu_chuan_mail_count,version,updated_at}`。普通符传按每封3个折算；白金币按行相乘求和，不含体力/购买赠送。
 
-`SubAccount.mailboxReserve` 是可空嵌入文档，旧账号只读返回版本0/空数组/0封/null时间。单文档定向 CAS 只更新该字段，过滤 userId+accountId+版本，不 upsert；删除账号自然清除且并发写入不会复活账号。版本冲突409、账号归属不存在404、字段/数量错误422。每项数量0..1000000，最多20行，expected_version 0..9007199254740990；保存覆盖而不累加。保留用户记录的单封数值，当前月卡档位变化不改写历史邮件。
+`SubAccount.mailboxReserve` 是可空嵌入文档，旧账号只读返回版本0/空数组/0封/null时间。当前值定向 CAS 只更新该字段，过滤 userId+accountId+版本，不 upsert；删除账号同时清理储备历史，且并发写入不会复活账号。版本冲突409、账号归属不存在404、字段/数量错误422。每项数量0..1000000，最多20行，expected_version 0..9007199254740990；保存覆盖而不累加。保留用户记录的单封数值，当前月卡档位变化不改写历史邮件。
 
-不写 `inventory_current` / `inventory_records`，不改变库存revision，不计入奖励统计，不包含在库存交换导入导出中。无需新集合、索引或数据迁移。定向证据：`MailboxReserveControllerContractTest` 和使用 TestMongo 自有可抛弃容器的 `MailboxReserveMongoTest`。
+不写 `inventory_current` / `inventory_records`，不改变库存revision，不计入奖励统计，不包含在库存交换导入导出中。历史保存与新索引见下文；无全量数据迁移。定向证据：`MailboxReserveControllerContractTest` 和使用 TestMongo 自有可抛弃容器的 `MailboxReserveMongoTest`。
 
 ### 邮件领取命令
 
@@ -350,7 +350,7 @@ resource_delta在删除/恢复时按每项基准应用有符号变动，同毫�
 
 `MailboxClaimService` 在同一 Hub Mongo 事务中执行储备 CAS 扣减与既有 `InventoryService.import`；奖励使用服务端毫秒时间、原 reward_delta 和 full/listed 基准规则，库存 revision 随原导入更新。保留单封白金币配置和未领取的剩余封数。空奖励、超协议上限、非法正文为 422；账号不属于本人为 404；旧版本或已删除领取为 409。记录 ID 为 `yuanhub:mail:<expected_version>:<operation_id>`；存在 selection 时附加规范化选择（白金币封数以逗号连接、冒号、符传封数）的 SHA-256 前16字节十六进制摘要，使异文请求被旧版本校验拒绝。相同正文和编号重试返回当前储备，不重复扣邮件或增加库存，也不清除之后新增的储备。删除记录后必须显式 restore，不通过重试复活。
 
-原 GET/PUT 仍只维护储备；联合领取响应继续为 `MailboxReserveResponse`，禁止缓存。不新增集合、索引、数据库结构或交换协议枚举。定向证据为 `MailboxClaimControllerContractTest` 与隔离容器 `MailboxClaimMongoTest`（回滚、重复、并发、归属、基准及删除/恢复）。
+原 GET/PUT 仍只维护储备；联合领取响应继续为 `MailboxReserveResponse`，禁止缓存。联合事务同时写入下述邮箱历史，不新增交换协议枚举。定向证据为 `MailboxClaimControllerContractTest` 与隔离容器 `MailboxClaimMongoTest`（回滚、重复、并发、归属、基准及删除/恢复）。
 
 ## 站内奖励补记（已计入库存）
 
@@ -368,3 +368,15 @@ resource_delta在删除/恢复时按每项基准应用有符号变动，同毫�
 同 record_id、同正文且现存记录为 history_only 的完整重试直接返回 duplicates，不要求旧 revision 再次匹配、不递增版本；同键异正文为 record_conflict，现存 applied 记录不能当作补记成功。部分重复只处理剩余新记录，并对整个提交保持事务一致性。网络/服务异常或回执不完整时冻结文档、record_id 与 revision 原样重试；只有明确拒绝后才能编辑并重建请求。
 
 补记仍按普通交换格式保存/导出，不新增 stock_effect 输入或永久不入库的流水类型。删除或恢复旧盘点沿用现有按时间重放：先重放奖励时 stock_effect 可变为 applied，较晚盘点再校准数量；不能据此认为恢复后标记必回到 history_only。“只补记录”保证本次提交在覆盖基线下不重复入库，不排除日后历史重算。
+
+## 邮箱储备历史与统计读取（2026-10-29）
+
+`mailbox_reserve_history` 独立保存服务端归属、version、effectiveAt、kind（baseline/adjustment/claim）、完整邮件分组、符传封数及可选领取 recordId。唯一索引 `(userId, accountId, version)`，时段索引 `(userId, accountId, effectiveAt, version)`，均按现有实体索引配置创建。金额折算使用 Long；不混入库存交换记录、导出或奖励获得量。
+
+储备 PUT 将旧观测保留、version CAS、新历史快照放在同一 Hub Mongo 事务；首次确认零封可建立基准，已有基准的无变化保存不新增历史。claim 在现有扣储备与奖励导入事务内追加历史，奖励与历史同时间、同 recordId；重试不会重复历史。没有可靠时间的旧值不回填；有 updatedAt 的旧值仅作该时刻的最后已知观测，GET 可虚拟返回而不写库，首次新写入时保存旧观测。
+
+本人 JWT `GET /v1/inventory/mailbox-reserve/history?account_id=...&from=...&to=...&limit=100&cursor=...`，时间为 RFC3339、范围 `[from,to)`，limit 为 1–100。按 effectiveAt/version 升序分页，游标绑定用户、账号和范围；响应 `{account_id, entries, next_cursor, version, inventory_revision, inventory_record_count}`。entries 包含 version、effective_at、kind、white_coin_mails、fu_chuan_mail_count、record_id、claim_deleted；不暴露内部用户 ID。响应禁止缓存，读取不创建文档／基准。
+
+当前储备 GET 追加 inventory_revision、inventory_record_count。历史与当前标记均在事务内一致读取。含邮箱报告比较全量读取前后的邮箱 version、库存 revision、库存流水条数；历史补录不一定改变库存 revision，条数用于覆盖这种追加。删除／恢复会递增 revision。任一变化最多整批重试一次，分页失败、超过上限或仍不稳定不能当成完整统计。旧 PUT/claim 字段保持兼容，写响应的读取标记可为 null，前端必须用 GET 取得统计标记。
+
+删除／恢复领取奖励维持现有语义：修正背包、不退还／再次扣邮箱。历史按关联已删除记录批量标注 claim_deleted，避免 N+1 查询。子账号删除在原事务内清理新集合；当前无单独的用户注销业务入口。前端先部署需新接口可用，建议后端先发布；回退旧后端将中断历史，不能删除新集合或宣称中断期间数据完整。

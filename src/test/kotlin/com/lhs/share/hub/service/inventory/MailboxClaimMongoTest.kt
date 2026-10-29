@@ -61,11 +61,21 @@ class MailboxClaimMongoTest {
     private val tx = TransactionTemplate(MongoTransactionManager(template.mongoDatabaseFactory))
     private val catalog = mockk<EntityCatalogService>()
     private val inventory = InventoryService(accounts, current, records, deleted, catalog, template, tx, revisions)
-    private val service = MailboxClaimService(accounts, records, deleted, inventory, tx)
+    private val accountService = mockk<com.lhs.share.hub.service.account.SubAccountService>()
+    private val historyRepository = factory.getRepository(com.lhs.share.hub.repository.MailboxReserveHistoryRepository::class.java)
+    private val history = MailboxHistoryService(accountService, historyRepository, template, tx)
+    private val service = MailboxClaimService(accounts, records, deleted, inventory, history, tx)
     private val mapper = jacksonObjectMapper()
 
     @BeforeEach
     fun seed() {
+        every { accountService.requireAccount(any(), any()) } answers {
+            accounts.findByUserIdAndAccountId(firstArg(), secondArg())
+                ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "not found")
+        }
+        template.indexOps(com.lhs.share.hub.repository.entity.MailboxReserveHistory::class.java).ensureIndex(
+            Index().on("userId", Sort.Direction.ASC).on("accountId", Sort.Direction.ASC).on("version", Sort.Direction.ASC).unique(),
+        )
         accounts.save(SubAccount(userId = "owner", accountId = "main", name = "Main", mailboxReserve = reserve))
         every { catalog.exists(any(), any()) } returns true
         every { catalog.catalog() } returns InventoryCatalogResponse(catalogVersion = "test", entities = emptyList())
@@ -173,6 +183,7 @@ class MailboxClaimMongoTest {
         assertEquals(10000L, balance("baijinbi"))
         assertEquals(0L, balance("fuchuan"))
         assertEquals(1L, records.count())
+        assertEquals(0L, historyRepository.count())
     }
 
     @Test
@@ -231,5 +242,139 @@ class MailboxClaimMongoTest {
         service.claim("owner", "main", body())
         assertEquals(10000L, balance("baijinbi"))
         assertEquals(0, accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve!!.fuChuanMailCount)
+    }
+
+    private fun historyPage(cursor: String? = null, limit: Int = 100) =
+        history.list("owner", "main", Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2030-01-01T00:00:00Z"), cursor, limit)
+
+    @Test
+    fun `legacy reads are pure then claim preserves baseline and history with deleted status`() {
+        repeat(2) {
+            val page = historyPage()
+            assertEquals(listOf(1L), page.entries.map { it.version })
+            assertEquals("baseline", page.entries.single().kind)
+            assertEquals(0L, historyRepository.count())
+        }
+        service.claim("owner", "main", selected())
+        repeat(2) { service.claim("owner", "main", selected()) }
+        assertEquals(2L, historyRepository.count())
+        val first = historyPage(limit = 1)
+        val second = historyPage(first.nextCursor, 1)
+        assertEquals(listOf(1L, 2L), (first.entries + second.entries).map { it.version })
+        assertEquals(null, second.nextCursor)
+        val receipt = second.entries.single()
+        assertEquals("claim", receipt.kind)
+        assertEquals(false, receipt.claimDeleted)
+        val marker = history.current("owner", "main")
+        inventory.deleteRecord("owner", "main", receipt.recordId!!)
+        assertEquals(true, historyPage().entries.last().claimDeleted)
+        assertTrue(history.current("owner", "main").inventoryRevision!! > marker.inventoryRevision!!)
+        assertEquals(1, accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve!!.fuChuanMailCount)
+        inventory.restoreRecord("owner", "main", receipt.recordId)
+        assertEquals(false, historyPage().entries.last().claimDeleted)
+        assertEquals(2L, historyRepository.count())
+        assertThrows(InventoryApiException::class.java) { history.list("other", "main", Instant.EPOCH, Instant.now(), null, 10) }
+        assertThrows(InventoryApiException::class.java) { historyPage("invalid!") }
+        assertThrows(InventoryApiException::class.java) { historyPage(limit = 101) }
+        assertThrows(InventoryApiException::class.java) { history.list("owner", "main", Instant.EPOCH, Instant.now(), first.nextCursor, 1) }
+    }
+
+    @Test
+    fun `save creates zero baseline without reward and history failure rolls back all claim effects`() {
+        accounts.save(SubAccount(userId = "owner", accountId = "empty", name = "Empty"))
+        val saver = MailboxReserveService(accountService, accounts, history, tx)
+        val zero = mapper.readTree("""{"expected_version":0,"white_coin_mails":[],"fu_chuan_mail_count":0}""")
+        assertEquals(1L, saver.save("owner", "empty", zero).version)
+        assertEquals(1L, historyRepository.count())
+        assertEquals(1L, records.count())
+        saver.save("owner", "empty", mapper.readTree("""{"expected_version":1,"white_coin_mails":[],"fu_chuan_mail_count":0}"""))
+        assertEquals(1L, historyRepository.count())
+        val failingHistory = mockk<MailboxHistoryService>()
+        every { failingHistory.record(any(), any(), any(), any(), any(), any()) } throws IllegalStateException("history unavailable")
+        val failingClaim = MailboxClaimService(accounts, records, deleted, inventory, failingHistory, tx)
+        assertThrows(IllegalStateException::class.java) { failingClaim.claim("owner", "main", selected()) }
+        assertEquals(reserve, accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve)
+        assertEquals(10000L, balance("baijinbi"))
+        assertEquals(1L, records.count())
+        val failingSave = MailboxReserveService(accountService, accounts, failingHistory, tx)
+        assertThrows(IllegalStateException::class.java) {
+            failingSave.save("owner", "empty", mapper.readTree("""{"expected_version":1,"white_coin_mails":[],"fu_chuan_mail_count":1}"""))
+        }
+        assertEquals(0, accounts.findByUserIdAndAccountId("owner", "empty")!!.mailboxReserve!!.fuChuanMailCount)
+    }
+
+    @Test
+    fun `history-only import changes report marker even without stock revision`() {
+        val before = history.current("owner", "main")
+        inventory.import(
+            "owner",
+            InventoryImportRequest(
+                format = "myshare-inventory-exchange",
+                version = 2,
+                exportedAt = "2025-12-01T00:00:00Z",
+                producer = ProducerDto("test"),
+                records = listOf(
+                    InventoryRecordRequest(
+                        accountId = "main",
+                        recordId = "old-reward",
+                        recordType = "reward_delta",
+                        entityType = "item",
+                        effectiveAt = "2025-12-01T00:00:00Z",
+                        entries = listOf(InventoryEntryRequest("baijinbi", count = 50)),
+                    ),
+                ),
+            ),
+        )
+        val after = history.current("owner", "main")
+        assertEquals(before.inventoryRevision, after.inventoryRevision)
+        assertEquals(before.inventoryRecordCount!! + 1, after.inventoryRecordCount)
+        assertEquals(10000L, balance("baijinbi"))
+    }
+
+    @Test
+    fun `history cleanup is account scoped and duplicate versions are rejected`() {
+        service.claim("owner", "main", selected())
+        val entry = historyRepository.findAll().first()
+        assertThrows(org.springframework.dao.DuplicateKeyException::class.java) { historyRepository.insert(entry.copy(id = null)) }
+        historyRepository.insert(entry.copy(id = null, accountId = "other"))
+        historyRepository.insert(entry.copy(id = null, userId = "other"))
+        historyRepository.deleteAllByUserIdAndAccountId("owner", "main")
+        assertEquals(2L, historyRepository.count())
+        assertTrue(historyRepository.findAll().none { it.userId == "owner" && it.accountId == "main" })
+    }
+
+    @Test
+    fun `concurrent adjustments commit one current value and one matching history`() {
+        val saver = MailboxReserveService(accountService, accounts, history, tx)
+        val barrier = CyclicBarrier(2)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val results = pool.invokeAll(
+                (3..4).map { count ->
+                    Callable {
+                        barrier.await()
+                        runCatching {
+                            saver.save(
+                                "owner",
+                                "main",
+                                mapper.readTree(
+                                    """{"expected_version":1,"white_coin_mails":[],"fu_chuan_mail_count":$count}""",
+                                ),
+                            )
+                        }
+                    }
+                },
+            ).map { it.get() }
+            assertEquals(1, results.count { it.isSuccess })
+            val saved = accounts.findByUserIdAndAccountId("owner", "main")!!.mailboxReserve!!
+            assertEquals(2L, saved.version)
+            assertEquals(2L, historyRepository.count())
+            val latest = historyPage().entries.last()
+            assertEquals("adjustment", latest.kind)
+            assertEquals(saved.fuChuanMailCount, latest.fuChuanMailCount)
+            assertEquals(1L, records.count())
+        } finally {
+            pool.shutdownNow()
+        }
     }
 }

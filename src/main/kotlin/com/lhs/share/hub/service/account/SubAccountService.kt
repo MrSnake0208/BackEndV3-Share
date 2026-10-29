@@ -90,6 +90,7 @@ class SubAccountService(
     private val bondPreviews: com.lhs.share.hub.service.bond.BondImportPreviews? = null,
     private val starScanRecords: StarScanRecordRepository? = null,
     private val reserveWorkspaces: OperatorReserveWorkspaceRepository? = null,
+    private val mailboxHistory: com.lhs.share.hub.repository.MailboxReserveHistoryRepository? = null,
     private val operatorResets: com.lhs.share.hub.repository.OperatorResetTransactionRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
@@ -233,6 +234,7 @@ class SubAccountService(
             transactionTemplate.executeWithoutResult {
                 val account = requireAccount(userId, accountId)
                 fenceAccount(account)
+                mailboxHistory?.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
