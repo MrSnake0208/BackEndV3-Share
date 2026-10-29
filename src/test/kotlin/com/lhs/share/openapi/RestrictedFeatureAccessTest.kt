@@ -7,7 +7,10 @@ import com.lhs.share.handler.InventoryExceptionHandler
 import com.lhs.share.handler.OperatorExceptionHandler
 import com.lhs.share.hub.controller.achievement.AchievementCatalogAdminController
 import com.lhs.share.hub.controller.achievement.AchievementController
+import com.lhs.share.hub.controller.achievement.AchievementSuggestionController
+import com.lhs.share.hub.controller.achievement.response.AchievementArchiveResponse
 import com.lhs.share.hub.controller.achievement.response.AchievementCatalogResponse
+import com.lhs.share.hub.controller.achievement.response.AchievementSuggestionOptions
 import com.lhs.share.hub.controller.bond.BondCatalogAdminController
 import com.lhs.share.hub.controller.bond.BondController
 import com.lhs.share.hub.controller.operator.OperatorPanelController
@@ -18,6 +21,7 @@ import com.lhs.share.hub.controller.star.StarScanController
 import com.lhs.share.hub.repository.entity.BondPublication
 import com.lhs.share.hub.service.achievement.AchievementCatalogService
 import com.lhs.share.hub.service.achievement.AchievementService
+import com.lhs.share.hub.service.achievement.AchievementSuggestionService
 import com.lhs.share.hub.service.admin.AdminAuthorizationService
 import com.lhs.share.hub.service.admin.AdminPermission
 import com.lhs.share.hub.service.bond.BondCatalogService
@@ -32,11 +36,13 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
+import org.springframework.http.converter.ByteArrayHttpMessageConverter
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 
@@ -45,6 +51,7 @@ class RestrictedFeatureAccessTest {
     private val authorization = mockk<AdminAuthorizationService>()
     private val achievements = mockk<AchievementService>()
     private val achievementCatalog = mockk<AchievementCatalogService>()
+    private val achievementSuggestions = mockk<AchievementSuggestionService>()
     private val bonds = mockk<BondService>()
     private val bondCatalog = mockk<BondCatalogService>()
     private val panels = mockk<OperatorPanelService>()
@@ -54,6 +61,7 @@ class RestrictedFeatureAccessTest {
     private val mapper = jacksonObjectMapper()
     private val mvc = MockMvcBuilders.standaloneSetup(
         AchievementController(achievements, achievementCatalog, helper, mapper),
+        AchievementSuggestionController(achievementSuggestions, helper, mapper),
         BondController(bonds, bondCatalog, helper, mapper),
         AchievementCatalogAdminController(mockk(), authorization, helper, mapper),
         BondCatalogAdminController(bondCatalog, authorization, helper, mapper),
@@ -63,15 +71,16 @@ class RestrictedFeatureAccessTest {
         StarScanController(scans, helper),
     ).addInterceptors(RestrictedFeatureInterceptor(authorization, helper))
         .setControllerAdvice(InventoryExceptionHandler(), OperatorExceptionHandler())
-        .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
+        .setMessageConverters(ByteArrayHttpMessageConverter(), MappingJackson2HttpMessageConverter(mapper)).build()
 
     @Test
-    fun `anonymous and ungranted users cannot read write import or calculate`() {
+    fun `anonymous users and ungranted users of restricted features cannot read write import or calculate`() {
         for (user in listOf(null, "ordinary", "beta-member", "historical-usage-role")) {
             every { helper.obtainUserId() } returns user
             every { authorization.hasPermission(any(), any()) } returns false
             val expected = if (user == null) 401 else 403
-            for (root in listOf("/v1/achievements", "/v1/bonds")) {
+            val roots = if (user == null) listOf("/v1/achievements", "/v1/bonds") else listOf("/v1/bonds")
+            for (root in roots) {
                 for (suffix in listOf("/catalog?game=如鸢", "/archive?account_id=a", "/export?account_id=a")) {
                     mvc.perform(get(root + suffix)).andExpect(status().`is`(expected))
                 }
@@ -134,7 +143,8 @@ class RestrictedFeatureAccessTest {
         every { panels.preview("member", any()) } returns OperatorPanelResponse("calculated", 10, 20)
         mvc.perform(post("/v1/operator/panel/preview").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isOk)
-        mvc.perform(get("/v1/achievements/catalog").param("game", "如鸢")).andExpect(status().isForbidden)
+        mvc.perform(get("/v1/achievements/catalog").param("game", "如鸢")).andExpect(status().isOk)
+        mvc.perform(get("/v1/bonds/catalog").param("game", "如鸢")).andExpect(status().isForbidden)
         every { authorization.hasPermission("member", AdminPermission.OPERATOR_RELATIONSHIP_USE) } returns true
         every { relationships.catalog("如鸢") } returns emptyMap()
         mvc.perform(get("/v1/operator/relationships/catalog").param("game", "如鸢")).andExpect(status().isOk)
@@ -150,5 +160,45 @@ class RestrictedFeatureAccessTest {
         every { authorization.hasPermission("member", AdminPermission.STAR_SCAN_REVIEW) } returns false
         mvc.perform(get("/v1/operator/reserve-workspace").param("account_id", "a")).andExpect(status().isForbidden)
         mvc.perform(get("/v1/star/scans/pending").param("account_id", "a")).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `ordinary users can read and save own achievements without archive grants but cannot manage catalogs`() {
+        every { helper.obtainUserId() } returns "ordinary"
+        every { helper.requireUserId() } returns "ordinary"
+        every { authorization.hasPermission("ordinary", any()) } returns false
+        every { achievementCatalog.catalog("如鸢") } returns
+            AchievementCatalogResponse("v", "如鸢", "ready", "fixture", emptyList(), emptyList())
+        every { achievements.archive("ordinary", "a") } returns AchievementArchiveResponse("a", "如鸢", 0, emptyList())
+        every { achievements.update("ordinary", "a", 0, any()) } returns AchievementArchiveResponse("a", "如鸢", 1, emptyList())
+        mvc.perform(get("/v1/achievements/catalog").param("game", "如鸢")).andExpect(status().isOk)
+            .andExpect(header().string("Cache-Control", "no-store"))
+        mvc.perform(get("/v1/achievements/archive").param("account_id", "a")).andExpect(status().isOk)
+        mvc.perform(
+            patch("/v1/achievements/records/yh_fixture_1").contentType(MediaType.APPLICATION_JSON)
+                .content("""{"account_id":"a","expected_revision":0,"status":"completed"}"""),
+        ).andExpect(status().isOk)
+        verify { achievements.update("ordinary", "a", 0, any()) }
+        verify(exactly = 0) { authorization.hasPermission("ordinary", AdminPermission.ARCHIVE_ACCESS) }
+        mvc.perform(get("/v1/admin/achievement-catalogs").param("game", "如鸢")).andExpect(status().isForbidden)
+        mvc.perform(
+            post("/v1/admin/achievement-catalogs/publish").param("game", "如鸢")
+                .contentType(MediaType.APPLICATION_JSON).content("{}"),
+        ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `achievement suggestion options allow ordinary users but still reject anonymous requests`() {
+        every { helper.obtainUserId() } returns "ordinary"
+        every { helper.requireUserId() } returns "ordinary"
+        every { achievementSuggestions.options("如鸢") } returns AchievementSuggestionOptions(
+            AchievementCatalogResponse("v", "如鸢", "ready", "fixture", emptyList(), emptyList()),
+            emptyList(),
+        )
+        mvc.perform(get("/v1/achievements/suggestions/options").param("game", "如鸢")).andExpect(status().isOk)
+        verify { authorization wasNot Called }
+        every { helper.obtainUserId() } returns null
+        mvc.perform(get("/v1/achievements/suggestions/options").param("game", "如鸢")).andExpect(status().isUnauthorized)
+        verify(exactly = 1) { achievementSuggestions.options("如鸢") }
     }
 }

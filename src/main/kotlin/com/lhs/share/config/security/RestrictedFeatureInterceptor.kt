@@ -20,7 +20,8 @@ class RestrictedFeatureInterceptor(
         if (handler !is HandlerMethod) return true
         val path = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE)?.toString() ?: return true
         val permission = when {
-            listOf("/v1/achievements", "/v1/bonds", "/v1/admin/achievement-catalogs", "/v1/admin/bonds").any {
+            path == "/v1/achievements" || path.startsWith("/v1/achievements/") -> null
+            listOf("/v1/bonds", "/v1/admin/achievement-catalogs", "/v1/admin/bonds").any {
                 path == it || path.startsWith("$it/")
             } -> AdminPermission.ARCHIVE_ACCESS
             path == "/v1/operator/panel" || path.startsWith("/v1/operator/panel/") -> AdminPermission.OPERATOR_PANEL_USE
@@ -33,7 +34,7 @@ class RestrictedFeatureInterceptor(
         response.setHeader("Cache-Control", "no-store")
         val userId = helper.obtainUserId()
             ?: throw InventoryApiException(HttpStatus.UNAUTHORIZED, "feature_unauthorized", "请先登录")
-        if (!authorization.hasPermission(userId, permission)) {
+        if (permission != null && !authorization.hasPermission(userId, permission)) {
             throw InventoryApiException(HttpStatus.FORBIDDEN, "feature_forbidden", "没有该功能的访问权限")
         }
         return true
