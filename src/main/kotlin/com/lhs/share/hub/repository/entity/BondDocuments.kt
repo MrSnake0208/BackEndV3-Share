@@ -22,6 +22,7 @@ data class BondPublication(
     val entries: List<BondEntry> = emptyList(),
     val publishedAt: Instant? = null,
     val publishedBy: String? = null,
+    val achievementTargets: List<Long> = emptyList(),
 )
 
 @Document("bond_catalogs")

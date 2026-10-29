@@ -416,4 +416,72 @@ class AchievementCatalogMongoTest {
         assertEquals(original, repository.raw(game))
         assertEquals(original, admin.legacyExport(game))
     }
+
+    @Test
+    fun `existing zero revision seed can be manually updated and settings publish atomically`() {
+        val initial = publicCatalog.load(game)
+        repository.insert(initial)
+        var view = admin.addCategory(game, 0, "合成分类")
+        assertEquals(1L, view.revision)
+        val category = view.draft.categories.single().categoryId
+        view = admin.addEntry(game, view.revision, category)
+        val id = view.draft.entries.single().achievementId
+        val settings = view.draft.copy(
+            rewardItems = fixtureRewardItems(),
+            rewardFilterKeys = listOf("test_coin"),
+            pointTracks = listOf(
+                com.lhs.share.hub.controller.achievement.response.AchievementPointTrack(
+                    category,
+                    "test_coin",
+                    listOf(
+                        com.lhs.share.hub.controller.achievement.response.AchievementPointTier(7, "测试档位", 1, "coins"),
+                    ),
+                ),
+            ),
+            entries = listOf(view.draft.entries.single().copy(name = "测试成就", rewards = listOf(AchievementReward("test_coin", "测试币", 3)))),
+        )
+        view = admin.save(game, view.revision, settings)
+        assertTrue(publicCatalog.catalog(game).pointTracks.isEmpty())
+        assertTrue(admin.preview(game, view.revision).settingsChanged)
+        val published = admin.publish(game, view.revision, "owner")
+        assertEquals(7L, publicCatalog.catalog(game).pointTracks.single().tiers.single().at)
+        assertEquals(id, publicCatalog.catalog(game).entries.single().achievementId)
+        assertThrows(InventoryApiException::class.java) { admin.save(game, view.revision, settings) }
+        assertEquals(published.revision, admin.read(game).revision)
+        val readOnlyGame = "如鸢"
+        publicCatalog.catalog(readOnlyGame)
+        assertEquals(null, repository.find(readOnlyGame))
+    }
+
+    @Test
+    fun `manual combined import remaps settings and publishes rewards with the same snapshot`() {
+        val document = mapper.readTree(
+            """
+            {"game":"代号鸢","categories":[{"category_id":"import_group","name":"测试分类","sort":0,"enabled":true}],
+             "reward_items":[{"item_key":"test_coin","name":"测试币","games":["代号鸢"]}],
+             "point_tracks":[{"category_id":"import_group","item_key":"test_coin","tiers":[{"at":7,"name":"测试奖励","quantity":2,"icon":"coins"}]}],
+             "reward_filter_keys":["test_coin"],
+             "entries":[{"game":"代号鸢","category_id":"import_group","name":"测试成就","rewards":[{"item_key":"test_coin","name":"测试币","quantity":3}]}]}
+            """.trimIndent(),
+        )
+        val preview = admin.importPreview(game, 0, "owner", document, "keep")
+        assertTrue(preview.items.none { it.outcome in setOf("invalid", "unmatched") })
+        assertEquals(null, repository.find(game))
+        val saved = admin.importConfirm(game, 0, "owner", document, "keep", preview.previewToken)
+        val category = saved.draft.categories.single().categoryId
+        assertTrue(category.startsWith("cat_"))
+        assertEquals(category, saved.draft.pointTracks.single().categoryId)
+        assertEquals(category, saved.draft.entries.single().categoryId)
+        assertTrue(publicCatalog.catalog(game).pointTracks.isEmpty())
+        assertTrue(admin.preview(game, saved.revision).errors.isEmpty())
+        val published = admin.publish(game, saved.revision, "owner")
+        assertEquals("测试币", publicCatalog.catalog(game).pointTracks.single().itemName)
+        assertEquals(3L, publicCatalog.catalog(game).entries.single().rewards!!.single().quantity)
+        val export = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(published.draft)
+        val repeatPreview = admin.importPreview(game, published.revision, "owner", export, "update")
+        assertTrue(repeatPreview.items.all { it.outcome == "same" })
+        val repeated = admin.importConfirm(game, published.revision, "owner", export, "update", repeatPreview.previewToken)
+        assertEquals(published.draft, repeated.draft)
+        assertEquals(published.published, repeated.published)
+    }
 }

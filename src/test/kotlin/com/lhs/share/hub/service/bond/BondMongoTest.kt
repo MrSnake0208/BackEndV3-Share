@@ -53,7 +53,8 @@ class BondMongoTest {
     private val accounts = mockk<SubAccountRepository>()
     private val accountWrites = SubAccountRepositoryImpl(mongo)
     private val mapper = bondMapper()
-    private val catalog = BondCatalogService(catalogRepository, operators, mapper)
+    private val catalog =
+        BondCatalogService(catalogRepository, operators, mapper, com.lhs.share.hub.repository.AchievementCatalogRepository(mongo))
     private val previews = BondImportPreviews()
     private val service = BondService(repository, accounts, catalog, operators, previews, mapper, tx)
     private val entries = listOf(bondEntry(), bondEntry(2, "rain"), bondEntry(3, action = "poison"))
@@ -373,5 +374,22 @@ class BondMongoTest {
         val restored = confirm(BondImportRequest("b", mapper.valueToTree(exported)))
         assertEquals(1207, restored.summary.triggeredCount)
         assertEquals(result.records.map { it.bondId }.toSet(), restored.records.map { it.bondId }.toSet())
+    }
+
+    @Test
+    fun `achievement targets use only active published entries from the current game`() {
+        val achievementRepository = com.lhs.share.hub.repository.AchievementCatalogRepository(mongo)
+        val achievements = com.lhs.share.hub.service.achievement.AchievementCatalogService(mapper, achievementRepository)
+        val admin = com.lhs.share.hub.service.achievement.AchievementCatalogAdminService(achievements, achievementRepository, mapper)
+        var view = admin.addCategory("代号鸢", 0, "合成分类")
+        repeat(4) { view = admin.addEntry("代号鸢", view.revision, view.draft.categories.single().categoryId) }
+        val entries = view.draft.entries.mapIndexed { index, entry ->
+            entry.copy(name = "测试成就$index", target = listOf(11L, 7L, 11L, 99L)[index], linkedMetric = "yuan_bond_variants")
+        }
+        view = admin.save("代号鸢", view.revision, view.draft.copy(entries = entries, retiredIds = setOf(entries.last().achievementId)))
+        assertTrue(catalog.catalog("代号鸢").achievementTargets.isEmpty())
+        admin.publish("代号鸢", view.revision, "owner")
+        assertEquals(listOf(7L, 11L), catalog.catalog("代号鸢").achievementTargets)
+        assertTrue(catalog.catalog("如鸢").achievementTargets.isEmpty())
     }
 }

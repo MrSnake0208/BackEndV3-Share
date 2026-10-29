@@ -24,7 +24,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
-import java.io.InputStream
 
 class AchievementCatalogAdminContractTest {
     private val mapper = achievementMapper()
@@ -106,27 +105,17 @@ class AchievementCatalogAdminContractTest {
     }
 
     @Test
-    fun `nonempty seed imports once and duplicate initialization keeps winner`() {
+    fun `read never seeds and competing first manual write reports conflict`() {
         val repository = mockk<AchievementCatalogRepository>()
-        val seedMapper = io.mockk.spyk(mapper)
-        val seeds = listOf("代号鸢", "如鸢").map { game ->
-            fixtureCatalog(game).let { c ->
-                c.copy(dataStatus = "partial", entries = c.entries)
-            }
-        }
-        every { seedMapper.readTree(any<InputStream>()) } returns mapper.valueToTree(seeds)
-        var stored: com.lhs.share.hub.repository.entity.AchievementCatalog? = null
-        every { repository.find("代号鸢") } answers { stored }
-        every { repository.insert(any()) } answers
-            { firstArg<com.lhs.share.hub.repository.entity.AchievementCatalog>().also { stored = it } }
-        every { repository.published(any()) } returns null
-        val real = AchievementCatalogService(seedMapper, repository)
-        assertEquals(3, real.catalog("代号鸢").entries.size)
-        assertEquals(real.catalog("代号鸢"), real.catalog("代号鸢"))
-        verify(exactly = 1) { repository.insert(any()) }
-        val winner = stored!!
-        every { repository.find("代号鸢") } returnsMany listOf(null, winner)
+        every { repository.find("代号鸢") } returns null
+        every { repository.published("代号鸢") } returns null
+        val real = AchievementCatalogService(mapper, repository)
+        assertEquals(0, real.catalog("代号鸢").entries.size)
+        verify(exactly = 0) { repository.insert(any()) }
+        val admin = AchievementCatalogAdminService(real, repository, mapper)
+        every { repository.replace(any(), 0L) } returns false
         every { repository.insert(any()) } throws DuplicateKeyException("concurrent")
-        assertEquals(winner.published.version, real.catalog("代号鸢").catalogVersion)
+        assertThrows(InventoryApiException::class.java) { admin.addCategory("代号鸢", 0, "测试分类") }
+        verify(exactly = 1) { repository.replace(any(), 0L) }
     }
 }

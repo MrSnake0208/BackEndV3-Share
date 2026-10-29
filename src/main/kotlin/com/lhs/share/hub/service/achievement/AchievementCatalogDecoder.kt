@@ -68,10 +68,29 @@ object AchievementCatalogDecoder {
     }
 
     fun content(node: JsonNode, mapper: ObjectMapper): CatalogContent {
-        fields(node, setOf("game", "data_status", "coverage", "catalog_version"), arrays = setOf("categories", "entries", "retired_ids"))
+        fields(
+            node,
+            setOf("game", "data_status", "coverage", "catalog_version"),
+            arrays = setOf("categories", "entries", "retired_ids", "reward_items", "point_tracks", "reward_filter_keys"),
+        )
         node["categories"]?.forEach { category(it, mapper) }
         node["entries"]?.forEach { entry(it, mapper) }
         node["retired_ids"]?.forEach { if (!it.isTextual) invalid("退役 ID 必须是文本") }
+        node["reward_items"]?.forEach { item ->
+            fields(item, setOf("item_key", "name"), arrays = setOf("games"))
+            item["games"]?.forEach { if (!it.isTextual) invalid("奖励游戏必须是文本") }
+        }
+        node["reward_filter_keys"]?.forEach { if (!it.isTextual) invalid("奖励筛选键必须是文本") }
+        node["point_tracks"]?.forEach { track ->
+            fields(track, setOf("category_id", "item_key"), arrays = setOf("tiers"))
+            track["tiers"]?.forEach { tier ->
+                fields(tier, setOf("name", "icon"), numbers = setOf("at", "quantity"))
+                for (key in listOf("at", "quantity")) {
+                    val number = tier[key]
+                    if (number == null || !number.isIntegralNumber || !number.canConvertToLong()) invalid("积分档位数值必须是整数")
+                }
+            }
+        }
         return decode(node, CatalogContent::class.java, mapper)
     }
 }

@@ -10,6 +10,7 @@ import com.lhs.share.hub.repository.entity.CatalogCategory
 import com.lhs.share.hub.repository.entity.CatalogContent
 import com.lhs.share.hub.repository.entity.CatalogPublication
 import com.lhs.share.hub.service.inventory.InventoryApiException
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -24,7 +25,7 @@ data class CatalogAdminView(
     val draft: CatalogContent,
     val history: List<CatalogPublication>,
     val compatibilityIssues: List<String> = emptyList(),
-    val rewardItems: List<com.lhs.share.hub.controller.achievement.response.AchievementRewardItem> = AchievementRewards.items,
+    val rewardItems: List<com.lhs.share.hub.controller.achievement.response.AchievementRewardItem> = emptyList(),
 )
 data class CatalogChange(val achievementId: String, val name: String, val kind: String)
 data class CatalogPublishPreview(
@@ -34,6 +35,7 @@ data class CatalogPublishPreview(
     val errors: List<String>,
     val progressChanges: List<String>,
     val restoredFrom: String? = null,
+    val settingsChanged: Boolean = false,
 )
 data class CatalogImportItem(val index: Int, val achievementId: String?, val outcome: String, val message: String)
 data class CatalogImportPreview(
@@ -163,6 +165,9 @@ class AchievementCatalogAdminService(
             AchievementCatalogRules.errors(content, true) + compatibility,
             progress,
             restore,
+            content.rewardItems != current.published.content.rewardItems ||
+                content.pointTracks != current.published.content.pointTracks ||
+                content.rewardFilterKeys != current.published.content.rewardFilterKeys,
         )
     }
 
@@ -295,6 +300,20 @@ class AchievementCatalogAdminService(
                 items += CatalogImportItem(-index - 1, null, "invalid", e.message)
             }
         }
+        val settingsNode = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(
+            current.draft.copy(categories = categories.values.toList(), entries = emptyList()),
+        )
+        for (field in listOf("reward_items", "point_tracks", "reward_filter_keys")) {
+            if (data.has(field) && (strategy == "update" || settingsNode.path(field).isEmpty)) {
+                settingsNode.set<JsonNode>(field, data[field].deepCopy())
+            }
+        }
+        settingsNode.path("point_tracks").forEach { track ->
+            if (track is com.fasterxml.jackson.databind.node.ObjectNode) {
+                categoryMap[track.path("category_id").asText()]?.let { track.put("category_id", it) }
+            }
+        }
+        val settings = AchievementCatalogDecoder.content(settingsNode, mapper)
         val entries = current.draft.entries.associateBy { it.achievementId }.toMutableMap()
         val seen = mutableSetOf<String>()
         rows.forEachIndexed { index, row ->
@@ -311,7 +330,7 @@ class AchievementCatalogAdminService(
                 val parsed = AchievementCatalogDecoder.entry(node, mapper)
                 val entry = parsed.copy(categoryId = categoryMap[parsed.categoryId] ?: parsed.categoryId)
                 validate(
-                    current.draft.copy(categories = categories.values.toList(), entries = listOf(entry), retiredIds = emptySet()),
+                    settings.copy(entries = listOf(entry), retiredIds = emptySet()),
                     false,
                 )
                 if (supplied != null && supplied !in entries) {
@@ -341,7 +360,7 @@ class AchievementCatalogAdminService(
                 items += CatalogImportItem(index, supplied, "invalid", e.message)
             }
         }
-        val content = withCoverage(current.draft.copy(categories = categories.values.toList(), entries = entries.values.toList()))
+        val content = withCoverage(settings.copy(entries = entries.values.toList()))
         AchievementCatalogRules.errors(content, false).forEach { items += CatalogImportItem(-101, null, "invalid", it) }
         return content to items
     }
@@ -365,11 +384,18 @@ class AchievementCatalogAdminService(
         if (retained.size > AchievementCatalogRules.MAX_ENTRIES) invalid("目录含历史身份最多5000条，请保留原系统ID；不会按名称合并")
         val value = next.copy(revision = old.revision + 1)
         if (mapper.writeValueAsBytes(value).size > AchievementCatalogRules.MAX_DOCUMENT_BYTES) invalid("目录和历史超过12MiB安全上限，请减少长文本")
-        if (!repository.replace(value, old.revision)) conflict("目录版本冲突，未覆盖其他管理员的修改")
+        if (!repository.replace(value, old.revision)) {
+            if (old.revision != 0L) conflict("目录版本冲突，未覆盖其他管理员的修改")
+            try {
+                repository.insert(value)
+            } catch (_: DuplicateKeyException) {
+                conflict("目录版本冲突，未覆盖其他管理员的修改")
+            }
+        }
         return view(value)
     }
     private fun view(value: AchievementCatalog) =
-        CatalogAdminView(value.revision, value.published, value.draft, value.history, value.compatibilityIssues)
+        CatalogAdminView(value.revision, value.published, value.draft, value.history, value.compatibilityIssues, value.draft.rewardItems)
     private fun newId(game: String) = "yh_${if (game == "代号鸢") "dhy" else "ry"}_${UUID.randomUUID().toString().replace("-", "")}"
     private fun conflict(message: String): Nothing =
         throw InventoryApiException(HttpStatus.CONFLICT, "achievement_catalog_conflict", message)

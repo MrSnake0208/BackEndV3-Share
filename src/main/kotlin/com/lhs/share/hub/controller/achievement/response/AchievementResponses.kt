@@ -6,6 +6,14 @@ import java.time.Instant
 data class AchievementCategory(val categoryId: String, val name: String)
 data class AchievementReward(val itemKey: String, val name: String, val quantity: Long)
 data class AchievementRewardItem(val itemKey: String, val name: String, val games: List<String>)
+data class AchievementPointTier(val at: Long, val name: String, val quantity: Long, val icon: String)
+data class AchievementPointTrack(val categoryId: String, val itemKey: String, val tiers: List<AchievementPointTier>)
+data class AchievementPublicPointTrack(
+    val categoryId: String,
+    val itemKey: String,
+    val itemName: String,
+    val tiers: List<AchievementPointTier>,
+)
 data class AchievementEntry(
     val achievementId: String,
     val game: String,
@@ -26,6 +34,8 @@ data class AchievementCatalogResponse(
     val categories: List<AchievementCategory>,
     val entries: List<AchievementEntry>,
     val legacyRewards: Map<String, String> = emptyMap(),
+    val pointTracks: List<AchievementPublicPointTrack> = emptyList(),
+    val rewardFilters: List<String> = emptyList(),
 )
 data class AchievementLinkedMetric(val metric: String, val value: Int, val sourceRevision: Long, val sourceCatalogVersion: String)
 data class AchievementArchiveResponse(

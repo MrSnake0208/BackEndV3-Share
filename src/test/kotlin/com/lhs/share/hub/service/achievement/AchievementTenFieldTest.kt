@@ -14,13 +14,19 @@ import org.junit.jupiter.api.Test
 class AchievementTenFieldTest {
     private val mapper = achievementMapper()
     private val entry = fixtureCatalog().entries.first()
-    private fun content() = CatalogContent("代号鸢", "partial", categories = listOf(CatalogCategory("test", "测试")), entries = listOf(entry))
+    private fun content() = CatalogContent(
+        "代号鸢",
+        "partial",
+        categories = listOf(CatalogCategory("test", "测试")),
+        entries = listOf(entry),
+        rewardItems = fixtureRewardItems(),
+    )
 
     @Test
     fun `public entry has exactly ten fields and rewards retain unknown empty or structured states`() {
         val expected =
             setOf("achievement_id", "game", "category_id", "name", "condition", "sort", "is_hidden", "rewards", "target", "linked_metric")
-        for (rewards in listOf(null, emptyList(), listOf(AchievementReward("baijinbi", "白金币", 10)))) {
+        for (rewards in listOf(null, emptyList(), listOf(AchievementReward("test_coin", "测试币", 10)))) {
             val value = entry.copy(rewards = rewards)
             val node = mapper.valueToTree<ObjectNode>(value)
             assertEquals(expected, node.fieldNames().asSequence().toSet())
@@ -33,9 +39,9 @@ class AchievementTenFieldTest {
         for (json in listOf(
             "{\"rewards\":[null]}",
             "{\"rewards\":[{}]}",
-            "{\"rewards\":[{\"item_key\":\"baijinbi\",\"name\":\"白金币\",\"quantity\":\"1\"}]}",
-            "{\"rewards\":[{\"item_key\":\"baijinbi\",\"name\":\"白金币\",\"quantity\":1.1}]}",
-            "{\"rewards\":[{\"item_key\":\"baijinbi\",\"name\":\"白金币\",\"quantity\":1,\"source\":\"x\"}]}",
+            "{\"rewards\":[{\"item_key\":\"test_coin\",\"name\":\"测试币\",\"quantity\":\"1\"}]}",
+            "{\"rewards\":[{\"item_key\":\"test_coin\",\"name\":\"测试币\",\"quantity\":1.1}]}",
+            "{\"rewards\":[{\"item_key\":\"test_coin\",\"name\":\"测试币\",\"quantity\":1,\"source\":\"x\"}]}",
             "{\"target\":1.1}",
             "{\"target\":\"10\"}",
             "{\"target\":9223372036854775808}",
@@ -54,7 +60,7 @@ class AchievementTenFieldTest {
 
     @Test
     fun `reward identity game names duplicates safe quantity and totals are validated`() {
-        val good = AchievementReward("baijinbi", "白金币", 10)
+        val good = AchievementReward("test_coin", "测试币", 10)
         val bad = listOf(
             listOf(good.copy(itemKey = "unknown")),
             listOf(good.copy(name = "伪造名称")),
@@ -62,22 +68,26 @@ class AchievementTenFieldTest {
             listOf(good.copy(quantity = 0)),
             listOf(good.copy(quantity = -1)),
             listOf(good.copy(quantity = AchievementRewards.MAX_SAFE_INTEGER + 1)),
-            listOf(good.copy(quantity = AchievementRewards.MAX_SAFE_INTEGER), AchievementReward("fuchuan", "符传", 1)),
+            listOf(good.copy(quantity = AchievementRewards.MAX_SAFE_INTEGER), AchievementReward("test_ticket", "测试券", 1)),
         )
         assertTrue(AchievementCatalogRules.errors(content().copy(entries = listOf(entry.copy(rewards = listOf(good)))), true).isEmpty())
         bad.forEach { rewards ->
             assertTrue(AchievementCatalogRules.errors(content().copy(entries = listOf(entry.copy(rewards = rewards))), false).isNotEmpty())
         }
-        assertEquals(52, AchievementRewards.items.size)
-        assertTrue(AchievementRewards.items.all { it.games.toSet() == setOf("代号鸢", "如鸢") })
+        assertTrue(
+            AchievementCatalogRules.errors(
+                content().copy(rewardItems = emptyList(), entries = listOf(entry.copy(rewards = listOf(good)))),
+                true,
+            ).isNotEmpty(),
+        )
     }
 
     @Test
-    fun `only explicit positive targets enable progress and only known bond thresholds link`() {
+    fun `only explicit positive targets enable progress and imported positive bond thresholds link`() {
         for (target in listOf(0L, -1L, AchievementCatalogRules.MAX_TARGET + 1)) {
             assertTrue(AchievementCatalogRules.errors(content().copy(entries = listOf(entry.copy(target = target))), false).isNotEmpty())
         }
-        for (target in AchievementCatalogRules.BOND_TARGETS) {
+        for (target in listOf(2L, 9L, 77L)) {
             assertTrue(
                 AchievementCatalogRules.errors(
                     content().copy(entries = listOf(entry.copy(target = target, linkedMetric = "yuan_bond_variants"))),
@@ -87,7 +97,6 @@ class AchievementTenFieldTest {
         }
         for (value in listOf(
             entry.copy(linkedMetric = "unknown"),
-            entry.copy(target = 2, linkedMetric = "yuan_bond_variants"),
             entry.copy(target = null, linkedMetric = "yuan_bond_variants"),
         )) {
             assertTrue(AchievementCatalogRules.errors(content().copy(entries = listOf(value)), false).isNotEmpty())

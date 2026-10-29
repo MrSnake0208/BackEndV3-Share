@@ -2,6 +2,7 @@ package com.lhs.share.hub.service.bond
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.lhs.share.hub.repository.AchievementCatalogRepository
 import com.lhs.share.hub.repository.BondCatalogRepository
 import com.lhs.share.hub.repository.entity.BondCatalog
 import com.lhs.share.hub.repository.entity.BondEntry
@@ -22,12 +23,19 @@ class BondCatalogService(
     private val repository: BondCatalogRepository,
     private val operators: OperatorCatalogService,
     private val mapper: ObjectMapper,
+    private val achievements: AchievementCatalogRepository,
 ) {
     fun read(game: String): BondCatalog {
         BondRules.game(game)
         return repository.find(game) ?: BondCatalog(game, published = BondPublication("bonds-empty-$game", game))
     }
-    fun catalog(game: String): BondPublication = read(game).published.copy(publishedBy = null)
+    fun catalog(game: String): BondPublication {
+        val published = achievements.published(game)?.content
+        val targets = published?.entries.orEmpty().filter {
+            it.achievementId !in published!!.retiredIds && it.linkedMetric == "yuan_bond_variants"
+        }.mapNotNull { it.target?.takeIf { target -> target > 0 } }.distinct().sorted()
+        return read(game).published.copy(publishedBy = null, achievementTargets = targets)
+    }
 
     fun fence(game: String, version: String) {
         if (!repository.fence(game, version)) conflict("目录已变化，请重新读取或预览")

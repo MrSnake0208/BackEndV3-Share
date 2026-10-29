@@ -37,3 +37,8 @@ internal fun fixtureCatalog(game: String = "代号鸢", version: String = "fixtu
 }
 
 internal fun fixturePatch(json: String) = AchievementRequestDecoder.patch(achievementMapper().readTree(json))
+
+internal fun fixtureRewardItems() = listOf(
+    com.lhs.share.hub.controller.achievement.response.AchievementRewardItem("test_coin", "测试币", listOf("代号鸢", "如鸢")),
+    com.lhs.share.hub.controller.achievement.response.AchievementRewardItem("test_ticket", "测试券", listOf("代号鸢", "如鸢")),
+)

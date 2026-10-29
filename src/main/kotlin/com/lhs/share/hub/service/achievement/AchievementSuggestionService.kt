@@ -54,14 +54,28 @@ class AchievementSuggestionService(
     fun options(game: String): AchievementSuggestionOptions {
         requireGame(game)
         val published = catalogs.published(game) ?: notReady()
-        return AchievementSuggestionOptions(published.content.publicCatalog(published.version), AchievementRewards.items)
+        return AchievementSuggestionOptions(
+            published.content.publicCatalog(published.version),
+            published.content.rewardItems.filter { item ->
+                game in item.games && published.content.entries.any { entry ->
+                    entry.achievementId !in published.content.retiredIds && entry.rewards.orEmpty().any { it.itemKey == item.itemKey }
+                }
+            },
+        )
     }
 
     fun reviewOptions(actor: String, game: String): CatalogAdminView {
         requireEditor(actor)
         requireGame(game)
         val value = catalogs.find(game) ?: notReady()
-        return CatalogAdminView(value.revision, value.published, value.draft, value.history, value.compatibilityIssues)
+        return CatalogAdminView(
+            value.revision,
+            value.published,
+            value.draft,
+            value.history,
+            value.compatibilityIssues,
+            value.draft.rewardItems,
+        )
     }
 
     fun submit(actor: String, request: AchievementSuggestionSubmitRequest): AchievementSuggestionResponse {

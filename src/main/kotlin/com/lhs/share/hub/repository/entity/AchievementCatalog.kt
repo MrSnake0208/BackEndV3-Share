@@ -4,6 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 import com.lhs.share.hub.controller.achievement.response.AchievementCatalogResponse
 import com.lhs.share.hub.controller.achievement.response.AchievementCategory
 import com.lhs.share.hub.controller.achievement.response.AchievementEntry
+import com.lhs.share.hub.controller.achievement.response.AchievementPointTrack
+import com.lhs.share.hub.controller.achievement.response.AchievementPublicPointTrack
+import com.lhs.share.hub.controller.achievement.response.AchievementRewardItem
 import org.springframework.data.annotation.Id
 import org.springframework.data.annotation.Transient
 import org.springframework.data.mongodb.core.mapping.Document
@@ -19,6 +22,9 @@ data class CatalogContent(
     val entries: List<AchievementEntry> = emptyList(),
     val retiredIds: Set<String> = emptySet(),
     val catalogVersion: String = "",
+    val rewardItems: List<AchievementRewardItem> = emptyList(),
+    val pointTracks: List<AchievementPointTrack> = emptyList(),
+    val rewardFilterKeys: List<String> = emptyList(),
 ) {
     @get:JsonIgnore
     @field:Transient
@@ -35,6 +41,12 @@ data class CatalogContent(
                 .thenBy { it.sort }.thenBy { it.achievementId },
         ),
         legacyRewards.filterKeys { id -> entries.any { it.achievementId == id && id !in retiredIds } },
+        pointTracks.filter { track -> categories.any { it.categoryId == track.categoryId && it.enabled } }.mapNotNull { track ->
+            rewardItems.find { it.itemKey == track.itemKey && game in it.games }?.let {
+                AchievementPublicPointTrack(track.categoryId, track.itemKey, it.name, track.tiers)
+            }
+        },
+        rewardFilterKeys.mapNotNull { key -> rewardItems.find { it.itemKey == key && game in it.games }?.name },
     )
 }
 
