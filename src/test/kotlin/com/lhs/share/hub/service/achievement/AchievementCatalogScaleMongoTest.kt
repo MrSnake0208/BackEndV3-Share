@@ -108,7 +108,7 @@ class AchievementCatalogScaleMongoTest {
                 val expected = row.deepCopy<ObjectNode>().put("achievement_id", ids[index])
                 val categoryName = input["catalog"]["categories"].first { it["category_id"] == row["category_id"] }["name"].asText()
                 expected.put("category_id", categoryIds.getValue(categoryName))
-                assertEquals(expected, mapper.readTree(mapper.writeValueAsBytes(view.draft.entries[index])))
+                assertEquals(expected, mapper.valueToTree<JsonNode>(view.draft.entries[index]))
             }
             val exported = mapper.valueToTree<JsonNode>(view.draft)
             val repeat = admin.importPreview(game, view.revision, "admin", exported, "update")
