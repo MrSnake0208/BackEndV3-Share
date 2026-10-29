@@ -19,6 +19,10 @@ data class CalendarPrivateItemResponse(
     val endDate: LocalDate = date,
     val reminderOn: String? = null,
     val reminderDaysBefore: Int = 0,
+    val recurrence: String = "NONE",
+    val occurrenceDate: LocalDate? = null,
+    val seriesStartDate: LocalDate = startDate,
+    val seriesEndDate: LocalDate = endDate,
 )
 
 data class CalendarPrivateItemsResponse(val items: List<CalendarPrivateItemResponse>)

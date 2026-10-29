@@ -24,4 +24,6 @@ data class CalendarPrivateItem(
     val endDate: LocalDate? = null,
     val reminderOn: String? = null,
     val reminderDaysBefore: Int = 0,
+    val recurrence: String = "NONE",
+    val excludedDates: Set<LocalDate> = emptySet(),
 )

@@ -19,12 +19,15 @@ data class CalendarPrivateItemRequest(
     val reminderDaysBefore: Int = 0,
     val reminderOnProvided: Boolean = false,
     val reminderDaysBeforeProvided: Boolean = false,
+    val recurrence: String = "NONE",
+    val recurrenceProvided: Boolean = false,
 )
 
 object CalendarPrivateItemRequestDecoder {
     fun decode(node: JsonNode, update: Boolean): CalendarPrivateItemRequest {
         val required = setOf("account_id", "title") + if (update) setOf("expected_version") else emptySet()
-        val allowed = required + setOf("date", "start_date", "end_date", "time", "note", "reminder_on", "reminder_days_before")
+        val allowed =
+            required + setOf("date", "start_date", "end_date", "time", "note", "reminder_on", "reminder_days_before", "recurrence")
         if (!node.isObject || required.any { !node.has(it) } || node.fieldNames().asSequence().any { it !in allowed }) {
             throw calendarInvalid("私人事项请求字段不正确")
         }
@@ -49,6 +52,10 @@ object CalendarPrivateItemRequestDecoder {
             }
             it.intValue()
         } ?: 0
+        val recurrence = node.get("recurrence")?.let {
+            if (!it.isTextual || it.asText() !in setOf("NONE", "MONTHLY")) throw calendarInvalid("仅支持不重复或每月固定", "recurrence")
+            it.asText()
+        } ?: "NONE"
         val version = if (update) {
             val value = node.get("expected_version")
             if (!value.isIntegralNumber || !value.canConvertToLong()) throw calendarInvalid("expected_version不正确")
@@ -70,6 +77,8 @@ object CalendarPrivateItemRequestDecoder {
             reminderDaysBefore,
             node.has("reminder_on"),
             node.has("reminder_days_before"),
+            recurrence,
+            node.has("recurrence"),
         )
     }
 

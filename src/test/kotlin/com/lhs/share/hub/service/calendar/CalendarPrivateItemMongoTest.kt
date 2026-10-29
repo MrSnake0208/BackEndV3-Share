@@ -97,6 +97,61 @@ class CalendarPrivateItemMongoTest {
     }
 
     @Test
+    fun `monthly recurrence persists exceptions across reads with owner isolation and stale version rejection`() {
+        val start = LocalDate.parse("2026-01-31")
+        val created = service.create(
+            "owner",
+            request().copy(date = start, endDate = start.plusDays(2), recurrence = "MONTHLY", reminderOn = "START", reminderDaysBefore = 1),
+        )
+        service.create("owner", request("b").copy(date = start, recurrence = "MONTHLY"))
+        service.create("other", request("c").copy(date = start, recurrence = "MONTHLY"))
+        val from = LocalDate.parse("2026-02-28")
+        val to = LocalDate.parse("2026-04-01")
+        val listed = service.list("owner", "a", from, to).items
+        assertEquals(listOf(from, LocalDate.parse("2026-03-31")), listed.map { it.occurrenceDate })
+        assertTrue(listed.all { it.id == created.id && it.reminderOn == "START" && it.reminderDaysBefore == 1 })
+        assertEquals(LocalDate.parse("2026-03-02"), listed.first().endDate)
+        val count = mongo.getCollection("activity_calendar_private_items").countDocuments()
+        assertEquals(3L, count)
+        service.delete("owner", "a", created.id, created.version, from)
+        val reread = CalendarPrivateItemService(CalendarPrivateItemRepository(mongo), accounts, transaction)
+        assertEquals(listOf(LocalDate.parse("2026-03-31")), reread.list("owner", "a", from, to).items.map { it.occurrenceDate })
+        assertEquals(setOf(from), repository.find("owner", "a", "如鸢", created.id)!!.excludedDates)
+        assertEquals(count, mongo.getCollection("activity_calendar_private_items").countDocuments())
+        assertEquals(
+            409,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.delete("owner", "a", created.id, 0, LocalDate.parse("2026-03-31"))
+            }.status.value(),
+        )
+        assertEquals(
+            404,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.delete("owner", "b", created.id, 1, from)
+            }.status.value(),
+        )
+        assertEquals(
+            404,
+            assertThrows(ActivityCalendarApiException::class.java) {
+                service.delete("other", "c", created.id, 1, from)
+            }.status.value(),
+        )
+        val current = service.get("owner", "a", created.id)
+        service.delete("owner", "a", created.id, current.version)
+        assertTrue(service.list("owner", "a", from, to).items.isEmpty())
+        assertEquals(2L, mongo.getCollection("activity_calendar_private_items").countDocuments())
+        val legacy = service.create("owner", request())
+        mongo.getCollection("activity_calendar_private_items").updateOne(
+            org.bson.Document("_id", legacy.id),
+            org.bson.Document("\$unset", org.bson.Document("recurrence", "").append("excludedDates", "")),
+        )
+        assertEquals("NONE", service.get("owner", "a", legacy.id).recurrence)
+        assertEquals(listOf(legacy.id), service.list("owner", "a", day, day).items.map { it.id })
+        service.update("owner", legacy.id, request().copy(expectedVersion = legacy.version))
+        service.delete("owner", "a", legacy.id, legacy.version + 1)
+    }
+
+    @Test
     fun `real persistence bounded range owner indexes and duplicate id are isolated from public data`() {
         val a = service.create("owner", request())
         val b = service.create("owner", request("b").copy(time = null))

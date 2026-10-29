@@ -203,4 +203,26 @@ class CalendarPrivateItemControllerContractTest {
             )
         }
     }
+
+    @Test
+    fun `recurrence contract is optional strict and occurrence deletion forwards actor account version`() {
+        val now = Instant.EPOCH
+        val start = LocalDate.parse("2026-10-15")
+        val response = CalendarPrivateItemResponse(id, "a", "如鸢", "私人内容", start, null, "", 0, now, now, recurrence = "MONTHLY")
+        every { service.create("owner", any()) } returns response
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"recurrence\":\"MONTHLY\"}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.recurrence").value("MONTHLY"))
+            .andExpect(jsonPath("$.data.series_start_date").value("2026-10-15"))
+        verify { service.create("owner", match { it.recurrence == "MONTHLY" && it.recurrenceProvided }) }
+        listOf("null", "true", "\"WEEKLY\"").forEach {
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body.dropLast(1) + ",\"recurrence\":$it}"))
+                .andExpect(status().isUnprocessableEntity)
+        }
+        every { service.delete("owner", "a", id, 0, start) } returns true
+        mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "0").param("occurrence_date", "2026-10-15"))
+            .andExpect(status().isOk)
+        verify { service.delete("owner", "a", id, 0, start) }
+        mvc.perform(delete("$path/$id").param("account_id", "a").param("expected_version", "0").param("occurrence_date", "2026-02-30"))
+            .andExpect(status().isUnprocessableEntity)
+    }
 }

@@ -203,4 +203,37 @@ class CalendarPrivateItemServiceTest {
         assertNull(disabled.reminderOn)
         assertEquals(1, disabled.reminderDaysBefore)
     }
+
+    @Test
+    fun `monthly save expand edit exceptions and delete retain owner and CAS`() {
+        val start = LocalDate.parse("2026-11-01")
+        val monthly = record().copy(date = start, endDate = start, recurrence = "MONTHLY")
+        val created = service.create("owner", request().copy(date = start, recurrence = "MONTHLY"))
+        assertEquals("MONTHLY", created.recurrence)
+        every { repository.list("owner", "a", "如鸢", start, start.plusDays(90)) } returns listOf(monthly)
+        val instances = service.list("owner", "a", start, start.plusDays(90)).items
+        assertEquals(listOf(start, start.plusMonths(1), start.plusMonths(2)), instances.map { it.occurrenceDate })
+        assertEquals(setOf(id), instances.map { it.id }.toSet())
+        assertEquals(setOf(start), instances.map { it.seriesStartDate }.toSet())
+        every { repository.find("owner", "a", "如鸢", id) } returns monthly
+        assertEquals("MONTHLY", service.update("owner", id, request().copy(expectedVersion = 0)).recurrence)
+        assertEquals("NONE", service.update("owner", id, request().copy(expectedVersion = 0, recurrenceProvided = true)).recurrence)
+        failure(409) { service.delete("owner", "a", id, 1, start.plusMonths(1)) }
+        failure(422) { service.delete("owner", "a", id, 0, start.minusMonths(1)) }
+        failure(422) { service.delete("owner", "a", id, 0, start.plusDays(1)) }
+        service.delete("owner", "a", id, 0, start.plusMonths(1))
+        verify {
+            repository.save(
+                match {
+                    it.id == id && it.excludedDates == setOf(start.plusMonths(1)) && it.userId == "owner" &&
+                        it.accountId == "a"
+                },
+            )
+        }
+        verify(exactly = 0) { repository.delete(any(), any(), any(), any(), any()) }
+        every { accounts.findByUserIdAndAccountId("intruder", "a") } returns null
+        failure(404) { service.delete("intruder", "a", id, 0, start) }
+        every { repository.save(any()) } throws OptimisticLockingFailureException("race")
+        failure(409) { service.delete("owner", "a", id, 0, start) }
+    }
 }

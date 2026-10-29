@@ -16,6 +16,7 @@ class CalendarPrivateItemRepository(@param:Qualifier("hubMongoTemplate") private
     fun list(userId: String, accountId: String, game: String, from: LocalDate, to: LocalDate): List<CalendarPrivateItem> = template.find(
         Query(
             owner(userId, accountId).and("game").`is`(game).and("date").lte(to).orOperator(
+                Criteria.where("recurrence").`is`("MONTHLY"),
                 Criteria.where("endDate").gte(from),
                 Criteria.where("endDate").`is`(null).and("date").gte(from),
             ),

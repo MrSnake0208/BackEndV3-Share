@@ -34,7 +34,14 @@ class CalendarPrivateItemService(
         }
         val values = repository.list(userId, accountId, owner.game, from, to)
         if (values.size > 1000) throw calendarInvalid("当前范围私人事项超过1000条，请缩小日期范围")
-        return CalendarPrivateItemsResponse(values.map(::response))
+        val instances = mutableListOf<CalendarPrivateItemResponse>()
+        for (value in values) {
+            for (date in CalendarPrivateItemOccurrences.dates(value, from, to)) {
+                instances.add(response(value, date))
+                if (instances.size > 1000) throw calendarInvalid("当前范围私人事项超过1000条，请缩小日期范围")
+            }
+        }
+        return CalendarPrivateItemsResponse(instances.sortedWith(compareBy({ it.startDate }, { it.time ?: "" }, { it.id })))
     }
 
     fun get(userId: String, accountId: String, id: String): CalendarPrivateItemResponse = response(find(account(userId, accountId), id))
@@ -53,6 +60,7 @@ class CalendarPrivateItemService(
                     endDate = request.endDate ?: request.date,
                     reminderOn = request.reminderOn,
                     reminderDaysBefore = request.reminderDaysBefore,
+                    recurrence = request.recurrence,
                 ),
             ),
         )
@@ -79,18 +87,32 @@ class CalendarPrivateItemService(
                     note = if (request.noteProvided) request.note else current.note,
                     reminderOn = if (request.reminderOnProvided) request.reminderOn else current.reminderOn,
                     reminderDaysBefore = if (request.reminderDaysBeforeProvided) request.reminderDaysBefore else current.reminderDaysBefore,
+                    recurrence = if (request.recurrenceProvided) request.recurrence else current.recurrence,
                     updatedAt = clock.instant().truncatedTo(ChronoUnit.MILLIS),
                 ),
             ),
         )
     }
 
-    fun delete(userId: String, accountId: String, id: String, expectedVersion: Long): Boolean = write {
+    fun delete(userId: String, accountId: String, id: String, expectedVersion: Long, occurrenceDate: LocalDate? = null): Boolean = write {
         val owner = account(userId, accountId)
         fence(owner)
         val current = find(owner, id)
         CalendarPrivateItemRequestDecoder.requireVersion(expectedVersion)
-        if (current.version != expectedVersion || !repository.delete(userId, accountId, owner.game, id, expectedVersion)) throw conflict()
+        if (current.version != expectedVersion) throw conflict()
+        if (occurrenceDate != null) {
+            if (occurrenceDate.year !in 1..9999 || !CalendarPrivateItemOccurrences.occursOn(current, occurrenceDate)) {
+                throw calendarInvalid("该期私人事项不存在", "occurrence_date")
+            }
+            repository.save(
+                current.copy(
+                    excludedDates = current.excludedDates + occurrenceDate,
+                    updatedAt = clock.instant().truncatedTo(ChronoUnit.MILLIS),
+                ),
+            )
+        } else if (!repository.delete(userId, accountId, owner.game, id, expectedVersion)) {
+            throw conflict()
+        }
         true
     }
 
@@ -107,6 +129,7 @@ class CalendarPrivateItemService(
     }
 
     private fun validate(request: CalendarPrivateItemRequest) {
+        if (request.recurrence !in setOf("NONE", "MONTHLY")) throw calendarInvalid("仅支持不重复或每月固定", "recurrence")
         if (request.reminderOn != null && request.reminderOn !in setOf("START", "END")) {
             throw calendarInvalid("提醒日期须为START或END", "reminder_on")
         }
@@ -121,13 +144,18 @@ class CalendarPrivateItemService(
         }
     }
 
-    private fun response(value: CalendarPrivateItem) = CalendarPrivateItemResponse(
-        value.id, value.accountId, value.game, value.title, value.date, value.time, value.note,
-        checkNotNull(value.version), value.createdAt, value.updatedAt,
-        endDate = value.endDate ?: value.date,
-        reminderOn = value.reminderOn,
-        reminderDaysBefore = value.reminderDaysBefore,
-    )
+    private fun response(value: CalendarPrivateItem, occurrenceDate: LocalDate? = null): CalendarPrivateItemResponse =
+        CalendarPrivateItemResponse(
+            value.id, value.accountId, value.game, value.title, occurrenceDate ?: value.date, value.time, value.note,
+            checkNotNull(value.version), value.createdAt, value.updatedAt,
+            endDate = occurrenceDate?.let { CalendarPrivateItemOccurrences.end(value, it) } ?: value.endDate ?: value.date,
+            reminderOn = value.reminderOn,
+            reminderDaysBefore = value.reminderDaysBefore,
+            recurrence = value.recurrence,
+            occurrenceDate = if (value.recurrence == "MONTHLY") occurrenceDate else null,
+            seriesStartDate = value.date,
+            seriesEndDate = value.endDate ?: value.date,
+        )
 
     private fun <T : Any> write(action: () -> T): T = try {
         checkNotNull(transaction.execute { action() })

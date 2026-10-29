@@ -50,7 +50,12 @@ class CalendarPrivateItemController(
         @PathVariable id: String,
         @RequestParam(name = "account_id") accountId: String,
         @RequestParam(name = "expected_version") expectedVersion: Long,
-    ) = success(service.delete(actor(), accountId, id, expectedVersion))
+        @RequestParam(
+            name = "occurrence_date",
+            required = false,
+        ) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) occurrenceDate: LocalDate? =
+            null,
+    ) = success(service.delete(actor(), accountId, id, expectedVersion, occurrenceDate))
 
     private fun actor(): String = helper.requireUserId()
 }
