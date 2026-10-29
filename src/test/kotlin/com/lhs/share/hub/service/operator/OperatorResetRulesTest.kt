@@ -3,7 +3,7 @@ package com.lhs.share.hub.service.operator
 import com.lhs.share.hub.repository.entity.OperatorCatalogEntity
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class OperatorResetRulesTest {
@@ -46,11 +46,27 @@ class OperatorResetRulesTest {
     }
 
     @Test
-    fun `level hundred does not invent unknown experience or lose level breakthrough refunds`() {
+    fun `level hundred refunds base experience as complete books then fragments without inventing overflow`() {
         val result = OperatorResetRules.refund(100, 17, 9, catalog)
-        assertNull(result.experience)
+        assertEquals(2386300L, result.experience)
+        assertEquals(2386L, result.suggested["bingshuquanjuan"])
+        assertEquals(3L, result.suggested["bingshucanjuan"])
+        assertEquals(0L, result.suggested["liutaobingshu"])
         assertEquals(160L, result.suggested["ziyunying"])
         assertEquals(120L, result.suggested["qingtingyan"])
         assertEquals(2100L, result.suggested["beihuifengshan"])
+        assertEquals(result, OperatorResetRules.refund(100, 17, 9, catalog.copy(games = listOf("代号鸢"))))
+    }
+
+    @Test
+    fun `book refunds conserve base experience at every level and never round up or use six tao`() {
+        for (level in 1..100) {
+            val result = OperatorResetRules.refund(level, 2, (level - 1) / 10, catalog)
+            val complete = result.suggested.getValue("bingshuquanjuan")
+            val fragments = result.suggested.getValue("bingshucanjuan")
+            assertEquals(result.experience, complete * 1000 + fragments * 100, "level $level")
+            assertEquals(0L, result.suggested["liutaobingshu"], "level $level")
+            assertTrue(fragments in 0..9, "level $level")
+        }
     }
 }

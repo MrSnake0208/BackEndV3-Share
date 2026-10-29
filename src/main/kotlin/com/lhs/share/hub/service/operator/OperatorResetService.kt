@@ -90,7 +90,6 @@ class OperatorResetService(
         if (refunds.keys != estimate.suggested.keys || refunds.values.any { it !in 0..Int.MAX_VALUE.toLong() }) invalid("请核对返还物品及整数数量")
         val blockers = mutableListOf<String>()
         if (stage == null) blockers += "请核对该密探在当前等级是否已突破"
-        if (estimate.experience == null && request.refunds == null) blockers += "100级兵书数量待核对，请按游戏重置预览填写"
         return bind(
             user, request.accountId, request.game, baseId, before, refunds, blockers, estimate.money, estimate.experience,
             stage == null,
@@ -187,8 +186,8 @@ class OperatorResetService(
         breakthroughRequired: Boolean = false,
         undoId: String? = null,
     ): OperatorResetPreviewResponse {
-        val inventory = stock.findByUserIdAndAccountIdAndEntityType(user, account, "item")
         val inventoryRevision = revisions.findByUserIdAndAccountId(user, account)?.revision ?: 0L
+        val inventory = stock.findByUserIdAndAccountIdAndEntityType(user, account, "item")
         val baselines = mutableMapOf<String, Instant>()
         val now = Instant.now()
         if (inventory == null) blockers += "请先盘点相关库存"

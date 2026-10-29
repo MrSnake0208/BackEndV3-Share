@@ -160,6 +160,40 @@ class OperatorResetMongoTest {
         assertEquals(expected, assertThrows(OperatorApiException::class.java, action).code)
 
     @Test
+    fun `inventory commit between preview reads cannot bind an old balance to a new revision`() {
+        var changed = false
+        val interleavedStock = object : InventoryCurrentRepository by stock {
+            override fun findByUserIdAndAccountIdAndEntityType(userId: String, accountId: String, entityType: String): InventoryCurrent? {
+                val snapshot = stock.findByUserIdAndAccountIdAndEntityType(userId, accountId, entityType)!!
+                if (!changed) {
+                    changed = true
+                    tx.execute {
+                        assertNotNull(revisions.compareAndIncrement(userId, accountId, 0L, Instant.now()))
+                        stock.save(snapshot.copy(entries = snapshot.entries + ("bingshuquanjuan" to StockEntry(count = 5))))
+                    }
+                }
+                return snapshot
+            }
+        }
+        val service =
+            OperatorResetService(accounts, catalog, operators, interleavedStock, revisions, records, corrections, receipts, events, tx)
+        val stale = service.preview("owner", preview())
+        assertEquals(0L, stale.resources.first { it.id == "bingshuquanjuan" }.balanceBefore)
+        code("reset_inventory_conflict") {
+            service.execute("owner", "stale", OperatorResetExecuteRequest("main", "如鸢", stale.previewToken, true))
+        }
+        assertEquals(0L, receipts.count())
+        assertEquals(40, current().entries.getValue("op").level)
+        assertEquals(5L, inventory().entries.getValue("bingshuquanjuan").count)
+        val fresh = service.preview("owner", preview())
+        val resource = fresh.resources.first { it.id == "bingshuquanjuan" }
+        assertEquals(5L, resource.balanceBefore)
+        assertEquals(70L, resource.balanceAfter)
+        service.execute("owner", "fresh", OperatorResetExecuteRequest("main", "如鸢", fresh.previewToken, true))
+        assertEquals(resource.balanceAfter, inventory().entries.getValue("bingshuquanjuan").count)
+    }
+
+    @Test
     fun `read and preview never write and reset undo survive service recreation with shared growth and exact refunds`() {
         val first = service()
         val original = current()
