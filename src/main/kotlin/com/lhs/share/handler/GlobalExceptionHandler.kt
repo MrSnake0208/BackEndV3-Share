@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.multipart.MaxUploadSizeExceededException
 import org.springframework.web.multipart.MultipartException
@@ -123,6 +124,13 @@ class GlobalExceptionHandler {
     @ExceptionHandler(ResponseStatusException::class)
     fun responseStatusException(e: ResponseStatusException): ApiResult<Unit> {
         return fail(e.statusCode.value(), e.reason)
+    }
+
+    /** SSE 断连后响应已不可写,不再尝试返回 JSON。 */
+    @ExceptionHandler(AsyncRequestNotUsableException::class)
+    fun clientDisconnected(e: AsyncRequestNotUsableException): ResponseEntity<Void> {
+        log.debug { "SSE client disconnected: ${e.message}" }
+        return ResponseEntity.noContent().build()
     }
 
     /**
