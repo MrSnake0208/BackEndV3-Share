@@ -380,3 +380,20 @@ resource_delta在删除/恢复时按每项基准应用有符号变动，同毫�
 当前储备 GET 追加 inventory_revision、inventory_record_count。历史与当前标记均在事务内一致读取。含邮箱报告比较全量读取前后的邮箱 version、库存 revision、库存流水条数；历史补录不一定改变库存 revision，条数用于覆盖这种追加。删除／恢复会递增 revision。任一变化最多整批重试一次，分页失败、超过上限或仍不稳定不能当成完整统计。旧 PUT/claim 字段保持兼容，写响应的读取标记可为 null，前端必须用 GET 取得统计标记。
 
 删除／恢复领取奖励维持现有语义：修正背包、不退还／再次扣邮箱。历史按关联已删除记录批量标注 claim_deleted，避免 N+1 查询。子账号删除在原事务内清理新集合；当前无单独的用户注销业务入口。前端先部署需新接口可用，建议后端先发布；回退旧后端将中断历史，不能删除新集合或宣称中断期间数据完整。
+
+
+## 邮件自动累计与日常领取联动（2026-10-31）
+
+`MailboxReserve`新增可空`whiteCoinSchedule`/`fuChuanSchedule`，默认null保持旧数据。配置`startDate`/`endDate`为YYYY-MM-DD，白金币配置`coinsPerMail`为正整数；`throughDate`仅服务端持有。站内业务日固定Asia/Shanghai 05:00。首次日期不能回溯，结束包含当天，最多未来10年。修改金额不重写已有邮件分组；开启或续期按每天收到估算，无游戏登录判断。到期后延长先补齐原有效期，再从当前业务日继续，不补停发期间。
+
+本人JWT新增`POST /v1/inventory/mailbox-reserve/sync?account_id=...`。显式访问补算，无定时任务；原储备GET和历史GET保持只读。POST、PUT、claim均禁止缓存，账号来自认证归属检查。PUT可选`white_coin_schedule`/`fu_chuan_schedule`，省略保留、null关闭，非null仅允许起止日期和白金币单封金额，客户端提交through_date拒绝。开始默认明天由UI提供；当天开始会额外累计，UI提示核对。
+
+新增`mailbox_deliveries`，唯一键`(userId,accountId,type,day)`，记录单封金额与pending/claimed/adjusted状态。该凭据用于幂等和来源日期归属，不属于库存交换/奖励获得量。累计进度、储备CAS、逐日历史和凭据同Hub Mongo事务写入。关闭/到期/校正不删除凭据；账户删除在原事务内清理。补算不修改背包。历史kind增加accrual，时间按应发业务日05:00（不早于已有观测），前端注明估算。
+
+领取仍以现有领取凭据和库存协议保证原子性。批量领取先扣未跟踪历史基数，再按日期扣跟踪邮件；校正减少同序标记adjusted。标准`yuanhub:daily-whitecoin:monthly-card:YYYY-MM-DD`新记录在库存导入事务内检查对应发信凭据、金额和业务日期，扣除对应邮件，再进行正常库存处理；已claimed/adjusted拒绝重复新增。已有库存record_id重试走原duplicates，不再次扣邮件。开启当天若已存在标准日常记录或删除备份，发信凭据直接标claimed，不加待领。任意外部来源或非标准ID不靠金额推断重复。
+
+`GET /v1/inventory/mailbox-reserve/daily-status?account_id=...&day=...`返回`monthly_claimed`和`monthly_coins`，只读、有归属检查，辅助日常UI；真正去重与扣减仍在后端事务内。历史日常补记沿用库存有效时间及基线规则，邮箱扣减为本次操作观测，不倒改旧邮箱快照。删除/恢复领取流水不恢复/重扣邮件。
+
+新前端须在读取邮件/报表前调用sync，再使用现有version/inventory_revision/inventory_record_count栅栏。后端先发布；旧客户端GET不触发补算，其修改若遇到待补算版本变化会被拒绝，需新版客户端重新读取。不得删除凭据集合来回退功能。
+
+验证：`MailboxAccrualServiceTest`覆盖日期/配置/补算/校正；`MailboxAccrualMongoTest`覆盖独立Mongo事务、重复/并发、双入口领取、隔离、失败回滚；原邮件契约与领取集成测试保留。Mongo测试只能使用TestMongo拥有的可抛弃容器，不能指向开发/生产库。

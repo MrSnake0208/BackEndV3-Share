@@ -52,6 +52,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 
 class SubAccountServiceTest {
+    private val mailboxDeliveries = mockk<com.lhs.share.hub.repository.MailboxDeliveryRepository>(relaxed = true)
     private val mailboxHistory = mockk<com.lhs.share.hub.repository.MailboxReserveHistoryRepository>(relaxed = true)
     private val accountRepository = mockk<SubAccountRepository>()
     private val inventoryCurrentRepository = mockk<InventoryCurrentRepository>()
@@ -135,6 +136,7 @@ class SubAccountServiceTest {
         starScanRecords = starScanRecords,
         operatorResets = resetRepository,
         mailboxHistory = mailboxHistory,
+        mailboxDeliveries = mailboxDeliveries,
     )
 
     @Test
@@ -275,6 +277,7 @@ class SubAccountServiceTest {
 
         service.delete("u1", "main")
         verify(exactly = 1) { mailboxHistory.deleteAllByUserIdAndAccountId("u1", "main") }
+        verify(exactly = 1) { mailboxDeliveries.deleteAllByUserIdAndAccountId("u1", "main") }
         verify(exactly = 1) { calendarSubscriptions.deleteAccount("u1", "main") }
         verify(exactly = 1) { calendarPrivateItems.deleteAccount("u1", "main") }
 

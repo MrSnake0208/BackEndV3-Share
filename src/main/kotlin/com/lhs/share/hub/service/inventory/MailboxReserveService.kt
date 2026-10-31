@@ -20,12 +20,25 @@ class MailboxReserveService(
     private val history: MailboxHistoryService,
     @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionTemplate,
     private val clock: Clock = Clock.systemUTC(),
+    private val accrual: MailboxAccrualService? = null,
 ) {
     fun get(userId: String, accountId: String): MailboxReserveResponse = history.current(userId, accountId)
 
+    fun sync(userId: String, accountId: String): MailboxReserveResponse {
+        checkNotNull(accrual).sync(userId, accountId)
+        return get(userId, accountId)
+    }
+
+    fun dailyStatus(userId: String, accountId: String, day: String): Map<String, Any?> =
+        checkNotNull(accrual).dailyStatus(userId, accountId, day)
+
     fun save(userId: String, accountId: String, body: JsonNode): MailboxReserveResponse {
         accounts.requireAccount(userId, accountId)
-        fields(body, setOf("expected_version", "white_coin_mails", "fu_chuan_mail_count"))
+        fields(
+            body,
+            setOf("expected_version", "white_coin_mails", "fu_chuan_mail_count") +
+                setOf("white_coin_schedule", "fu_chuan_schedule").filter { body.has(it) },
+        )
         val expected = body.path("expected_version")
         if (!expected.isIntegralNumber || !expected.canConvertToLong() || expected.longValue() !in 0L until 9007199254740991L) {
             invalid("储备版本不正确，请重新读取")
@@ -39,16 +52,29 @@ class MailboxReserveService(
         val tickets = amount(body.path("fu_chuan_mail_count"))
         return checkNotNull(
             transactions.execute {
-                val previous = accounts.requireAccount(userId, accountId).mailboxReserve ?: MailboxReserve()
+                val previous =
+                    accrual?.settle(userId, accountId) ?: (accounts.requireAccount(userId, accountId).mailboxReserve ?: MailboxReserve())
                 if (previous.version != expected.longValue()) conflict()
-                if (previous.updatedAt != null && previous.whiteCoinMails == mails && previous.fuChuanMailCount == tickets) {
+                val coinSchedule =
+                    accrual?.schedule(body.get("white_coin_schedule"), previous.whiteCoinSchedule, true)
+                        ?: if (body.has("white_coin_schedule")) null else previous.whiteCoinSchedule
+                val ticketSchedule =
+                    accrual?.schedule(body.get("fu_chuan_schedule"), previous.fuChuanSchedule, false)
+                        ?: if (body.has("fu_chuan_schedule")) null else previous.fuChuanSchedule
+                if (coinSchedule != null && mails.none { it.coinsPerMail == coinSchedule.coinsPerMail }) invalid("请保留自动累计对应的单封奖励分组，或关闭自动累计")
+                if (previous.updatedAt != null && previous.whiteCoinMails == mails && previous.fuChuanMailCount == tickets &&
+                    previous.whiteCoinSchedule == coinSchedule &&
+                    previous.fuChuanSchedule == ticketSchedule
+                ) {
                     return@execute MailboxReserveResponse.of(accountId, previous)
                 }
                 val now = maxOf(clock.instant().truncatedTo(ChronoUnit.MILLIS), previous.updatedAt ?: java.time.Instant.MIN)
-                val reserve = MailboxReserve(mails, tickets, previous.version + 1, now)
+                val reserve = MailboxReserve(mails, tickets, previous.version + 1, now, coinSchedule, ticketSchedule)
+                accrual?.validateCapacity(reserve)
                 val account = repository.replaceMailboxReserve(userId, accountId, previous.version, reserve) ?: conflict()
+                accrual?.reduce(userId, accountId, previous, reserve, "adjusted")
                 history.record(userId, accountId, previous, reserve, if (previous.updatedAt == null) "baseline" else "adjustment")
-                MailboxReserveResponse.of(accountId, checkNotNull(account.mailboxReserve))
+                MailboxReserveResponse.of(accountId, accrual?.settle(userId, accountId) ?: checkNotNull(account.mailboxReserve))
             },
         )
     }

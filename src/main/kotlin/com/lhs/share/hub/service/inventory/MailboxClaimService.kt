@@ -27,6 +27,7 @@ class MailboxClaimService(
     private val inventory: InventoryService,
     private val history: MailboxHistoryService,
     @param:Qualifier("hubTransactionTemplate") private val transactions: TransactionTemplate,
+    private val accrual: MailboxAccrualService? = null,
 ) {
     fun claim(userId: String, accountId: String, body: JsonNode): MailboxReserveResponse {
         val version = body.path("expected_version")
@@ -67,7 +68,7 @@ class MailboxClaimService(
             transactions.execute {
                 val account = accounts.findByUserIdAndAccountId(userId, accountId)
                     ?: throw InventoryApiException(HttpStatus.NOT_FOUND, "account_not_found", "游戏账号不存在")
-                val reserve = account.mailboxReserve ?: MailboxReserve()
+                val reserve = accrual?.settle(userId, accountId) ?: (account.mailboxReserve ?: MailboxReserve())
                 if (records.findByUserIdAndAccountIdAndRecordId(userId, accountId, recordId) != null) {
                     return@execute MailboxReserveResponse.of(accountId, reserve)
                 }
@@ -100,6 +101,7 @@ class MailboxClaimService(
                 )
                 val saved = accounts.replaceMailboxReserve(userId, accountId, reserve.version, cleared)
                     ?: conflict("邮件储备已变更或账号已删除，请重新读取")
+                accrual?.reduce(userId, accountId, reserve, cleared, "claimed")
                 inventory.import(
                     userId,
                     accountId,

@@ -92,6 +92,7 @@ class SubAccountService(
     private val reserveWorkspaces: OperatorReserveWorkspaceRepository? = null,
     private val mailboxHistory: com.lhs.share.hub.repository.MailboxReserveHistoryRepository? = null,
     private val operatorResets: com.lhs.share.hub.repository.OperatorResetTransactionRepository? = null,
+    private val mailboxDeliveries: com.lhs.share.hub.repository.MailboxDeliveryRepository? = null,
 ) {
     fun create(userId: String, name: String, game: String? = null): SubAccountResponse {
         val normalizedGame = normalizeGame(game ?: DEFAULT_GAME)
@@ -235,6 +236,7 @@ class SubAccountService(
                 val account = requireAccount(userId, accountId)
                 fenceAccount(account)
                 mailboxHistory?.deleteAllByUserIdAndAccountId(userId, accountId)
+                mailboxDeliveries?.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryCurrentRepository.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)
                 inventoryDeletedRecordRepository.deleteAllByUserIdAndAccountId(userId, accountId)

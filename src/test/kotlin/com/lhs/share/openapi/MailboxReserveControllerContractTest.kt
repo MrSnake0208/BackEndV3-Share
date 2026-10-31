@@ -23,6 +23,7 @@ import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -33,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 
 class MailboxReserveControllerContractTest {
+    private val accrual = mockk<com.lhs.share.hub.service.inventory.MailboxAccrualService>()
     private val repository = mockk<SubAccountRepository>()
     private val history = mockk<com.lhs.share.hub.service.inventory.MailboxHistoryService>(relaxed = true)
     private val tx = TransactionTemplate(
@@ -53,6 +55,10 @@ class MailboxReserveControllerContractTest {
     @BeforeEach
     fun setup() {
         every { helper.requireUserId() } returns "owner"
+        every { accrual.settle("owner", "a") } returns MailboxReserve()
+        every { accrual.schedule(any(), any(), any()) } answers { secondArg() }
+        every { accrual.validateCapacity(any()) } returns Unit
+        every { accrual.reduce(any(), any(), any(), any(), any()) } returns Unit
         every { accounts.requireAccount("owner", "a") } returns account
         every { history.current("owner", any()) } answers {
             val id = secondArg<String>()
@@ -62,7 +68,7 @@ class MailboxReserveControllerContractTest {
         val mapper = jacksonObjectMapper().registerModule(JavaTimeModule()).setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         mvc =
             MockMvcBuilders.standaloneSetup(
-                MailboxReserveController(MailboxReserveService(accounts, repository, history, tx), helper, history),
+                MailboxReserveController(MailboxReserveService(accounts, repository, history, tx, accrual = accrual), helper, history),
             )
                 .setControllerAdvice(InventoryExceptionHandler(), GlobalExceptionHandler())
                 .setMessageConverters(MappingJackson2HttpMessageConverter(mapper)).build()
@@ -79,7 +85,9 @@ class MailboxReserveControllerContractTest {
         }
         verify { repository wasNot io.mockk.Called }
         every { repository.replaceMailboxReserve("owner", "a", 0, any()) } answers {
-            account.copy(mailboxReserve = lastArg<MailboxReserve>())
+            val reserve = lastArg<MailboxReserve>()
+            every { accrual.settle("owner", "a") } returns reserve
+            account.copy(mailboxReserve = reserve)
         }
         mvc.perform(put(path).param("account_id", "a").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
@@ -150,5 +158,21 @@ class MailboxReserveControllerContractTest {
         every { helper.requireUserId() } throws ResponseStatusException(HttpStatus.UNAUTHORIZED)
         mvc.perform(get("$path/history").param("account_id", "a").param("from", from.toString()).param("to", to.toString()))
             .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `sync is an authenticated explicit write and daily status is private`() {
+        every { accrual.sync("owner", "a") } returns MailboxReserve()
+        every { accrual.dailyStatus("owner", "a", "2026-11-01") } returns mapOf("monthly_claimed" to true, "monthly_coins" to 90)
+        mvc.perform(post("$path/sync").param("account_id", "a").param("user_id", "stranger"))
+            .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
+        mvc.perform(get("$path/daily-status").param("account_id", "a").param("day", "2026-11-01"))
+            .andExpect(status().isOk).andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.data.monthly_claimed").value(true))
+            .andExpect(jsonPath("$.data.monthly_coins").value(90))
+        verify(exactly = 1) { accrual.sync("owner", "a") }
+        every { helper.requireUserId() } throws ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        mvc.perform(post("$path/sync").param("account_id", "a")).andExpect(status().isUnauthorized)
+        mvc.perform(get("$path/daily-status").param("account_id", "a").param("day", "2026-11-01")).andExpect(status().isUnauthorized)
     }
 }

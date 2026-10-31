@@ -68,6 +68,7 @@ class InventoryService(
     @param:Qualifier("hubMongoTemplate") private val hubMongoTemplate: MongoTemplate,
     @param:Qualifier("hubTransactionTemplate") private val transactionTemplate: TransactionTemplate,
     private val inventoryRevisionRepository: InventoryRevisionRepository? = null,
+    private val mailboxAccrual: MailboxAccrualService? = null,
 ) {
     // ==================== import ====================
 
@@ -200,6 +201,7 @@ class InventoryService(
                             if (item.duplicate) {
                                 duplicates++
                             } else {
+                                mailboxAccrual?.consumeDaily(userId, item.validated.record)
                                 when (
                                     applyRecord(
                                         userId,
