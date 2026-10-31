@@ -2,6 +2,7 @@ package com.lhs.share.hub.repository.entity
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import io.swagger.v3.oas.annotations.media.Schema
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.Indexed
@@ -43,7 +44,7 @@ data class OperatorHuajiLegacy(val raw: Int, val source: String)
 data class OperatorDisc(val otName: String, val abbreviation: String? = null, val color: String? = null, val desp: String? = null)
 data class OperatorStarStone(val name: String? = null, val type: String, val level: Int)
 data class OperatorDiscLoadout(
-    val id: String,
+    @Value("#root['_id'] ?: #root['id']") val id: String,
     val name: String,
     val discs: List<OperatorDisc> = emptyList(),
     val status: String = "unmarked",

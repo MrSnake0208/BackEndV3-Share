@@ -2,6 +2,8 @@
 
 每个 `operator_current.entries[operatorId].discLoadouts` 组合增加 `status`（`unmarked` / `reroll` / `perfect`）及 `targetDiscs`。缺失字段由实体默认值兼容，不需要迁移。它们是用户意图，`discs` 是实际词条；旧字段 `entries.discs` 仍只镜像第一套实际词条。
 
+命盘编号在 MongoDB 中沿用 `_id`，接口 JSON 使用 `id`。读取兼容直接导入的普通 `id` 字段；两者并存时以 `_id` 为准，不改写原文档。编号均缺失时仍报错，不生成编号或丢弃命盘。手工导入后应核对后端读回结果。
+
 ## PATCH / current
 
 沿用密探 current 的账号归属校验、`expected_revision`、CAS 和 correction 记录，不新增接口或存储集合。JSON 使用 `target_discs`：
