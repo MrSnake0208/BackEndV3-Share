@@ -13,6 +13,7 @@ import org.springframework.http.CacheControl
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -47,6 +48,17 @@ class MailboxReserveController(
     ): ResponseEntity<ApiResult<MailboxHistoryResponse>> = ResponseEntity.ok().cacheControl(
         CacheControl.noStore(),
     ).body(success(history.list(helper.requireUserId(), accountId, from, to, cursor, limit)))
+
+    @PostMapping("/sync")
+    fun sync(@RequestParam("account_id") accountId: String): ResponseEntity<ApiResult<MailboxReserveResponse>> =
+        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(success(service.sync(helper.requireUserId(), accountId)))
+
+    @GetMapping("/daily-status")
+    fun dailyStatus(
+        @RequestParam("account_id") accountId: String,
+        @RequestParam day: String,
+    ): ResponseEntity<ApiResult<Map<String, Any?>>> =
+        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(success(service.dailyStatus(helper.requireUserId(), accountId, day)))
 
     @PutMapping
     fun save(
